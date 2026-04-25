@@ -1087,9 +1087,11 @@ class ConfirmScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             with Container(id="dialog-box"):
-                yield Label(self.title, classes="dialog-title")
                 yield Static(self.body, classes="dialog-body")
                 yield Static("[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help")
+
+    def on_mount(self):
+        self.query_one("#dialog-box").border_title = f"[b][#63f3ff]{self.title}[/][/]"
 
     def action_confirm(self):
         self.dismiss(True)
@@ -1102,12 +1104,12 @@ class NegativeInputScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             with Container(id="dialog-box"):
-                yield Label("Log Negative", classes="dialog-title")
                 yield Static("Select a negative action to log.", classes="dialog-body")
                 yield OptionList(id="negative-list")
                 yield Static("[Esc] cancel", classes="dialog-help")
 
     def on_mount(self):
+        self.query_one("#dialog-box").border_title = "[b][#63f3ff]Log Negative[/][/]"
         option_list = self.query_one("#negative-list", OptionList)
         for name in NEGATIVES:
             option_list.add_option(name)
@@ -1146,11 +1148,6 @@ class TogglTUI(App):
         color: #63f3ff;
         text-style: bold;
         width: auto;
-    }
-
-    #status-line {
-        color: #8d98a7;
-        width: 1fr;
     }
 
     #chrome {
@@ -1237,17 +1234,13 @@ class TogglTUI(App):
     }
 
     #footer {
-        height: 2;
+        height: auto;
         border-top: solid #2e3947;
         padding: 0 1;
     }
 
     #footer-main {
         color: #63f3ff;
-    }
-
-    #footer-sub {
-        color: #8d98a7;
     }
 
     #dialog {
@@ -1262,12 +1255,6 @@ class TogglTUI(App):
         border: solid #63f3ff;
         padding: 1 2;
         background: #0b1016;
-    }
-
-    .dialog-title {
-        text-style: bold;
-        color: #63f3ff;
-        margin-bottom: 1;
     }
 
     .dialog-body {
@@ -1327,11 +1314,11 @@ class TogglTUI(App):
         Binding("question_mark", "show_help", "Help"),
     ]
 
-    VIEWS = ["Week", "Overview", "Day", "Negatives", "Recovery", "Sync/Quota"]
+    VIEWS = ["Overview", "Day", "Week", "Negatives", "Recovery", "Sync/Quota"]
 
     def __init__(self):
         super().__init__()
-        self.active_view_index = 2
+        self.active_view_index = 1
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
         self.sparkbar_forced_open = False
@@ -1347,13 +1334,13 @@ class TogglTUI(App):
                         yield Static(view, classes="view-tab", id=f"view-tab-{index}")
             with Horizontal(id="main"):
                 with Container(id="content"):
-                    with Container(id="week-view", classes="view -active"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="week-table")
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="week-category-table")
-                    with Container(id="overview-view", classes="view"):
+                    with Container(id="overview-view", classes="view -active"):
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="overview-table")
                     with Container(id="day-view", classes="view"):
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="day-table")
+                    with Container(id="week-view", classes="view"):
+                        yield DataTable(zebra_stripes=False, cursor_type="row", id="week-table")
+                        yield DataTable(zebra_stripes=False, cursor_type="row", id="week-category-table")
                     with Container(id="negatives-view", classes="view"):
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-catalog-table")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-log-table")
@@ -1365,7 +1352,6 @@ class TogglTUI(App):
                     yield Static(id="sparkbar")
             with Vertical(id="footer"):
                 yield Static(id="footer-main")
-                yield Static(id="footer-sub")
 
     def on_mount(self):
         self._setup_tables()
@@ -1428,28 +1414,27 @@ class TogglTUI(App):
         current_week = get_current_week()
         start_d, end_d = get_week_dates(current_week)
         synced = get_last_updated_str()
-        self.query_one("#status-line", Static).update(
-            f"  | [#8d98a7]Updated {synced}[/]"
-        )
+
+        self.query_one("#status-line", Static).update(f"  | [#8d98a7]Updated {synced}[/]")
+
         footer_main = Text()
+        footer_main.append("Views ", style="bold #63f3ff")
         footer_main.append("<- ->", style="bold #63f3ff")
-        footer_main.append(" switch   ", style="#8d98a7")
+        footer_main.append(" switch  •  ", style="#8d98a7")
         footer_main.append("n", style="bold #63f3ff")
-        footer_main.append(" negative   ", style="#8d98a7")
+        footer_main.append(" negative  •  ", style="#8d98a7")
         footer_main.append("u", style="bold #63f3ff")
-        footer_main.append(" sync   ", style="#8d98a7")
+        footer_main.append(" sync  •  ", style="#8d98a7")
         footer_main.append("s", style="bold #63f3ff")
-        footer_main.append(" sparkbar", style="#8d98a7")
+        footer_main.append(" sparkbar  •  up/down scroll  •  enter/select  •  q quit", style="#8d98a7")
+
         self.query_one("#footer-main", Static).update(footer_main)
-        self.query_one("#footer-sub", Static).update(
-            "up/down scroll  •  enter/select  •  click top tabs  •  q quit"
-        )
 
     def update_view_visibility(self):
         view_ids = [
-            "#week-view",
             "#overview-view",
             "#day-view",
+            "#week-view",
             "#negatives-view",
             "#recovery-view",
             "#sync-view",
@@ -1460,9 +1445,9 @@ class TogglTUI(App):
 
     def focus_active_view(self):
         focus_targets = {
-            0: "#week-table",
-            1: "#overview-table",
-            2: "#day-table",
+            0: "#overview-table",
+            1: "#day-table",
+            2: "#week-table",
             3: "#negatives-catalog-table",
             4: "#recovery-table",
             5: "#sync-table",
@@ -1630,6 +1615,7 @@ class TogglTUI(App):
         
         remaining = status["quota_remaining"] if status["quota_remaining"] is not None else "Unknown"
         limit = status["quota_limit"] if status["quota_limit"] is not None else "Unknown"
+        table.add_row("Requests made", str(API_RUN_STATS["requests_made"]))
         table.add_row("Quota remaining", f"{remaining}/{limit}")
         
         if status["quota_resets_in"] is not None:
