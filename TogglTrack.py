@@ -1291,6 +1291,9 @@ class TogglTUI(App):
         background: #0b1016;
         color: #d7dde8;
         border: solid #2e3947;
+        padding: 0 1;
+        margin: 1 1 0 0;
+        height: auto;
     }
     Toast.-information {
         border: solid #37d994;
@@ -1319,7 +1322,7 @@ class TogglTUI(App):
 
     def __init__(self):
         super().__init__()
-        self.active_view_index = 1
+        self.active_view_index = 2
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
         self.sparkbar_forced_open = False
@@ -1387,7 +1390,7 @@ class TogglTUI(App):
 
     def _setup_tables(self):
         week_table = self.query_one("#week-table", DataTable)
-        week_table.add_columns("Day", "Date", "Hours", "Earned", "Negs", "Δ", "Net")
+        week_table.add_columns("Day", "Date", "Hours", "Earned", "Negs", "Net")
 
         week_category_table = self.query_one("#week-category-table", DataTable)
         week_category_table.add_columns("Category", "Hours", "Rate", "Points")
@@ -1505,7 +1508,6 @@ class TogglTUI(App):
                 hour_text,
                 earned_text,
                 neg_text,
-                format_signed_rich(row["delta"]),
                 format_signed_rich(row["net"]),
                 key=row["date"],
             )
@@ -1527,12 +1529,12 @@ class TogglTUI(App):
                     fmt_rate(rate),
                     fmt_pts_rich(pts),
                 )
+        if report["negative_results"]:
+            category_table.add_row("[LOGGED]", "", "", "")
+            for name, _, _, pts in report["negative_results"]:
+                category_table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         summary = dashboard["summary"]
-        summary_text = (
-            f"Target through today: {summary['expected']:.1f} pts   "
-            f"Actual: {summary['actual']:.1f} pts   "
-            f"Δ: {format_signed_rich(summary['delta'])}"
-        )
+        summary_text = f"Week net: {format_signed_rich(summary['actual'])} pts"
         self.query_one("#week-summary", Static).update(summary_text)
 
     def refresh_overview_view(self):
@@ -1547,6 +1549,10 @@ class TogglTUI(App):
                 table.add_row(f"[{section_name.upper()}]", "", "", "")
             for name, hours, rate, pts in rows:
                 table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
+        if report["negative_results"]:
+            table.add_row("[LOGGED]", "", "", "")
+            for name, _, _, pts in report["negative_results"]:
+                table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         total_hours = report["total_hours"]
         total_text = (
             f"Lifetime total {format_signed_rich(report['total_points'])} pts   "
@@ -1558,14 +1564,29 @@ class TogglTUI(App):
         metrics = get_day_metrics(self.selected_day)
         table = self.query_one("#day-table", DataTable)
         table.clear(columns=False)
-        for name, hours, rate, pts in metrics["results"]:
-            table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
-        for name, _, _, pts in metrics["negative_results"]:
-            table.add_row(name, "—", "logged", fmt_pts_rich(pts))
+        pos_rows = [r for r in metrics["results"] if r[3] is not None and r[3] >= 0]
+        neg_rows = [r for r in metrics["results"] if r[3] is not None and r[3] < 0]
+        unscored_rows = [r for r in metrics["results"] if r[3] is None]
+
+        if pos_rows:
+            table.add_row("[POSITIVE]", "", "", "")
+            for name, hours, rate, pts in pos_rows:
+                table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
+        if neg_rows:
+            table.add_row("[NEGATIVE]", "", "", "")
+            for name, hours, rate, pts in neg_rows:
+                table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
+        if metrics["negative_results"]:
+            table.add_row("[LOGGED]", "", "", "")
+            for name, _, _, pts in metrics["negative_results"]:
+                table.add_row(name, "—", "logged", fmt_pts_rich(pts))
+        if unscored_rows:
+            table.add_row("[UNSCORED]", "", "", "")
+            for name, hours, rate, pts in unscored_rows:
+                table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
         meta = (
             f"Hours {metrics['total_hours']:.1f}h   Earned {format_signed_rich(metrics['earned'])}   "
-            f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}   "
-            f"Δ {format_signed_rich(metrics['delta'])}"
+            f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}"
         )
         self.query_one("#day-selected", Static).update(f"Selected day: {self.selected_day}")
         self.query_one("#day-meta", Static).update(meta)
