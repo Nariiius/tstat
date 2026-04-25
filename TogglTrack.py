@@ -137,6 +137,7 @@ if not os.path.exists(DATA_DIR):
 CSV_FILE = os.path.join(DATA_DIR, "toggl_data.csv")
 DAILY_CSV_FILE = os.path.join(DATA_DIR, "toggl_daily.csv")
 NEGATIVES_CSV_FILE = os.path.join(DATA_DIR, "toggl_negatives.csv")
+POSITIVES_CSV_FILE = os.path.join(DATA_DIR, "toggl_positives.csv")
 HISTORY_FILE = os.path.join(DATA_DIR, "toggl_sync_history.json")
 CONFIG_FILE = os.path.join(DIR_PATH, "toggl_config.json")
 PROJECTS_FILE = os.path.join(DATA_DIR, "toggl_projects.json")
@@ -147,6 +148,7 @@ PROJECTS_CACHE_MAX_AGE_DAYS = 7
 
 POINTS = {}
 NEGATIVES = {}
+POSITIVES = {}
 DAILY_TARGET = DEFAULT_DAILY_TARGET
 API_RUN_STATS = {
     "requests_made": 0,
@@ -194,10 +196,11 @@ def _load_rate_map(config, key):
 
 
 def load_runtime_settings():
-    global POINTS, NEGATIVES, DAILY_TARGET
+    global POINTS, NEGATIVES, POSITIVES, DAILY_TARGET
     config = load_config()
     POINTS = _load_rate_map(config, "points")
     NEGATIVES = _load_rate_map(config, "negatives")
+    POSITIVES = _load_rate_map(config, "positives")
     daily_target = config.get("daily_target", DEFAULT_DAILY_TARGET)
     DAILY_TARGET = float(_coerce_number(daily_target, "daily_target"))
 
@@ -686,6 +689,87 @@ def sync_current_week_light(auto_refresh=False, prompt_on_warning=True):
 # ──────────────────────────────────────────────
 # NEGATIVES LOGIC
 # ──────────────────────────────────────────────
+
+def pick_positive_interactive():
+    names = list(POSITIVES.keys())
+    if not names:
+        print(f"{YELLOW}No positives configured.{RESET}")
+        sys.exit(0)
+    print(f"\n  {BOLD}PICK A POSITIVE{RESET}")
+    print("  " + "─" * 35)
+    for idx, name in enumerate(names, start=1):
+        cost = POSITIVES[name]
+        print(f"  {idx:>2}. {name:<22} {GREEN}+{cost} pts{RESET}")
+    print()
+    while True:
+        raw = input(f"{YELLOW}Choose a number (blank to cancel): {RESET}").strip()
+        if not raw:
+            print(f"{DIM}Action cancelled.{RESET}")
+            sys.exit(0)
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(names):
+                return names[index - 1]
+        print(f"{YELLOW}Please enter a valid number from the list.{RESET}")
+
+def log_positive(pos_name):
+    lower_map = {k.lower(): k for k in POSITIVES}
+    canonical = lower_map.get(pos_name.strip().lower())
+    if not canonical:
+        print(f"{RED}Positive '{pos_name}' not found.{RESET}")
+        sys.exit(1)
+    pos_name = canonical
+    cost = POSITIVES[pos_name]
+    if not _prompt_yes_no(
+        f"{YELLOW}Log positive '{pos_name}' for +{cost} pts? (y/n): {RESET}"
+    ):
+        print(f"{DIM}Action cancelled.{RESET}")
+        sys.exit(0)
+    file_exists = os.path.exists(POSITIVES_CSV_FILE)
+    with open(POSITIVES_CSV_FILE, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["Date", "Positive", "Points"])
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "Date": date.today().strftime("%Y-%m-%d"),
+                "Positive": pos_name,
+                "Points": cost,
+            }
+        )
+    print(f"\n{GREEN}✓ Logged '{pos_name}' (+{cost} pts).{RESET}\n")
+    sys.exit(0)
+
+def print_pos_log(group_by="week"):
+    if not os.path.exists(POSITIVES_CSV_FILE):
+        print(f"{YELLOW}No positives logged yet.{RESET}")
+        return
+    rows = []
+    with open(POSITIVES_CSV_FILE, "r") as f:
+        for row in csv.DictReader(f):
+            try:
+                d = datetime.strptime(row["Date"], "%Y-%m-%d").date()
+                name = row.get("Positive") or row.get("Bonus") or "?"
+                pts = float(row["Points"])
+                rows.append((d, name, pts))
+            except (KeyError, ValueError):
+                continue
+    if not rows:
+        print(f"{YELLOW}No positives logged yet.{RESET}")
+        return
+    rows.sort(key=lambda x: x[0])
+    groups: dict[str, list] = {}
+    for d, name, pts in rows:
+        key = d.strftime("%Y-%m") if group_by == "month" else get_week_str(d)
+        groups.setdefault(key, []).append((d, name, pts))
+    
+    print(f"\n  {BOLD}{GREEN}POSITIVES LOG{RESET}  {DIM}· by {group_by}{RESET}")
+    for key in sorted(groups.keys(), reverse=True):
+        print(f"  {BOLD}{CYAN}{key}{RESET}")
+        for d, name, pts in sorted(groups[key], key=lambda x: x[0], reverse=True):
+            print(f"  {d.strftime('%Y-%m-%d')}  {name:<25} {GREEN}+{pts:>4.1f}{RESET}")
+        print()
+
 def pick_negative_interactive():
     names = list(NEGATIVES.keys())
     if not names:
@@ -907,19 +991,23 @@ def get_day_metrics(day_str):
     projects = get_data_for_day(day_str) or {}
     results = calculate(projects)
     negatives = get_negatives_for_context(day_str, "DAY")
+    positives = get_positives_for_context(day_str, "DAY")
     earned = round(sum(r[3] for r in results if r[3] is not None and r[3] > 0), 1)
     tracked = round(sum(abs(r[3]) for r in results if r[3] is not None and r[3] < 0), 1)
     logged = round(sum(abs(r[3]) for r in negatives), 1)
+    logged_pos = round(sum(r[3] for r in positives), 1)
     total_hours = round(sum(projects.values()), 1)
-    net = round(earned - tracked - logged, 1)
+    net = round(earned - tracked - logged + logged_pos, 1)
     return {
         "label": day_str,
         "projects": projects,
         "results": results,
         "negative_results": negatives,
+        "positive_results": positives,
         "earned": earned,
         "tracked_negative": tracked,
         "logged_negative": logged,
+        "logged_positive": logged_pos,
         "total_hours": total_hours,
         "net": net,
         "delta": round(net - DAILY_TARGET, 1),
@@ -936,7 +1024,7 @@ def get_week_dashboard_rows(label):
         d = start_d + timedelta(days=i)
         d_str = d.strftime("%Y-%m-%d")
         metrics = get_day_metrics(d_str)
-        has_activity = bool(metrics["projects"] or metrics["negative_results"])
+        has_activity = bool(metrics["projects"] or metrics["negative_results"] or metrics["positive_results"])
         if not has_activity and d > date.today():
             continue
         if d <= cutoff:
@@ -950,6 +1038,10 @@ def get_week_dashboard_rows(label):
                 "hours": metrics["total_hours"],
                 "earned": metrics["earned"],
                 "tracked_negative": metrics["tracked_negative"],
+                "logged_positive": metrics["logged_positive"],
+                "positive_total": round(
+                    metrics["earned"] + metrics["logged_positive"], 1
+                ),
                 "logged_negative": metrics["logged_negative"],
                 "negative_total": round(
                     metrics["tracked_negative"] + metrics["logged_negative"], 1
@@ -982,13 +1074,15 @@ def get_report_sections(label, context_type):
         projects = get_all_time_data() or {}
     results = calculate(projects)
     negative_results = get_negatives_for_context(label, context_type)
+    positive_results = get_positives_for_context(label, context_type)
     total_pts = round(
-        sum(r[3] for r in results if r[3] is not None) + sum(r[3] for r in negative_results),
+        sum(r[3] for r in results if r[3] is not None) + sum(r[3] for r in negative_results) + sum(r[3] for r in positive_results),
         2,
     )
     return {
         "results": results,
         "negative_results": negative_results,
+        "positive_results": positive_results,
         "positive": [r for r in results if r[3] is not None and r[3] >= 0],
         "negative": [r for r in results if r[3] is not None and r[3] < 0],
         "unscored": [r for r in results if r[3] is None],
@@ -1036,6 +1130,85 @@ def get_sync_status_data():
 
 def get_sparkbar_text():
     return "\n".join(build_week_sparkbar_lines())
+
+
+
+def get_positives_for_context(label, context_type):
+    if not os.path.exists(POSITIVES_CSV_FILE):
+        return []
+    positives_dict: dict[str, float] = {}
+    start_d, end_d = None, None
+    if context_type == "WEEK":
+        start_d, end_d = get_week_dates(label)
+    with open(POSITIVES_CSV_FILE, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                r_date_str = row["Date"]
+                r_date = datetime.strptime(r_date_str, "%Y-%m-%d").date()
+            except (KeyError, ValueError):
+                continue
+            include = False
+            if context_type == "ALL":
+                include = True
+            elif context_type == "DAY" and r_date_str == label:
+                include = True
+            elif (
+                context_type == "WEEK"
+                and start_d
+                and end_d
+                and start_d <= r_date <= end_d
+            ):
+                include = True
+            if include:
+                try:
+                    name = row.get("Positive") or row.get("Bonus") or "Unknown"
+                    pts = float(row["Points"])
+                    positives_dict[name] = positives_dict.get(name, 0.0) + pts
+                except (KeyError, ValueError):
+                    continue
+    return [(name, None, None, pts) for name, pts in positives_dict.items()]
+
+def get_positive_catalog_rows():
+    return [(name, POSITIVES[name]) for name in POSITIVES]
+
+def get_positive_log_rows(limit=30):
+    if not os.path.exists(POSITIVES_CSV_FILE):
+        return []
+    rows = []
+    with open(POSITIVES_CSV_FILE, "r") as f:
+        for row in csv.DictReader(f):
+            try:
+                rows.append(
+                    {
+                        "date": row["Date"],
+                        "name": row.get("Positive") or row.get("Bonus") or "?",
+                        "points": float(row["Points"]),
+                    }
+                )
+            except (KeyError, ValueError):
+                continue
+    rows.sort(key=lambda item: item["date"], reverse=True)
+    return rows[:limit]
+
+def log_positive_direct(pos_name):
+    lower_map = {k.lower(): k for k in POSITIVES}
+    canonical = lower_map.get(pos_name.strip().lower())
+    if not canonical:
+        return False, f"Positive '{pos_name}' not found"
+    file_exists = os.path.exists(POSITIVES_CSV_FILE)
+    with open(POSITIVES_CSV_FILE, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["Date", "Positive", "Points"])
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "Date": date.today().strftime("%Y-%m-%d"),
+                "Positive": canonical,
+                "Points": POSITIVES[canonical],
+            }
+        )
+    return True, f"Logged {canonical} (+{POSITIVES[canonical]} pts)"
 
 
 def log_negative_direct(neg_name):
@@ -1122,6 +1295,28 @@ class NegativeInputScreen(ModalScreen[str | None]):
     def key_escape(self):
         self.dismiss(None)
 
+
+class PositiveInputScreen(ModalScreen[str | None]):
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            with Container(id="dialog-box"):
+                yield Static("Select a positive action to log.", classes="dialog-body")
+                yield OptionList(id="positive-list")
+                yield Static("[Esc] cancel", classes="dialog-help")
+
+    def on_mount(self):
+        self.query_one("#dialog-box").border_title = "[b][#37d994]Log Positive[/][/]"
+        option_list = self.query_one("#positive-list", OptionList)
+        for name in POSITIVES:
+            option_list.add_option(name)
+        option_list.focus()
+
+    @on(OptionList.OptionSelected, "#positive-list")
+    def submit_positive(self, event: OptionList.OptionSelected):
+        self.dismiss(str(event.option.prompt))
+
+    def key_escape(self):
+        self.dismiss(None)
 
 class TogglTUI(App):
     CSS = """
@@ -1297,11 +1492,12 @@ class TogglTUI(App):
         Binding("u", "sync_current_week", "Sync Week"),
         Binding("U", "sync_full", "Full Sync"),
         Binding("n", "add_negative", "Add Negative"),
+        Binding("p", "add_positive", "Add Positive"),
         Binding("s", "toggle_sparkbar", "Sparkbar"),
         Binding("question_mark", "show_help", "Help"),
     ]
 
-    VIEWS = ["Overview", "Day", "Week", "Negatives", "Recovery", "Sync/Quota"]
+    VIEWS = ["Overview", "Day", "Week", "Negatives", "Positives", "Recovery", "Sync/Quota"]
 
     def __init__(self):
         super().__init__()
@@ -1328,6 +1524,9 @@ class TogglTUI(App):
                     with Container(id="negatives-view", classes="view"):
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-catalog-table")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-log-table")
+                    with Container(id="positives-view", classes="view"):
+                        yield DataTable(zebra_stripes=False, cursor_type="row", id="positives-catalog-table")
+                        yield DataTable(zebra_stripes=False, cursor_type="row", id="positives-log-table")
                     with Container(id="recovery-view", classes="view"):
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="recovery-table")
                     with Container(id="sync-view", classes="view"):
@@ -1352,7 +1551,7 @@ class TogglTUI(App):
 
     def _setup_tables(self):
         week_table = self.query_one("#week-table", DataTable)
-        week_table.add_columns("Day", "Date", "Hours", "Earned", "Negs", "Net")
+        week_table.add_columns("Day", "Date", "Hours", "Earned", "Pos", "Negs", "Net")
 
         week_category_table = self.query_one("#week-category-table", DataTable)
         week_category_table.add_columns("Category", "Hours", "Rate", "Points")
@@ -1369,6 +1568,12 @@ class TogglTUI(App):
         negatives_log = self.query_one("#negatives-log-table", DataTable)
         negatives_log.add_columns("Date", "Negative", "Points")
 
+        positives_catalog = self.query_one("#positives-catalog-table", DataTable)
+        positives_catalog.add_columns("Positive", "Points")
+
+        positives_log = self.query_one("#positives-log-table", DataTable)
+        positives_log.add_columns("Date", "Positive", "Points")
+
         recovery_table = self.query_one("#recovery-table", DataTable)
         recovery_table.add_columns("Category", "Rate", "Hours Needed")
 
@@ -1382,6 +1587,7 @@ class TogglTUI(App):
         self.refresh_overview_view()
         self.refresh_day_view()
         self.refresh_negatives_view()
+        self.refresh_positives_view()
         self.refresh_recovery_view()
         self.refresh_sync_view()
         self.refresh_sparkbar()
@@ -1409,6 +1615,8 @@ class TogglTUI(App):
         footer_main.append(" switch  •  ", style="#8d98a7")
         footer_main.append("n", style="bold #63f3ff")
         footer_main.append(" negative  •  ", style="#8d98a7")
+        footer_main.append("p", style="bold #63f3ff")
+        footer_main.append(" positive  •  ", style="#8d98a7")
         footer_main.append("u", style="bold #63f3ff")
         footer_main.append(" sync  •  ", style="#8d98a7")
         footer_main.append("s", style="bold #63f3ff")
@@ -1422,6 +1630,7 @@ class TogglTUI(App):
             "#day-view",
             "#week-view",
             "#negatives-view",
+            "#positives-view",
             "#recovery-view",
             "#sync-view",
         ]
@@ -1435,8 +1644,9 @@ class TogglTUI(App):
             1: "#day-table",
             2: "#week-table",
             3: "#negatives-catalog-table",
-            4: "#recovery-table",
-            5: "#sync-table",
+            4: "#positives-catalog-table",
+            5: "#recovery-table",
+            6: "#sync-table",
         }
         selector = focus_targets.get(self.active_view_index)
         if selector:
@@ -1463,6 +1673,7 @@ class TogglTUI(App):
         table.clear(columns=False)
         for row in dashboard["rows"]:
             neg_text = "—" if row["negative_total"] == 0 else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
+            pos_text = "—" if row["logged_positive"] == 0 else f"[#37d994]+{row['logged_positive']:.1f}[/]"
             hour_text = "—" if row["hours"] == 0 else f"{row['hours']:.1f}h"
             earned_text = "—" if row["hours"] == 0 and row["earned"] == 0 else format_signed_rich(row["earned"])
             table.add_row(
@@ -1470,6 +1681,7 @@ class TogglTUI(App):
                 row["date_short"],
                 hour_text,
                 earned_text,
+                pos_text,
                 neg_text,
                 format_signed_rich(row["net"]),
                 key=row["date"],
@@ -1492,8 +1704,12 @@ class TogglTUI(App):
                     fmt_rate(rate),
                     fmt_pts_rich(pts),
                 )
+        if report["positive_results"]:
+            category_table.add_row("[LOGGED POSITIVE]", "", "", "")
+            for name, _, _, pts in report["positive_results"]:
+                category_table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         if report["negative_results"]:
-            category_table.add_row("[LOGGED]", "", "", "")
+            category_table.add_row("[LOGGED NEGATIVE]", "", "", "")
             for name, _, _, pts in report["negative_results"]:
                 category_table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         summary = dashboard["summary"]
@@ -1513,8 +1729,12 @@ class TogglTUI(App):
                 table.add_row(f"[{section_name.upper()}]", "", "", "")
             for name, hours, rate, pts in rows:
                 table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
+        if report["positive_results"]:
+            table.add_row("[LOGGED POSITIVE]", "", "", "")
+            for name, _, _, pts in report["positive_results"]:
+                table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         if report["negative_results"]:
-            table.add_row("[LOGGED]", "", "", "")
+            table.add_row("[LOGGED NEGATIVE]", "", "", "")
             for name, _, _, pts in report["negative_results"]:
                 table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         total_hours = report["total_hours"]
@@ -1540,8 +1760,12 @@ class TogglTUI(App):
             table.add_row("[NEGATIVE]", "", "", "")
             for name, hours, rate, pts in neg_rows:
                 table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
+        if metrics["positive_results"]:
+            table.add_row("[LOGGED POSITIVE]", "", "", "")
+            for name, _, _, pts in metrics["positive_results"]:
+                table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         if metrics["negative_results"]:
-            table.add_row("[LOGGED]", "", "", "")
+            table.add_row("[LOGGED NEGATIVE]", "", "", "")
             for name, _, _, pts in metrics["negative_results"]:
                 table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         if unscored_rows:
@@ -1550,6 +1774,7 @@ class TogglTUI(App):
                 table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
         meta = (
             f"[#8d98a7]Hours {metrics['total_hours']:.1f}h   Earned {format_signed_rich(metrics['earned'])}   "
+            f"Pos [#37d994]+{metrics['logged_positive']:.1f}[/]   "
             f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
         )
         table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]"
@@ -1559,16 +1784,31 @@ class TogglTUI(App):
         catalog = self.query_one("#negatives-catalog-table", DataTable)
         catalog.clear(columns=False)
         for name, points in get_negative_catalog_rows():
-            catalog.add_row(name, f"[#ff5f5f]-{points:.0f}[/]")
+            catalog.add_row(name, fmt_pts_rich(-points))
         recent = self.query_one("#negatives-log-table", DataTable)
         recent.clear(columns=False)
         recent_rows = get_negative_log_rows()
         for row in recent_rows:
-            recent.add_row(row["date"], row["name"], f"[#ff5f5f]-{row['points']:.0f}[/]")
+            recent.add_row(row["date"], row["name"], fmt_pts_rich(-row["points"]))
         total_recent = sum(row["points"] for row in recent_rows)
         catalog.border_title = "[b][#63f3ff]Catalog[/][/]"
         recent.border_title = "[b][#63f3ff]Recent Log[/][/]"
         recent.border_subtitle = f"[#8d98a7]Press n to log. Visible penalties: [#ff5f5f]-{total_recent:.0f}[/] pts[/]"
+
+    def refresh_positives_view(self):
+        catalog = self.query_one("#positives-catalog-table", DataTable)
+        catalog.clear(columns=False)
+        for name, points in get_positive_catalog_rows():
+            catalog.add_row(name, fmt_pts_rich(points))
+        recent = self.query_one("#positives-log-table", DataTable)
+        recent.clear(columns=False)
+        recent_rows = get_positive_log_rows()
+        for row in recent_rows:
+            recent.add_row(row["date"], row["name"], fmt_pts_rich(row["points"]))
+        total_recent = sum(row["points"] for row in recent_rows)
+        catalog.border_title = "[b][#63f3ff]Catalog[/][/]"
+        recent.border_title = "[b][#63f3ff]Recent Log[/][/]"
+        recent.border_subtitle = f"[#8d98a7]Press p to log. Visible positives: [#37d994]+{total_recent:.0f}[/] pts[/]"
 
     def refresh_recovery_view(self):
         data = get_recovery_rows("ALL_TIME", "ALL")
@@ -1694,6 +1934,18 @@ class TogglTUI(App):
 
         self.push_screen(NegativeInputScreen(), after_input)
 
+    def action_add_positive(self):
+        def after_input(value):
+            if value:
+                ok, message = log_positive_direct(value)
+                self.refresh_all_views()
+                if ok:
+                    self.notify(message)
+                else:
+                    self.notify(message, severity="error")
+
+        self.push_screen(PositiveInputScreen(), after_input)
+
     def on_resize(self):
         self.update_sparkbar_visibility()
 
@@ -1729,13 +1981,41 @@ def fmt_pts_rich(pts):
     if pts == 0:
         return "0.0"
     if pts > 0:
-        return f"[#37d994]+{pts}[/]"
-    return f"[#ff5f5f]{pts}[/]"
+        return f"[#37d994]+{pts:.1f}[/]"
+    return f"[#ff5f5f]{pts:.1f}[/]"
 
 
 # ──────────────────────────────────────────────
 # WEEKLY DAILY BREAKDOWN
 # ──────────────────────────────────────────────
+
+def print_neg_catalog():
+    print(f"\n  {BOLD}{RED}NEGATIVES CATALOG{RESET}")
+    print("  " + "─" * 35)
+    for name, points in get_negative_catalog_rows():
+        print(f"  {name:<25} {RED}-{points:>4.1f}{RESET}")
+    print()
+
+def print_pos_catalog():
+    print(f"\n  {BOLD}{GREEN}POSITIVES CATALOG{RESET}")
+    print("  " + "─" * 35)
+    for name, points in get_positive_catalog_rows():
+        print(f"  {name:<25} {GREEN}+{points:>4.1f}{RESET}")
+    print()
+
+def _parse_day_arg(arg):
+    if not arg: return None
+    arg = arg.lower()
+    if arg == "today": return date.today().strftime("%Y-%m-%d")
+    if arg == "yesterday": return (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    days = {"sun":0, "mon":1, "tue":2, "wed":3, "thu":4, "fri":5, "sat":6}
+    if arg in days:
+        target_weekday = days[arg]
+        today_weekday = (date.today().weekday() + 1) % 7 # sun=0
+        diff = (today_weekday - target_weekday) % 7
+        return (date.today() - timedelta(days=diff)).strftime("%Y-%m-%d")
+    return arg
+
 def print_weekly_dashboard(label):
     start_d, end_d = get_week_dates(label)
     daily_proj: dict[str, dict[str, float]] = {}
@@ -1759,11 +2039,22 @@ def print_weekly_dashboard(label):
                 daily_neg[d_str][name] = daily_neg[d_str].get(name, 0.0) + float(
                     row["Points"]
                 )
+    daily_pos: dict[str, dict[str, float]] = {}
+    if os.path.exists(POSITIVES_CSV_FILE):
+        with open(POSITIVES_CSV_FILE, "r") as f:
+            for row in csv.DictReader(f):
+                d_str = row["Date"]
+                name = row.get("Positive") or row.get("Bonus") or "Unknown"
+                if d_str not in daily_pos:
+                    daily_pos[d_str] = {}
+                daily_pos[d_str][name] = daily_pos[d_str].get(name, 0.0) + float(
+                    row["Points"]
+                )
     print(f"\n  {BOLD}{CYAN}DAILY BREAKDOWN{RESET} {DIM}({label}){RESET}")
-    table_width = 76
+    table_width = 85
     print("  " + "─" * table_width)
     print(
-        f"  {BOLD}{'Day':<10} {'Date':<8} {'Hours':>8} {'Earned':>9} {'Negs':>8} {'Goal':>8} {'Δ':>8} {'Net':>8}{RESET}"
+        f"  {BOLD}{'Day':<10} {'Date':<8} {'Hours':>8} {'Earned':>9} {'Pos':>8} {'Negs':>8} {'Goal':>8} {'Δ':>8} {'Net':>8}{RESET}"
     )
     print("  " + "─" * table_width)
     has_data = False
@@ -1777,14 +2068,16 @@ def print_weekly_dashboard(label):
         date_short = d.strftime("%d %b")
         projs = daily_proj.get(d_str, {})
         negs = daily_neg.get(d_str, {})
-        if not projs and not negs and d > date.today():
+        poss = daily_pos.get(d_str, {})
+        if not projs and not negs and not poss and d > date.today():
             continue
         has_data = True
         results = calculate(projs)
         earned = sum(r[3] for r in results if r[3] is not None)
         hours = sum(projs.values())
         neg_cost = sum(negs.values())
-        net = earned - neg_cost
+        pos_bonus = sum(poss.values())
+        net = earned - neg_cost + pos_bonus
         h_str = f"{hours:.1f}h" if hours > 0 else "—"
         e_str = (
             f"+{earned:.1f}"
@@ -1793,6 +2086,8 @@ def print_weekly_dashboard(label):
         )
         if earned == 0 and hours == 0:
             e_str = "—"
+        p_str = f"+{pos_bonus:.1f}" if pos_bonus > 0 else "—"
+        p_styled = f"{GREEN}{p_str:>8}{RESET}" if pos_bonus > 0 else f"{p_str:>8}"
         n_str = f"-{neg_cost:.1f}" if neg_cost > 0 else "—"
         n_styled = f"{MAGENTA}{n_str:>8}{RESET}" if neg_cost > 0 else f"{n_str:>8}"
         goal_str = f"{DAILY_TARGET:.1f}"
@@ -1808,15 +2103,15 @@ def print_weekly_dashboard(label):
         if d <= cutoff:
             cumulative_net += net
             cumulative_days += 1
-        if earned == 0 and hours == 0 and neg_cost == 0:
+        if earned == 0 and hours == 0 and neg_cost == 0 and pos_bonus == 0:
             print(
-                f"  {DIM}{day_name:<10} {date_short:<8} {h_str:>8} {e_str:>9} {n_str:>8} {goal_str:>8} {delta_raw:>8} {'—':>8}{RESET}"
+                f"  {DIM}{day_name:<10} {date_short:<8} {h_str:>8} {e_str:>9} {p_str:>8} {n_str:>8} {goal_str:>8} {delta_raw:>8} {'—':>8}{RESET}"
             )
         else:
             styled_net = f"{net_col}{raw_net}{RESET}"
             net_pad = len(styled_net) - len(raw_net)
             print(
-                f"  {day_name:<10} {date_short:<8} {h_str:>8} {e_str:>9} {n_styled} {goal_str:>8} {styled_delta:>{8 + delta_pad}} {styled_net:>{8 + net_pad}}"
+                f"  {day_name:<10} {date_short:<8} {h_str:>8} {e_str:>9} {p_styled} {n_styled} {goal_str:>8} {styled_delta:>{8 + delta_pad}} {styled_net:>{8 + net_pad}}"
             )
     print("  " + "─" * table_width)
     if cumulative_days > 0:
@@ -1840,6 +2135,24 @@ def print_weekly_dashboard(label):
 # ──────────────────────────────────────────────
 # SPARKBAR HELPERS
 # ──────────────────────────────────────────────
+
+def get_week_pos_breakdown(week_str):
+    logged = 0.0
+    if os.path.exists(POSITIVES_CSV_FILE):
+        try:
+            start_d, end_d = get_week_dates(week_str)
+            with open(POSITIVES_CSV_FILE, "r") as f:
+                for row in csv.DictReader(f):
+                    try:
+                        r_date = datetime.strptime(row["Date"], "%Y-%m-%d").date()
+                        if start_d <= r_date <= end_d:
+                            logged += float(row["Points"])
+                    except (KeyError, ValueError):
+                        continue
+        except Exception:
+            pass
+    return round(logged, 1)
+
 def get_week_neg_breakdown(week_str):
     """
     Returns (tracked_neg_pts, logged_neg_pts) both as positive numbers.
@@ -1940,6 +2253,19 @@ def build_week_sparkbar_lines(_week_str=None):
                     )
                 except ValueError:
                     pass
+    daily_pos_map: dict[str, dict[str, float]] = {}
+    if os.path.exists(POSITIVES_CSV_FILE):
+        with open(POSITIVES_CSV_FILE, "r") as f:
+            for row in csv.DictReader(f):
+                d = row["Date"]
+                name = row.get("Positive") or row.get("Bonus") or "?"
+                daily_pos_map.setdefault(d, {})
+                try:
+                    daily_pos_map[d][name] = daily_pos_map[d].get(name, 0.0) + float(
+                        row["Points"]
+                    )
+                except ValueError:
+                    pass
 
     # ── compute per-day stats ──
     day_data = []
@@ -1948,16 +2274,18 @@ def build_week_sparkbar_lines(_week_str=None):
         d_str = d.strftime("%Y-%m-%d")
         projs = daily_proj.get(d_str, {})
         negs = daily_neg_map.get(d_str, {})
+        pos_logged = daily_pos_map.get(d_str, {})
 
         results = calculate(projs)
         earned = sum(r[3] for r in results if r[3] is not None)
         logged_neg = sum(negs.values())
+        logged_pos = sum(pos_logged.values())
         tracked_neg = sum(
             abs(hours * POINTS[name])
             for name, hours in projs.items()
             if name in POINTS and POINTS[name] < 0
         )
-        net = round(earned - logged_neg, 1)
+        net = round(earned - logged_neg + logged_pos, 1)
         if abs(net) < 0.05:
             net = 0.0
 
@@ -1967,9 +2295,10 @@ def build_week_sparkbar_lines(_week_str=None):
                 "net": net,
                 "tracked_neg": round(tracked_neg, 1),
                 "logged_neg": round(logged_neg, 1),
+                "logged_pos": round(logged_pos, 1),
                 "is_today": d == date.today(),
                 "future": d > date.today(),
-                "has_data": bool(projs or negs),
+                "has_data": bool(projs or negs or pos_logged),
             }
         )
 
@@ -2004,7 +2333,8 @@ def build_week_sparkbar_lines(_week_str=None):
             pw_earned = 0.0
 
         pw_tracked, pw_logged = get_week_neg_breakdown(pw)
-        pw_net = round(pw_earned - pw_logged, 1)
+        pw_logged_pos = get_week_pos_breakdown(pw)
+        pw_net = round(pw_earned - pw_logged + pw_logged_pos, 1)
 
         max_abs_pw = max(max_abs_pw, abs(pw_net))
         past_weeks_data.append(
@@ -2092,10 +2422,14 @@ def build_week_sparkbar_lines(_week_str=None):
     # ════════════════════════════════
     # THIS WEEK header
     # ════════════════════════════════
-    tw_logged = round(sum(dd["logged_neg"] for dd in day_data), 1)
-    l_str = f"{MAGENTA}-{tw_logged}l{RESET}" if tw_logged > 0 else f"{DIM}-0l{RESET}"
+    tw_logged_neg = round(sum(dd["logged_neg"] for dd in day_data), 1)
+    tw_logged_pos = round(sum(dd["logged_pos"] for dd in day_data), 1)
+    
+    neg_l_str = f"{MAGENTA}-{tw_logged_neg}l{RESET}" if tw_logged_neg > 0 else f"{DIM}-0l{RESET}"
+    pos_l_str = f"{GREEN}+{tw_logged_pos}l{RESET}" if tw_logged_pos > 0 else f"{DIM}+0l{RESET}"
+    l_str = f"{pos_l_str} {neg_l_str}"
 
-    lines.append(f"{BOLD}THIS WEEK{RESET} {DIM}({week_str}){RESET} {l_str} {DIM}")
+    lines.append(f"{BOLD}THIS WEEK{RESET} {DIM}({week_str}){RESET} {l_str}")
     lines.append("─" * SPARK_W)
 
     # ════════════════════════════════
@@ -2181,8 +2515,10 @@ def build_week_sparkbar_lines(_week_str=None):
     else:
         all_earned = 0.0
     all_negatives = get_negatives_for_context("ALL_TIME", "ALL")
+    all_positives = get_positives_for_context("ALL_TIME", "ALL")
     all_neg_pts = sum(r[3] for r in all_negatives)
-    lifetime_pts = round(all_earned + all_neg_pts, 1)
+    all_pos_pts = sum(r[3] for r in all_positives)
+    lifetime_pts = round(all_earned + all_neg_pts + all_pos_pts, 1)
 
     if lifetime_pts < 0:
         deficit = abs(lifetime_pts)
@@ -2291,9 +2627,10 @@ def build_week_sparkbar_lines(_week_str=None):
 # ──────────────────────────────────────────────
 # DEFICIT RECOVERY
 # ──────────────────────────────────────────────
-def print_check_recovery(results, negative_results, label, context_type):
+def print_recovery_cli(results, negative_results, positive_results, label, context_type):
     total_pts = sum(r[3] for r in results if r[3] is not None)
     total_pts += sum(r[3] for r in negative_results)
+    total_pts += sum(r[3] for r in positive_results)
     total_pts = round(total_pts, 2)
 
     if context_type == "DAY":
@@ -2347,7 +2684,7 @@ def print_check_recovery(results, negative_results, label, context_type):
 # ──────────────────────────────────────────────
 # MAIN REPORT (with inline sparkbar)
 # ──────────────────────────────────────────────
-def print_report(results, negative_results, label, context_type="ALL"):
+def print_report(results, negative_results, positive_results, label, context_type="ALL"):
     # Weekly day-by-day breakdown prints separately above the merged table
     if context_type == "WEEK":
         print_weekly_dashboard(label)
@@ -2355,6 +2692,7 @@ def print_report(results, negative_results, label, context_type="ALL"):
     # ── compute totals ──
     total_pts = sum(r[3] for r in results if r[3] is not None)
     total_pts += sum(r[3] for r in negative_results)
+    total_pts += sum(r[3] for r in positive_results)
     total_pts = round(total_pts, 2)
     is_deficit = total_pts < 0
 
@@ -2408,6 +2746,17 @@ def print_report(results, negative_results, label, context_type="ALL"):
     if pos_rows:
         lines.append(f"  {BOLD}{DIM}POSITIVE{RESET}")
         for r in pos_rows:
+            lines.append(_row_str(r[0], r[1], r[2], r[3], GREEN))
+
+    # POSITIVES LOGGED
+    if positive_results:
+        pos_log_subtotal = round(sum(r[3] for r in positive_results), 1)
+        lines.append("")
+        lines.append(
+            f"  {BOLD}{DIM}POSITIVES LOGGED{RESET}  "
+            f"{GREEN}+{pos_log_subtotal} manually logged{RESET}"
+        )
+        for r in positive_results:
             lines.append(_row_str(r[0], r[1], r[2], r[3], GREEN))
 
     # NEGATIVE  (tracked projects with negative rates)
@@ -2483,7 +2832,78 @@ def print_report(results, negative_results, label, context_type="ALL"):
 # ──────────────────────────────────────────────
 def main():
     load_runtime_settings()
-    TogglTUI().run()
+    
+    if len(sys.argv) == 1:
+        TogglTUI().run()
+        return
+
+    parser = argparse.ArgumentParser(description="Toggl Track Life Points CLI")
+    parser.add_argument("--update", action="store_true")
+    parser.add_argument("--update-all", type=int, nargs='?', const=4)
+    parser.add_argument("--week", type=str, nargs='?', const=get_current_week())
+    parser.add_argument("--today", action="store_true")
+    parser.add_argument("--yesterday", action="store_true")
+    parser.add_argument("--day", type=str)
+    parser.add_argument("--negatives", action="store_true")
+    parser.add_argument("--negative", type=str, nargs='?', const="")
+    parser.add_argument("--neg-log", type=str, nargs='?', const="week")
+    parser.add_argument("--positives", action="store_true")
+    parser.add_argument("--positive", type=str, nargs='?', const="")
+    parser.add_argument("--pos-log", type=str, nargs='?', const="week")
+    parser.add_argument("--quota", action="store_true")
+    parser.add_argument("--recovery", action="store_true")
+    
+    args = parser.parse_args()
+    
+    if args.update:
+        sync_current_week_light()
+    elif args.update_all is not None:
+        sync_api_to_csv(weeks_back=args.update_all)
+    elif args.quota:
+        _reset_api_stats()
+        get_api_token()
+        _print_api_usage_summary()
+    elif args.negatives:
+        print_neg_catalog()
+    elif args.negative is not None:
+        if args.negative == "":
+            neg_name = pick_negative_interactive()
+            if neg_name: log_negative(neg_name)
+        else:
+            log_negative(args.negative)
+    elif args.neg_log:
+        print_neg_log(args.neg_log)
+    elif args.positives:
+        print_pos_catalog()
+    elif args.positive is not None:
+        if args.positive == "":
+            pos_name = pick_positive_interactive()
+            if pos_name: log_positive(pos_name)
+        else:
+            log_positive(args.positive)
+    elif args.pos_log:
+        print_pos_log(args.pos_log)
+    elif args.today:
+        d_str = date.today().strftime("%Y-%m-%d")
+        report = get_report_sections(d_str, "DAY")
+        print_report(report["results"], report["negative_results"], report["positive_results"], d_str, "DAY")
+    elif args.yesterday:
+        d_str = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        report = get_report_sections(d_str, "DAY")
+        print_report(report["results"], report["negative_results"], report["positive_results"], d_str, "DAY")
+    elif args.day:
+        d_str = _parse_day_arg(args.day)
+        report = get_report_sections(d_str, "DAY")
+        print_report(report["results"], report["negative_results"], report["positive_results"], d_str, "DAY")
+    elif args.week:
+        report = get_report_sections(args.week, "WEEK")
+        print_report(report["results"], report["negative_results"], report["positive_results"], args.week, "WEEK")
+    elif args.recovery:
+        report = get_report_sections("ALL_TIME", "ALL")
+        print_recovery_cli(report["results"], report["negative_results"], report["positive_results"], "ALL_TIME", "ALL")
+    else:
+        report = get_report_sections("ALL_TIME", "ALL")
+        print_report(report["results"], report["negative_results"], report["positive_results"], "ALL_TIME", "ALL")
 
 
 if __name__ == "__main__":
