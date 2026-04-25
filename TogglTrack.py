@@ -1138,20 +1138,9 @@ class TogglTUI(App):
         height: 1fr;
     }
 
-    #topbar {
-        height: 2;
-        padding: 0 1;
-        border-bottom: solid #2e3947;
-    }
-
-    #app-title {
-        color: #63f3ff;
-        text-style: bold;
-        width: auto;
-    }
-
     #chrome {
-        height: 1;
+        height: 3;
+        border: solid #2e3947;
         padding: 0 1;
     }
 
@@ -1173,7 +1162,6 @@ class TogglTUI(App):
 
     #main {
         height: 1fr;
-        padding: 1 1;
     }
 
     #content {
@@ -1196,7 +1184,6 @@ class TogglTUI(App):
         border: solid #2e3947;
         background: #0b1016;
         color: #d7dde8;
-        margin-bottom: 1;
     }
 
     DataTable > .datatable--header {
@@ -1252,7 +1239,7 @@ class TogglTUI(App):
     #dialog-box {
         width: 60;
         height: auto;
-        border: solid #63f3ff;
+        border: solid #2e3947;
         padding: 1 2;
         background: #0b1016;
     }
@@ -1325,10 +1312,7 @@ class TogglTUI(App):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
-            with Horizontal(id="topbar"):
-                yield Static("togglscale", id="app-title")
-                yield Static(id="status-line", classes="muted")
-            with Vertical(id="chrome"):
+            with Container(id="chrome"):
                 with Horizontal(id="view-tabs"):
                     for index, view in enumerate(self.VIEWS):
                         yield Static(view, classes="view-tab", id=f"view-tab-{index}")
@@ -1415,7 +1399,9 @@ class TogglTUI(App):
         start_d, end_d = get_week_dates(current_week)
         synced = get_last_updated_str()
 
-        self.query_one("#status-line", Static).update(f"  | [#8d98a7]Updated {synced}[/]")
+        chrome = self.query_one("#chrome", Container)
+        chrome.border_title = "[b][#63f3ff]Toggl Stats[/][/]"
+        chrome.border_subtitle = f"  | [#8d98a7]Updated {synced}[/]"
 
         footer_main = Text()
         footer_main.append("Views ", style="bold #63f3ff")
