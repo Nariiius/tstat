@@ -49,7 +49,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import Click
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Label, Static
+from textual.widgets import DataTable, Input, Label, Static, OptionList
 
 # ──────────────────────────────────────────────
 # TASK SHORT NAMES (for catchup block)
@@ -904,11 +904,11 @@ def get_day_metrics(day_str):
     projects = get_data_for_day(day_str) or {}
     results = calculate(projects)
     negatives = get_negatives_for_context(day_str, "DAY")
-    earned = round(sum(r[3] for r in results if r[3] is not None), 1)
+    earned = round(sum(r[3] for r in results if r[3] is not None and r[3] > 0), 1)
     tracked = round(sum(abs(r[3]) for r in results if r[3] is not None and r[3] < 0), 1)
     logged = round(sum(abs(r[3]) for r in negatives), 1)
     total_hours = round(sum(projects.values()), 1)
-    net = round(earned - logged, 1)
+    net = round(earned - tracked - logged, 1)
     return {
         "label": day_str,
         "projects": projects,
@@ -1067,6 +1067,15 @@ def run_quietly(func, *args, **kwargs):
 
 
 class ConfirmScreen(ModalScreen[bool]):
+    BINDINGS = [
+        ("y", "confirm", "Confirm"),
+        ("Y", "confirm", "Confirm"),
+        ("enter", "confirm", "Confirm"),
+        ("n", "cancel", "Cancel"),
+        ("N", "cancel", "Cancel"),
+        ("escape", "cancel", "Cancel"),
+    ]
+
     def __init__(self, title, body):
         super().__init__()
         self.title = title
@@ -1076,15 +1085,12 @@ class ConfirmScreen(ModalScreen[bool]):
         with Container(id="dialog"):
             yield Label(self.title, classes="dialog-title")
             yield Static(self.body, classes="dialog-body")
-            yield Static("[Y] confirm   [N] cancel", classes="dialog-help")
+            yield Static("[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help")
 
-    def key_y(self):
+    def action_confirm(self):
         self.dismiss(True)
 
-    def key_n(self):
-        self.dismiss(False)
-
-    def key_escape(self):
+    def action_cancel(self):
         self.dismiss(False)
 
 
@@ -1092,17 +1098,19 @@ class NegativeInputScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Label("Log Negative", classes="dialog-title")
-            yield Static("Type a configured negative name and press Enter.", classes="dialog-body")
-            yield Input(placeholder="Negative name", id="negative-input")
+            yield Static("Select a negative action to log.", classes="dialog-body")
+            yield OptionList(id="negative-list")
             yield Static("[Esc] cancel", classes="dialog-help")
 
     def on_mount(self):
-        self.query_one("#negative-input", Input).focus()
+        option_list = self.query_one("#negative-list", OptionList)
+        for name in NEGATIVES:
+            option_list.add_option(name)
+        option_list.focus()
 
-    @on(Input.Submitted, "#negative-input")
-    def submit_negative(self, event: Input.Submitted):
-        value = event.value.strip()
-        self.dismiss(value or None)
+    @on(OptionList.OptionSelected, "#negative-list")
+    def submit_negative(self, event: OptionList.OptionSelected):
+        self.dismiss(str(event.option.prompt))
 
     def key_escape(self):
         self.dismiss(None)
@@ -1110,6 +1118,10 @@ class NegativeInputScreen(ModalScreen[str | None]):
 
 class TogglTUI(App):
     CSS = """
+    * {
+        scrollbar-size: 0 0;
+    }
+
     Screen {
         background: #0b1016;
         color: #d7dde8;
@@ -1117,20 +1129,19 @@ class TogglTUI(App):
 
     #root {
         height: 1fr;
-        padding: 0 1;
+        border: solid #2e3947;
     }
 
     #topbar {
         height: 1;
         color: #63f3ff;
         text-style: bold;
-        margin: 0 1;
+        padding: 0 1;
     }
 
     #chrome {
-        height: 3;
-        border: heavy #2e3947;
-        margin: 0 0 1 0;
+        height: 2;
+        border-bottom: solid #2e3947;
         padding: 0 1;
     }
 
@@ -1152,14 +1163,13 @@ class TogglTUI(App):
 
     #main {
         height: 1fr;
-        border: heavy #2e3947;
         padding: 0 1;
     }
 
     #content {
         width: 1fr;
         height: 1fr;
-        padding: 0 1 0 0;
+        padding: 0;
     }
 
     .view {
@@ -1174,7 +1184,7 @@ class TogglTUI(App):
     .section-title {
         color: #63f3ff;
         text-style: bold;
-        margin: 1 0 0 0;
+        margin: 0;
     }
 
     .muted {
@@ -1189,7 +1199,7 @@ class TogglTUI(App):
     }
 
     DataTable > .datatable--header {
-        background: #131b25;
+        background: #0b1016;
         color: #63f3ff;
         text-style: bold;
     }
@@ -1197,17 +1207,6 @@ class TogglTUI(App):
     DataTable > .datatable--cursor {
         background: #27323d;
         color: #f5f7fa;
-    }
-
-    .datatable--scrollbar,
-    .datatable--scrollbar-corner,
-    .datatable--scrollbar-horizontal,
-    .datatable--scrollbar-vertical,
-    .scrollbar {
-        display: none;
-        width: 0;
-        height: 0;
-        opacity: 0;
     }
 
     #spark-rail {
@@ -1226,7 +1225,7 @@ class TogglTUI(App):
     #spark-title {
         color: #63f3ff;
         text-style: bold;
-        margin: 1 0 0 0;
+        margin: 0;
     }
 
     #sparkbar {
@@ -1234,9 +1233,8 @@ class TogglTUI(App):
     }
 
     #footer {
-        height: 3;
-        border: heavy #2e3947;
-        margin: 1 0 0 0;
+        height: 2;
+        border-top: solid #2e3947;
         padding: 0 1;
     }
 
@@ -1251,7 +1249,7 @@ class TogglTUI(App):
     #dialog {
         width: 60;
         height: auto;
-        border: round #63f3ff;
+        border: solid #63f3ff;
         padding: 1 2;
         background: #0b1016;
         align: center middle;
@@ -1271,6 +1269,38 @@ class TogglTUI(App):
         color: #8d98a7;
         margin-top: 1;
     }
+
+    OptionList {
+        background: #0b1016;
+        color: #d7dde8;
+        border: none;
+        height: auto;
+        max-height: 10;
+    }
+
+    OptionList > .option-list--option {
+        padding: 0 1;
+    }
+
+    OptionList > .option-list--option-highlighted {
+        background: #27323d;
+        color: #63f3ff;
+    }
+
+    Toast {
+        background: #0b1016;
+        color: #d7dde8;
+        border: solid #2e3947;
+    }
+    Toast.-information {
+        border: solid #37d994;
+    }
+    Toast.-warning {
+        border: solid #e2b714;
+    }
+    Toast.-error {
+        border: solid #ff5f5f;
+    }
     """
 
     BINDINGS = [
@@ -1289,7 +1319,7 @@ class TogglTUI(App):
 
     def __init__(self):
         super().__init__()
-        self.active_view_index = 0
+        self.active_view_index = 1
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
         self.sparkbar_forced_open = False
@@ -1318,8 +1348,6 @@ class TogglTUI(App):
                         yield Static("Day", id="day-title", classes="section-title")
                         yield Static(id="day-selected", classes="muted")
                         yield Static(id="day-meta", classes="muted")
-                        yield Static("Week Context", id="day-context-title", classes="section-title")
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="day-context-table")
                         yield Static("Contributions", id="day-contrib-title", classes="section-title")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="day-table")
                     with Container(id="negatives-view", classes="view"):
@@ -1359,16 +1387,13 @@ class TogglTUI(App):
 
     def _setup_tables(self):
         week_table = self.query_one("#week-table", DataTable)
-        week_table.add_columns("Day", "Date", "Hours", "Earned", "Negs", "Goal", "Δ", "Net")
+        week_table.add_columns("Day", "Date", "Hours", "Earned", "Negs", "Δ", "Net")
 
         week_category_table = self.query_one("#week-category-table", DataTable)
         week_category_table.add_columns("Category", "Hours", "Rate", "Points")
 
         overview_table = self.query_one("#overview-table", DataTable)
         overview_table.add_columns("Category", "Hours", "Rate", "Points")
-
-        day_context_table = self.query_one("#day-context-table", DataTable)
-        day_context_table.add_columns("Day", "Net")
 
         day_table = self.query_one("#day-table", DataTable)
         day_table.add_columns("Category", "Hours", "Rate", "Points")
@@ -1471,18 +1496,17 @@ class TogglTUI(App):
         table = self.query_one("#week-table", DataTable)
         table.clear(columns=False)
         for row in dashboard["rows"]:
-            neg_text = "—" if row["negative_total"] == 0 else f"-{row['negative_total']:.1f}"
+            neg_text = "—" if row["negative_total"] == 0 else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
             hour_text = "—" if row["hours"] == 0 else f"{row['hours']:.1f}h"
-            earned_text = "—" if row["hours"] == 0 and row["earned"] == 0 else format_signed(row["earned"])
+            earned_text = "—" if row["hours"] == 0 and row["earned"] == 0 else format_signed_rich(row["earned"])
             table.add_row(
                 row["day"],
                 row["date_short"],
                 hour_text,
                 earned_text,
                 neg_text,
-                f"{row['goal']:.1f}",
-                format_signed(row["delta"]),
-                format_signed(row["net"]),
+                format_signed_rich(row["delta"]),
+                format_signed_rich(row["net"]),
                 key=row["date"],
             )
         if dashboard["rows"]:
@@ -1501,13 +1525,13 @@ class TogglTUI(App):
                     name,
                     f"{hours:.2f}h",
                     fmt_rate(rate),
-                    fmt_pts(pts),
+                    fmt_pts_rich(pts),
                 )
         summary = dashboard["summary"]
         summary_text = (
             f"Target through today: {summary['expected']:.1f} pts   "
             f"Actual: {summary['actual']:.1f} pts   "
-            f"Δ: {format_signed(summary['delta'])}"
+            f"Δ: {format_signed_rich(summary['delta'])}"
         )
         self.query_one("#week-summary", Static).update(summary_text)
 
@@ -1522,11 +1546,11 @@ class TogglTUI(App):
             if rows:
                 table.add_row(f"[{section_name.upper()}]", "", "", "")
             for name, hours, rate, pts in rows:
-                table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts(pts))
+                table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
         total_hours = report["total_hours"]
         total_text = (
-            f"Lifetime total {format_signed(report['total_points'])} pts   "
-            f"{total_hours:.2f}h tracked   This week {format_signed(week_total)}"
+            f"Lifetime total {format_signed_rich(report['total_points'])} pts   "
+            f"{total_hours:.2f}h tracked   This week {format_signed_rich(week_total)}"
         )
         self.query_one("#overview-summary", Static).update(total_text)
 
@@ -1535,21 +1559,14 @@ class TogglTUI(App):
         table = self.query_one("#day-table", DataTable)
         table.clear(columns=False)
         for name, hours, rate, pts in metrics["results"]:
-            table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts(pts))
+            table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
         for name, _, _, pts in metrics["negative_results"]:
-            table.add_row(name, "—", "logged", fmt_pts(pts))
+            table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         meta = (
-            f"Hours {metrics['total_hours']:.1f}h   Earned {format_signed(metrics['earned'])}   "
-            f"Negs -{metrics['logged_negative']:.1f}   Net {format_signed(metrics['net'])}   "
-            f"Δ {format_signed(metrics['delta'])}"
+            f"Hours {metrics['total_hours']:.1f}h   Earned {format_signed_rich(metrics['earned'])}   "
+            f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}   "
+            f"Δ {format_signed_rich(metrics['delta'])}"
         )
-        week = get_current_week()
-        week_rows = get_week_dashboard_rows(week)["rows"]
-        context_table = self.query_one("#day-context-table", DataTable)
-        context_table.clear(columns=False)
-        for row in week_rows:
-            marker = "◀" if row["date"] == self.selected_day else ""
-            context_table.add_row(f"{row['day']} {marker}", format_signed(row["net"]))
         self.query_one("#day-selected", Static).update(f"Selected day: {self.selected_day}")
         self.query_one("#day-meta", Static).update(meta)
 
@@ -1557,15 +1574,15 @@ class TogglTUI(App):
         catalog = self.query_one("#negatives-catalog-table", DataTable)
         catalog.clear(columns=False)
         for name, points in get_negative_catalog_rows():
-            catalog.add_row(name, f"-{points:.0f}")
+            catalog.add_row(name, f"[#ff5f5f]-{points:.0f}[/]")
         recent = self.query_one("#negatives-log-table", DataTable)
         recent.clear(columns=False)
         recent_rows = get_negative_log_rows()
         for row in recent_rows:
-            recent.add_row(row["date"], row["name"], f"-{row['points']:.0f}")
+            recent.add_row(row["date"], row["name"], f"[#ff5f5f]-{row['points']:.0f}[/]")
         total_recent = sum(row["points"] for row in recent_rows)
         self.query_one("#negatives-summary", Static).update(
-            f"Press n to log a negative. Recent visible penalties: -{total_recent:.0f} pts"
+            f"Press n to log a negative. Recent visible penalties: [#ff5f5f]-{total_recent:.0f}[/] pts"
         )
 
     def refresh_recovery_view(self):
@@ -1573,11 +1590,13 @@ class TogglTUI(App):
         table = self.query_one("#recovery-table", DataTable)
         table.clear(columns=False)
         for row in data["rows"]:
-            table.add_row(row["category"], fmt_rate(row["rate"]), row["hours_needed"])
+            rate = row["rate"]
+            color = "[#37d994]" if rate >= 2 else ("[#63f3ff]" if rate >= 1 else "[#d7dde8]")
+            table.add_row(f"{color}{row['category']}[/]", f"{color}{fmt_rate(rate)}[/]", f"{color}{row['hours_needed']}[/]")
         status = (
             "Already non-negative."
             if not data["rows"]
-            else f"Current total {format_signed(data['total_points'])} pts"
+            else f"Current total {format_signed_rich(data['total_points'])} pts"
         )
         self.query_one("#recovery-summary", Static).update(status)
 
@@ -1704,6 +1723,26 @@ def fmt_pts(pts):
     if pts == 0:
         return "0.0"
     return f"+{pts}" if pts > 0 else str(pts)
+
+
+def format_signed_rich(value):
+    if abs(value) < 0.05:
+        value = 0.0
+    if value > 0:
+        return f"[#37d994]+{value:.1f}[/]"
+    elif value < 0:
+        return f"[#ff5f5f]{value:.1f}[/]"
+    return "0.0"
+
+
+def fmt_pts_rich(pts):
+    if pts is None:
+        return "—"
+    if pts == 0:
+        return "0.0"
+    if pts > 0:
+        return f"[#37d994]+{pts}[/]"
+    return f"[#ff5f5f]{pts}[/]"
 
 
 # ──────────────────────────────────────────────
