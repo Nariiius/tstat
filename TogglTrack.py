@@ -131,12 +131,15 @@ SPARK_START_ROW = 1  # which table-lines[] index the sparkbar header aligns with
 # FILE PATHS
 # ──────────────────────────────────────────────
 DIR_PATH = os.path.dirname(os.path.abspath(__file__))
-CSV_FILE = os.path.join(DIR_PATH, "toggl_data.csv")
-DAILY_CSV_FILE = os.path.join(DIR_PATH, "toggl_daily.csv")
-NEGATIVES_CSV_FILE = os.path.join(DIR_PATH, "toggl_negatives.csv")
-HISTORY_FILE = os.path.join(DIR_PATH, "toggl_sync_history.json")
+DATA_DIR = os.path.join(DIR_PATH, "data")
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+CSV_FILE = os.path.join(DATA_DIR, "toggl_data.csv")
+DAILY_CSV_FILE = os.path.join(DATA_DIR, "toggl_daily.csv")
+NEGATIVES_CSV_FILE = os.path.join(DATA_DIR, "toggl_negatives.csv")
+HISTORY_FILE = os.path.join(DATA_DIR, "toggl_sync_history.json")
 CONFIG_FILE = os.path.join(DIR_PATH, "toggl_config.json")
-PROJECTS_FILE = os.path.join(DIR_PATH, "toggl_projects.json")
+PROJECTS_FILE = os.path.join(DATA_DIR, "toggl_projects.json")
 
 DEFAULT_DAILY_TARGET = 13.0
 LOW_QUOTA_WARNING = 5
@@ -1083,9 +1086,10 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
-            yield Label(self.title, classes="dialog-title")
-            yield Static(self.body, classes="dialog-body")
-            yield Static("[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help")
+            with Container(id="dialog-box"):
+                yield Label(self.title, classes="dialog-title")
+                yield Static(self.body, classes="dialog-body")
+                yield Static("[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help")
 
     def action_confirm(self):
         self.dismiss(True)
@@ -1097,10 +1101,11 @@ class ConfirmScreen(ModalScreen[bool]):
 class NegativeInputScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
-            yield Label("Log Negative", classes="dialog-title")
-            yield Static("Select a negative action to log.", classes="dialog-body")
-            yield OptionList(id="negative-list")
-            yield Static("[Esc] cancel", classes="dialog-help")
+            with Container(id="dialog-box"):
+                yield Label("Log Negative", classes="dialog-title")
+                yield Static("Select a negative action to log.", classes="dialog-body")
+                yield OptionList(id="negative-list")
+                yield Static("[Esc] cancel", classes="dialog-help")
 
     def on_mount(self):
         option_list = self.query_one("#negative-list", OptionList)
@@ -1129,19 +1134,27 @@ class TogglTUI(App):
 
     #root {
         height: 1fr;
-        border: solid #2e3947;
     }
 
     #topbar {
-        height: 1;
+        height: 2;
+        padding: 0 1;
+        border-bottom: solid #2e3947;
+    }
+
+    #app-title {
         color: #63f3ff;
         text-style: bold;
-        padding: 0 1;
+        width: auto;
+    }
+
+    #status-line {
+        color: #8d98a7;
+        width: 1fr;
     }
 
     #chrome {
-        height: 2;
-        border-bottom: solid #2e3947;
+        height: 1;
         padding: 0 1;
     }
 
@@ -1163,7 +1176,7 @@ class TogglTUI(App):
 
     #main {
         height: 1fr;
-        padding: 0 1;
+        padding: 1 1;
     }
 
     #content {
@@ -1181,21 +1194,12 @@ class TogglTUI(App):
         display: block;
     }
 
-    .section-title {
-        color: #63f3ff;
-        text-style: bold;
-        margin: 0;
-    }
-
-    .muted {
-        color: #8d98a7;
-    }
-
     DataTable {
         height: 1fr;
-        border: none;
+        border: solid #2e3947;
         background: #0b1016;
         color: #d7dde8;
+        margin-bottom: 1;
     }
 
     DataTable > .datatable--header {
@@ -1213,8 +1217,8 @@ class TogglTUI(App):
         width: 32;
         min-width: 32;
         max-width: 32;
-        border-left: solid #2e3947;
-        padding: 0 0 0 1;
+        border: solid #2e3947;
+        padding: 0 1;
         display: block;
     }
 
@@ -1247,12 +1251,17 @@ class TogglTUI(App):
     }
 
     #dialog {
+        width: 100%;
+        height: 100%;
+        align: center middle;
+    }
+
+    #dialog-box {
         width: 60;
         height: auto;
         border: solid #63f3ff;
         padding: 1 2;
         background: #0b1016;
-        align: center middle;
     }
 
     .dialog-title {
@@ -1329,47 +1338,30 @@ class TogglTUI(App):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
-            yield Static("togglscale", id="topbar")
+            with Horizontal(id="topbar"):
+                yield Static("togglscale", id="app-title")
+                yield Static(id="status-line", classes="muted")
             with Vertical(id="chrome"):
                 with Horizontal(id="view-tabs"):
                     for index, view in enumerate(self.VIEWS):
                         yield Static(view, classes="view-tab", id=f"view-tab-{index}")
-                yield Static(id="status-line", classes="muted")
             with Horizontal(id="main"):
                 with Container(id="content"):
                     with Container(id="week-view", classes="view -active"):
-                        yield Static("Week", id="week-title", classes="section-title")
-                        yield Static(id="week-summary", classes="muted")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="week-table")
-                        yield Static("Category Totals", id="week-category-title", classes="section-title")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="week-category-table")
                     with Container(id="overview-view", classes="view"):
-                        yield Static("Overview", id="overview-title", classes="section-title")
-                        yield Static(id="overview-summary", classes="muted")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="overview-table")
                     with Container(id="day-view", classes="view"):
-                        yield Static("Day", id="day-title", classes="section-title")
-                        yield Static(id="day-selected", classes="muted")
-                        yield Static(id="day-meta", classes="muted")
-                        yield Static("Contributions", id="day-contrib-title", classes="section-title")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="day-table")
                     with Container(id="negatives-view", classes="view"):
-                        yield Static("Negatives", id="negatives-title", classes="section-title")
-                        yield Static(id="negatives-summary", classes="muted")
-                        yield Static("Catalog", id="negatives-catalog-title", classes="section-title")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-catalog-table")
-                        yield Static("Recent Log", id="negatives-log-title", classes="section-title")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-log-table")
                     with Container(id="recovery-view", classes="view"):
-                        yield Static("Recovery", id="recovery-title", classes="section-title")
-                        yield Static(id="recovery-summary", classes="muted")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="recovery-table")
                     with Container(id="sync-view", classes="view"):
-                        yield Static("Sync / Quota", id="sync-title", classes="section-title")
-                        yield Static(id="sync-summary", classes="muted")
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="sync-table")
                 with Vertical(id="spark-rail"):
-                    yield Static("Current Week Trends", id="spark-title")
                     yield Static(id="sparkbar")
             with Vertical(id="footer"):
                 yield Static(id="footer-main")
@@ -1437,11 +1429,9 @@ class TogglTUI(App):
         start_d, end_d = get_week_dates(current_week)
         synced = get_last_updated_str()
         self.query_one("#status-line", Static).update(
-            f"Week {current_week}  {start_d.strftime('%d %b')} - {end_d.strftime('%d %b %Y')}  Updated {synced}"
+            f"  | [#8d98a7]Updated {synced}[/]"
         )
         footer_main = Text()
-        footer_main.append("Views: ", style="bold #63f3ff")
-        footer_main.append("Week  Day  Overview   ", style="#63f3ff")
         footer_main.append("<- ->", style="bold #63f3ff")
         footer_main.append(" switch   ", style="#8d98a7")
         footer_main.append("n", style="bold #63f3ff")
@@ -1490,6 +1480,8 @@ class TogglTUI(App):
         )
 
     def refresh_sparkbar(self):
+        rail = self.query_one("#spark-rail", Vertical)
+        rail.border_title = "[b][#63f3ff]Current Week Trends[/][/]"
         self.query_one("#sparkbar", Static).update(Text.from_ansi(get_sparkbar_text()))
 
     def refresh_week_view(self):
@@ -1534,8 +1526,9 @@ class TogglTUI(App):
             for name, _, _, pts in report["negative_results"]:
                 category_table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         summary = dashboard["summary"]
-        summary_text = f"Week net: {format_signed_rich(summary['actual'])} pts"
-        self.query_one("#week-summary", Static).update(summary_text)
+        table.border_title = f"[b][#63f3ff]Week ({week})[/][/]"
+        table.border_subtitle = f"[#8d98a7]Week net: {format_signed_rich(summary['actual'])} pts[/]"
+        category_table.border_title = "[b][#63f3ff]Category Totals[/][/]"
 
     def refresh_overview_view(self):
         report = get_report_sections("ALL_TIME", "ALL")
@@ -1554,11 +1547,11 @@ class TogglTUI(App):
             for name, _, _, pts in report["negative_results"]:
                 table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         total_hours = report["total_hours"]
-        total_text = (
-            f"Lifetime total {format_signed_rich(report['total_points'])} pts   "
-            f"{total_hours:.2f}h tracked   This week {format_signed_rich(week_total)}"
+        table.border_title = "[b][#63f3ff]Overview[/][/]"
+        table.border_subtitle = (
+            f"[#8d98a7]Lifetime total {format_signed_rich(report['total_points'])} pts   "
+            f"{total_hours:.2f}h tracked   This week {format_signed_rich(week_total)}[/]"
         )
-        self.query_one("#overview-summary", Static).update(total_text)
 
     def refresh_day_view(self):
         metrics = get_day_metrics(self.selected_day)
@@ -1585,11 +1578,11 @@ class TogglTUI(App):
             for name, hours, rate, pts in unscored_rows:
                 table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
         meta = (
-            f"Hours {metrics['total_hours']:.1f}h   Earned {format_signed_rich(metrics['earned'])}   "
-            f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}"
+            f"[#8d98a7]Hours {metrics['total_hours']:.1f}h   Earned {format_signed_rich(metrics['earned'])}   "
+            f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
         )
-        self.query_one("#day-selected", Static).update(f"Selected day: {self.selected_day}")
-        self.query_one("#day-meta", Static).update(meta)
+        table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]"
+        table.border_subtitle = meta
 
     def refresh_negatives_view(self):
         catalog = self.query_one("#negatives-catalog-table", DataTable)
@@ -1602,9 +1595,9 @@ class TogglTUI(App):
         for row in recent_rows:
             recent.add_row(row["date"], row["name"], f"[#ff5f5f]-{row['points']:.0f}[/]")
         total_recent = sum(row["points"] for row in recent_rows)
-        self.query_one("#negatives-summary", Static).update(
-            f"Press n to log a negative. Recent visible penalties: [#ff5f5f]-{total_recent:.0f}[/] pts"
-        )
+        catalog.border_title = "[b][#63f3ff]Catalog[/][/]"
+        recent.border_title = "[b][#63f3ff]Recent Log[/][/]"
+        recent.border_subtitle = f"[#8d98a7]Press n to log. Visible penalties: [#ff5f5f]-{total_recent:.0f}[/] pts[/]"
 
     def refresh_recovery_view(self):
         data = get_recovery_rows("ALL_TIME", "ALL")
@@ -1614,12 +1607,12 @@ class TogglTUI(App):
             rate = row["rate"]
             color = "[#37d994]" if rate >= 2 else ("[#63f3ff]" if rate >= 1 else "[#d7dde8]")
             table.add_row(f"{color}{row['category']}[/]", f"{color}{fmt_rate(rate)}[/]", f"{color}{row['hours_needed']}[/]")
-        status = (
-            "Already non-negative."
+        table.border_title = "[b][#63f3ff]Recovery[/][/]"
+        table.border_subtitle = (
+            "[#8d98a7]Already non-negative.[/]"
             if not data["rows"]
-            else f"Current total {format_signed_rich(data['total_points'])} pts"
+            else f"[#8d98a7]Current total {format_signed_rich(data['total_points'])} pts[/]"
         )
-        self.query_one("#recovery-summary", Static).update(status)
 
     def refresh_sync_view(self):
         status = get_sync_status_data()
@@ -1634,15 +1627,17 @@ class TogglTUI(App):
         )
         table.add_row("Synced weeks", str(len(status["synced_weeks"])))
         table.add_row("Synced days", str(len(status["synced_days"])))
-        if status["quota_remaining"] is not None:
-            table.add_row("Quota", f"{status['quota_remaining']}/{status['quota_limit']}")
+        
+        remaining = status["quota_remaining"] if status["quota_remaining"] is not None else "Unknown"
+        limit = status["quota_limit"] if status["quota_limit"] is not None else "Unknown"
+        table.add_row("Quota remaining", f"{remaining}/{limit}")
+        
         if status["quota_resets_in"] is not None:
             table.add_row(
                 "Quota resets in", _format_reset_window(status["quota_resets_in"])
             )
-        self.query_one("#sync-summary", Static).update(
-            "u syncs the current week. U refreshes projects and syncs 4 weeks."
-        )
+        table.border_title = "[b][#63f3ff]Sync Status[/][/]"
+        table.border_subtitle = "[#8d98a7]u syncs current week. U refreshes projects and syncs 4 weeks.[/]"
 
     @on(DataTable.RowHighlighted, "#week-table")
     def update_selected_day(self, event: DataTable.RowHighlighted):
