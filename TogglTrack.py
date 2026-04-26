@@ -1505,6 +1505,7 @@ class TogglTUI(App):
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
         self.sparkbar_forced_open = False
+        self._resize_timer = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -1593,6 +1594,7 @@ class TogglTUI(App):
         self.refresh_sparkbar()
         self.update_view_visibility()
         self.update_sparkbar_visibility()
+        self._schedule_resize()
 
     def update_tabs(self):
         for index, view in enumerate(self.VIEWS):
@@ -1948,6 +1950,114 @@ class TogglTUI(App):
 
     def on_resize(self):
         self.update_sparkbar_visibility()
+        self._schedule_resize()
+
+    def _schedule_resize(self):
+        if self._resize_timer is not None:
+            self._resize_timer.stop()
+        self._resize_timer = self.set_timer(0.05, self._resize_tables)
+
+    def _resize_tables(self):
+        from rich.text import Text
+        
+        if self.size.width <= 0:
+            return
+            
+        content_node = self.query_one("#content")
+        content_w = content_node.size.width
+        
+        expected_width = content_w - 2 # -2 for DataTable border
+        if expected_width <= 0:
+            rail = self.query_one("#spark-rail")
+            rail_w = 34 if not rail.has_class("-hidden") else 0  # 32 + 2 border
+            expected_width = self.size.width - rail_w - 2  # -2 for DataTable border only
+            
+        if expected_width <= 0:
+            return
+
+        available_width = max(10, expected_width)
+
+        table_ids = [
+            "#week-table", "#week-category-table", "#overview-table",
+            "#day-table", "#negatives-catalog-table", "#negatives-log-table",
+            "#positives-catalog-table", "#positives-log-table", "#recovery-table",
+            "#sync-table"
+        ]
+        text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
+        
+        for t_id in table_ids:
+            try:
+                table = self.query_one(t_id, DataTable)
+            except Exception:
+                continue
+                
+            if not table.columns:
+                continue
+            
+            req_widths = {}
+            col_keys = list(table.columns.keys())
+            
+            for key, col in table.columns.items():
+                req_widths[key] = len(col.label.plain) + 3
+                
+            for row_idx in range(table.row_count):
+                row_data = table.get_row_at(row_idx)
+                for col_idx, col_key in enumerate(col_keys):
+                    val = str(row_data[col_idx])
+                    try:
+                        cell_w = Text.from_markup(val).cell_len + 2
+                    except Exception:
+                        cell_w = len(strip_ansi(val)) + 2
+                    if cell_w > req_widths[col_key]:
+                        req_widths[col_key] = cell_w
+                        
+            total_req_width = sum(req_widths.values())
+            
+            expandable_keys = []
+            fixed_keys = []
+            for key, col in table.columns.items():
+                # Allow partial matches for Category since labels might get truncated if we did earlier
+                label_str = col.label.plain
+                if label_str in text_cols or label_str.startswith("Cat"):
+                    expandable_keys.append(key)
+                else:
+                    fixed_keys.append(key)
+                    
+            if not expandable_keys:
+                expandable_keys = list(table.columns.keys())
+                fixed_keys = []
+                
+            if available_width >= total_req_width:
+                extra = available_width - total_req_width
+                for key in fixed_keys:
+                    table.columns[key].width = req_widths[key]
+                    table.columns[key].auto_width = False
+                    
+                expand_extra = extra // len(expandable_keys)
+                rem = extra % len(expandable_keys)
+                for i, key in enumerate(expandable_keys):
+                    table.columns[key].width = req_widths[key] + expand_extra + (1 if i < rem else 0)
+                    table.columns[key].auto_width = False
+            else:
+                fixed_req = sum(req_widths[k] for k in fixed_keys)
+                if available_width > fixed_req and expandable_keys:
+                    for key in fixed_keys:
+                        table.columns[key].width = req_widths[key]
+                        table.columns[key].auto_width = False
+                    rem_width = available_width - fixed_req
+                    base_w = rem_width // len(expandable_keys)
+                    rem = rem_width % len(expandable_keys)
+                    for i, key in enumerate(expandable_keys):
+                        table.columns[key].width = max(1, base_w + (1 if i < rem else 0))
+                        table.columns[key].auto_width = False
+                else:
+                    for i, key in enumerate(table.columns.keys()):
+                        base_w = available_width // len(table.columns)
+                        rem = available_width % len(table.columns)
+                        table.columns[key].width = max(1, base_w + (1 if i < rem else 0))
+                        table.columns[key].auto_width = False
+                        
+            table.refresh(layout=True)
 
 
 def fmt_rate(rate):
