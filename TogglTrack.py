@@ -96,6 +96,14 @@ def vlen(s):
     return len(strip_ansi(s))
 
 
+def pad_ansi(s, width):
+    """Right-pad an ANSI string so its visual length equals `width`."""
+    vis = vlen(s)
+    if vis >= width:
+        return s
+    return s + " " * (width - vis)
+
+
 # ──────────────────────────────────────────────
 # LAYOUT CONSTANTS
 # ──────────────────────────────────────────────
@@ -1242,6 +1250,36 @@ def run_quietly(func, *args, **kwargs):
     return result, text
 
 
+# ──────────────────────────────────────────────
+# SPARK TABLE CELL RENDERER
+# ──────────────────────────────────────────────
+
+def _spark_net_rich(net, max_abs, bar_w=4, dim_zero=False,
+                     blame_tracked=0, blame_logged=0, blame_w=3):
+    """
+    Return Rich markup for a net-points cell in the interactive spark tables.
+    Positive → green bar on left of value.  Negative → red value + bar on right.
+    When net < 0 and blame data is provided, a blame bar (red tracked + magenta
+    logged) is appended after the net bar.
+    """
+    if net is None or (abs(net) < 0.05 and dim_zero):
+        return "[dim]—[/]"
+    if abs(net) < 0.05:
+        return "[dim]0.0[/]"
+    bar_len = max(1, round(abs(net) / max_abs * bar_w)) if max_abs > 0 else 1
+    bar = "█" * bar_len
+    if net > 0:
+        return f"[#37d994]{bar} +{net}[/]"
+    else:
+        blame_total = blame_tracked + blame_logged
+        if blame_total > 0 and blame_w > 0:
+            red_count = round(blame_tracked / blame_total * blame_w)
+            mag_count = blame_w - red_count
+            blame = f"[#ff5f5f]{'█' * red_count}[/][#ff5fff]{'█' * mag_count}[/]"
+            return f"[#ff5f5f]{net} {bar}[/]{blame}"
+        return f"[#ff5f5f]{net} {bar}[/]"
+
+
 class ConfirmScreen(ModalScreen[bool]):
     BINDINGS = [
         ("y", "confirm", "Confirm"),
@@ -1393,11 +1431,11 @@ class TogglTUI(App):
     }
 
     #spark-rail {
-        width: 32;
-        min-width: 32;
-        max-width: 32;
-        border: solid #2e3947;
-        padding: 0 1;
+        width: 34;
+        min-width: 34;
+        max-width: 34;
+        border: none;
+        padding: 0;
         display: block;
     }
 
@@ -1405,14 +1443,47 @@ class TogglTUI(App):
         display: none;
     }
 
-    #spark-title {
-        color: #63f3ff;
-        text-style: bold;
-        margin: 0;
+    #spark-weeks-table {
+        height: auto;
+        min-height: 5;
+        border: solid #2e3947;
+        background: #0b1016;
+        color: #d7dde8;
     }
 
-    #sparkbar {
+    #spark-weeks-table > .datatable--header {
+        background: #0b1016;
+        color: #63f3ff;
+        text-style: bold;
+    }
+
+    #spark-weeks-table > .datatable--cursor {
+        background: #27323d;
+        color: #f5f7fa;
+    }
+
+    #spark-days-table {
         height: 1fr;
+        border: solid #2e3947;
+        background: #0b1016;
+        color: #d7dde8;
+    }
+
+    #spark-days-table > .datatable--header {
+        background: #0b1016;
+        color: #63f3ff;
+        text-style: bold;
+    }
+
+    #spark-days-table > .datatable--cursor {
+        background: #27323d;
+        color: #f5f7fa;
+    }
+
+    #spark-catchup {
+        height: auto;
+        border: solid #2e3947;
+        padding: 0 1;
     }
 
     #footer {
@@ -1532,8 +1603,13 @@ class TogglTUI(App):
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="recovery-table")
                     with Container(id="sync-view", classes="view"):
                         yield DataTable(zebra_stripes=False, cursor_type="row", id="sync-table")
+                # ── Spark rail: interactive side-panel with the same DataTable
+                #    design as the main views — selectable, cursor-navigable,
+                #    collapsible via `s`.
                 with Vertical(id="spark-rail"):
-                    yield Static(id="sparkbar")
+                    yield DataTable(show_header=False, cursor_type="row", id="spark-weeks-table", zebra_stripes=False)
+                    yield DataTable(show_header=False, cursor_type="row", id="spark-days-table", zebra_stripes=False)
+                    yield Static(id="spark-catchup")
             with Vertical(id="footer"):
                 yield Static(id="footer-main")
 
@@ -1581,6 +1657,13 @@ class TogglTUI(App):
         sync_table = self.query_one("#sync-table", DataTable)
         sync_table.add_columns("Metric", "Value")
 
+        # Spark rail tables — no visible header, single label + net columns
+        spark_weeks = self.query_one("#spark-weeks-table", DataTable)
+        spark_weeks.add_columns("Label", "Net")
+
+        spark_days = self.query_one("#spark-days-table", DataTable)
+        spark_days.add_columns("Day", "Net")
+
     def refresh_all_views(self):
         self.update_tabs()
         self.update_status_line()
@@ -1591,7 +1674,7 @@ class TogglTUI(App):
         self.refresh_positives_view()
         self.refresh_recovery_view()
         self.refresh_sync_view()
-        self.refresh_sparkbar()
+        self.refresh_spark_tables()
         self.update_view_visibility()
         self.update_sparkbar_visibility()
         self._schedule_resize()
@@ -1668,10 +1751,226 @@ class TogglTUI(App):
             "-hidden",
         )
 
-    def refresh_sparkbar(self):
-        rail = self.query_one("#spark-rail", Vertical)
-        rail.border_title = "[b][#63f3ff]Current Week Trends[/][/]"
-        self.query_one("#sparkbar", Static).update(Text.from_ansi(get_sparkbar_text()))
+    # ──────────────────────────────────────────────
+    # SPARK TABLES — interactive side-panel
+    # ──────────────────────────────────────────────
+
+    def refresh_spark_tables(self):
+        """Refresh all three spark-rail widgets."""
+        self._refresh_spark_weeks()
+        self._refresh_spark_days()
+        self._refresh_spark_catchup()
+
+    def _refresh_spark_weeks(self):
+        """Populate the Past 3 Weeks DataTable in the spark rail."""
+        table = self.query_one("#spark-weeks-table", DataTable)
+        table.clear(columns=False)
+
+        current_sunday = get_sunday_of_week(date.today())
+        weeks_data = []
+
+        for i in range(3, 0, -1):
+            pw_sunday = current_sunday - timedelta(days=7 * i)
+            pw = get_week_str(pw_sunday)
+            pw_num = pw.split("W")[1]
+            pw_label = f"W{int(pw_num)}"
+
+            pw_data = get_data_for_week(pw)
+            if pw_data:
+                pw_results = calculate(pw_data)
+                pw_earned = sum(r[3] for r in pw_results if r[3] is not None)
+            else:
+                pw_earned = 0.0
+
+            pw_tracked, pw_logged = get_week_neg_breakdown(pw)
+            pw_logged_pos = get_week_pos_breakdown(pw)
+            pw_net = round(pw_earned - pw_logged + pw_logged_pos, 1)
+            weeks_data.append((pw_label, pw, pw_net, pw_tracked, pw_logged))
+
+        max_abs = max((abs(w[2]) for w in weeks_data), default=1) or 1
+
+        for label, wk, net, tracked, logged in weeks_data:
+            net_cell = _spark_net_rich(net, max_abs,
+                                       blame_tracked=tracked, blame_logged=logged)
+            table.add_row(label, net_cell, key=wk)
+
+        table.border_title = "[b][#63f3ff]Past 3 Weeks[/][/]"
+
+    def _refresh_spark_days(self):
+        """Populate the This Week DataTable in the spark rail."""
+        table = self.query_one("#spark-days-table", DataTable)
+        table.clear(columns=False)
+
+        week_str = get_current_week()
+        start_d, _ = get_week_dates(week_str)
+
+        # Load daily project hours
+        daily_proj: dict[str, dict[str, float]] = {}
+        if os.path.exists(DAILY_CSV_FILE):
+            with open(DAILY_CSV_FILE) as f:
+                for row in csv.DictReader(f):
+                    d = row["Date"]
+                    daily_proj.setdefault(d, {})
+                    daily_proj[d][row["Project"]] = (
+                        daily_proj[d].get(row["Project"], 0.0) + float(row["Hours"])
+                    )
+
+        # Load daily negatives
+        daily_neg_map: dict[str, dict[str, float]] = {}
+        if os.path.exists(NEGATIVES_CSV_FILE):
+            with open(NEGATIVES_CSV_FILE) as f:
+                for row in csv.DictReader(f):
+                    d = row["Date"]
+                    name = row.get("Negative") or row.get("Penalty") or "?"
+                    daily_neg_map.setdefault(d, {})
+                    try:
+                        daily_neg_map[d][name] = daily_neg_map[d].get(name, 0.0) + float(row["Points"])
+                    except ValueError:
+                        pass
+
+        # Load daily positives
+        daily_pos_map: dict[str, dict[str, float]] = {}
+        if os.path.exists(POSITIVES_CSV_FILE):
+            with open(POSITIVES_CSV_FILE) as f:
+                for row in csv.DictReader(f):
+                    d = row["Date"]
+                    name = row.get("Positive") or row.get("Bonus") or "?"
+                    daily_pos_map.setdefault(d, {})
+                    try:
+                        daily_pos_map[d][name] = daily_pos_map[d].get(name, 0.0) + float(row["Points"])
+                    except ValueError:
+                        pass
+
+        # Compute per-day net values for scaling
+        day_entries = []
+        for i in range(7):
+            d = start_d + timedelta(days=i)
+            d_str = d.strftime("%Y-%m-%d")
+            projs = daily_proj.get(d_str, {})
+            negs = daily_neg_map.get(d_str, {})
+            poss = daily_pos_map.get(d_str, {})
+            results = calculate(projs)
+            earned = sum(r[3] for r in results if r[3] is not None)
+            neg_cost = sum(negs.values())
+            pos_bonus = sum(poss.values())
+            net = round(earned - neg_cost + pos_bonus, 1)
+            has_data = bool(projs or negs or poss)
+            # Blame: tracked negs = negative-rate project points, logged negs = manual
+            tracked_neg = sum(abs(float(h) * POINTS[p]) for p, h in projs.items() if POINTS.get(p, 0) < 0)
+            logged_neg = round(sum(negs.values()), 1)
+            day_entries.append((d, d_str, net, has_data, tracked_neg, logged_neg))
+
+        max_abs = max(
+            (abs(net) for _, _, net, has, _, _ in day_entries if has and abs(net) >= 0.05),
+            default=1,
+        ) or 1
+
+        cursor_row = None
+        for i, (d, d_str, net, has_data, tracked_neg, logged_neg) in enumerate(day_entries):
+            # Skip future days with no data
+            if not has_data and d > date.today():
+                continue
+
+            day_name = d.strftime("%a")
+            is_today = d == date.today()
+
+            # Style the day label to match left-side week-table conventions
+            if is_today:
+                label_cell = f"[bold #e2b714]{day_name} ◀[/]"
+            elif not has_data:
+                label_cell = f"[dim]{day_name}[/]"
+            else:
+                label_cell = day_name
+
+            net_cell = _spark_net_rich(
+                net if has_data else None,
+                max_abs,
+                dim_zero=(not has_data),
+                blame_tracked=tracked_neg if has_data and net < 0 else 0,
+                blame_logged=logged_neg if has_data and net < 0 else 0,
+            )
+
+            table.add_row(label_cell, net_cell, key=d_str)
+
+            if d_str == self.selected_day:
+                cursor_row = table.row_count - 1
+
+        # Restore cursor to the currently-selected day
+        if cursor_row is not None:
+            table.move_cursor(row=cursor_row)
+
+        tw_num = week_str.split("W")[1]
+        tw_label = f"W{int(tw_num)}"
+
+        # Show logged neg/pos totals in the border subtitle
+        tw_logged_neg = round(
+            sum(sum(v.values()) for v in daily_neg_map.values()), 1
+        )
+        tw_logged_pos = round(
+            sum(sum(v.values()) for v in daily_pos_map.values()), 1
+        )
+        neg_s = f"[#ff5f5f]-{int(tw_logged_neg) if tw_logged_neg == int(tw_logged_neg) else tw_logged_neg}l[/]" if tw_logged_neg > 0 else "[dim]-0l[/]"
+        pos_s = f"[#37d994]+{int(tw_logged_pos) if tw_logged_pos == int(tw_logged_pos) else tw_logged_pos}l[/]" if tw_logged_pos > 0 else "[dim]+0l[/]"
+
+        table.border_title = f"[b][#63f3ff]This Week ({tw_label})[/][/]"
+        table.border_subtitle = f"{pos_s} {neg_s}"
+
+    def _refresh_spark_catchup(self):
+        """Update the lifetime on-track / catch-up Static in the spark rail."""
+        all_time_data = get_all_time_data()
+        if all_time_data:
+            all_results = calculate(all_time_data)
+            all_earned = sum(r[3] for r in all_results if r[3] is not None)
+        else:
+            all_earned = 0.0
+        all_negatives = get_negatives_for_context("ALL_TIME", "ALL")
+        all_positives = get_positives_for_context("ALL_TIME", "ALL")
+        all_neg_pts = sum(r[3] for r in all_negatives)
+        all_pos_pts = sum(r[3] for r in all_positives)
+        lifetime_pts = round(all_earned + all_neg_pts + all_pos_pts, 1)
+
+        catchup = self.query_one("#spark-catchup", Static)
+
+        if lifetime_pts >= 0:
+            pts_val = int(lifetime_pts) if lifetime_pts == int(lifetime_pts) else lifetime_pts
+            text = Text()
+            text.append(f"+{pts_val} pts", style="bold #37d994")
+            catchup.update(text)
+            catchup.border_title = "[b][#37d994]On Track[/][/]"
+        else:
+            deficit = abs(lifetime_pts)
+            tl_raw = time_left_in_week()
+            deficit_val = int(deficit) if deficit == int(deficit) else deficit
+
+            # Rate group rows: ×rate hours task-names
+            group_colors_rich = ["#63f3ff", "#ff5fff", "#37d994", "#5fafff", "#e2b714"]
+            rate_groups: dict[float, list[str]] = {}
+            for task_name, rate in POINTS.items():
+                if rate >= 1:
+                    rate_groups.setdefault(rate, []).append(task_name)
+            rates_sorted = sorted(rate_groups.keys(), reverse=True)
+
+            text = Text()
+            for i, rate in enumerate(rates_sorted):
+                tasks = rate_groups[rate]
+                hours_needed = deficit / rate
+                h = int(hours_needed)
+                m = int((hours_needed - h) * 60)
+                h_str = f"{h}h {m:02d}m"
+                rate_str = f"×{int(rate) if rate == int(rate) else rate}"
+                short: list[str] = [TASK_SHORT_NAMES.get(t) or t for t in tasks]
+                task_str = " ".join(short)
+                color = group_colors_rich[i % len(group_colors_rich)]
+
+                if i > 0:
+                    text.append("\n")
+                text.append(f" {rate_str:<3}", style="dim")
+                text.append(f"{h_str}", style="#e2b714")
+                text.append(f" {task_str}", style=color)
+
+            catchup.update(text)
+            catchup.border_title = "[b][#ff5f5f]Catch Up[/][/]"
+            catchup.border_subtitle = f"[#ff5f5f]-{deficit_val} pts[/] [#63f3ff]in {tl_raw}[/]"
 
     def refresh_week_view(self):
         week = get_current_week()
@@ -1859,11 +2158,53 @@ class TogglTUI(App):
         table.border_title = "[b][#63f3ff]Sync Status[/][/]"
         table.border_subtitle = "[#8d98a7]u syncs current week. U refreshes projects and syncs 4 weeks.[/]"
 
+    # ──────────────────────────────────────────────
+    # EVENT HANDLERS
+    # ──────────────────────────────────────────────
+
     @on(DataTable.RowHighlighted, "#week-table")
     def update_selected_day(self, event: DataTable.RowHighlighted):
         if event.row_key is not None:
             self.selected_day = str(event.row_key.value)
             self.refresh_day_view()
+            # Keep spark-days-table cursor in sync
+            self._sync_spark_days_cursor()
+
+    @on(DataTable.RowHighlighted, "#spark-days-table")
+    def spark_day_highlighted(self, event: DataTable.RowHighlighted):
+        """Clicking / navigating a day row in the spark panel updates the
+        selected day exactly as navigating the week-table does."""
+        if event.row_key is not None:
+            self.selected_day = str(event.row_key.value)
+            self.refresh_day_view()
+            # Keep week-table cursor in sync when spark panel drives selection
+            self._sync_week_table_cursor()
+
+    def _sync_spark_days_cursor(self):
+        """Move the spark-days-table cursor to match self.selected_day."""
+        table = self.query_one("#spark-days-table", DataTable)
+        for i in range(table.row_count):
+            row_key = table.get_row_at(i)  # returns cell values, not key
+            # Use coordinate-based key lookup via the ordered key list
+            try:
+                key = list(table.rows.keys())[i]
+                if str(key.value) == self.selected_day:
+                    table.move_cursor(row=i, animate=False)
+                    break
+            except (IndexError, AttributeError):
+                pass
+
+    def _sync_week_table_cursor(self):
+        """Move the week-table cursor to match self.selected_day."""
+        table = self.query_one("#week-table", DataTable)
+        try:
+            keys = list(table.rows.keys())
+            for i, key in enumerate(keys):
+                if str(key.value) == self.selected_day:
+                    table.move_cursor(row=i, animate=False)
+                    break
+        except (IndexError, AttributeError):
+            pass
 
     @on(Click, ".view-tab")
     def click_view_tab(self, event: Click):
@@ -1898,8 +2239,6 @@ class TogglTUI(App):
             self.sparkbar_collapsed = not self.sparkbar_collapsed
             self.sparkbar_forced_open = False
         self.update_sparkbar_visibility()
-        # Reflow columns — sparkbar appearing/disappearing changes #content width.
-        # Without this call, column widths stay frozen at the pre-toggle dimensions.
         self._schedule_resize()
 
     def action_show_help(self):
@@ -1958,16 +2297,6 @@ class TogglTUI(App):
         self.push_screen(PositiveInputScreen(), after_input)
 
     def on_resize(self, event) -> None:
-        """Fires whenever the terminal dimensions change.
-
-        In Textual v8+, App.size is a plain property (not a reactive), so
-        watch_size never fires.  The Resize event IS dispatched to the App
-        first (the driver posts it here), so on_resize on App works reliably.
-
-        Note: self.size may still hold the OLD value when this handler runs
-        (it is updated by App._on_resize which fires after this due to MRO
-        ordering), so we read the new dimensions from event.size instead.
-        """
         new_size = event.size
         if new_size.width == 0 or new_size.height == 0:
             return
@@ -1977,11 +2306,9 @@ class TogglTUI(App):
     def _resize_tables(self):
         from rich.text import Text
 
-        # Re-check sparkbar visibility now that self.size is up-to-date
-        # (on_resize fires before App._on_resize updates self.size, so the
-        # earlier call may have used a stale width).
         self.update_sparkbar_visibility()
 
+        # ── Main content tables ────────────────────────────────────────────
         table_ids = [
             "#week-table", "#week-category-table", "#overview-table",
             "#day-table", "#negatives-catalog-table", "#negatives-log-table",
@@ -1990,17 +2317,13 @@ class TogglTUI(App):
         ]
         text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
 
-        # Always compute width from App size rather than #content.size
-        # to avoid race conditions with Textual's async layout pass.
         rail = self.query_one("#spark-rail")
         rail_w = 34 if not rail.has_class("-hidden") else 0
         content_w = self.size.width - rail_w
 
         if content_w <= 0:
-            # Terminal size unknown — bail and wait for the next resize event.
             return
 
-        # -2 for the DataTable's own left+right border.
         available_width = max(10, content_w - 2)
 
         for t_id in table_ids:
@@ -2014,11 +2337,8 @@ class TogglTUI(App):
 
             col_keys = list(table.columns.keys())
             n_cols = len(col_keys)
-            cell_padding = table.cell_padding  # default 1; get_render_width adds 2*cell_padding per col
+            cell_padding = table.cell_padding
 
-            # req_widths stores PURE CONTENT widths (no padding).
-            # column.width must be pure content — get_render_width() adds 2*cell_padding on top.
-            # If we put padding into column.width it gets double-counted and columns overflow.
             req_widths = {key: len(col.label.plain) for key, col in table.columns.items()}
 
             for row_idx in range(table.row_count):
@@ -2032,11 +2352,8 @@ class TogglTUI(App):
                     if cell_w > req_widths[col_key]:
                         req_widths[col_key] = cell_w
 
-            # Total space consumed by padding across all columns (added automatically by get_render_width).
             total_padding = 2 * cell_padding * n_cols
-            # Space available for pure column content after accounting for padding.
             content_budget = available_width - total_padding
-            # Total pure content width required to fit every cell without clipping.
             total_req_content = sum(req_widths.values())
 
             expandable_keys = []
@@ -2053,7 +2370,6 @@ class TogglTUI(App):
                 fixed_keys = []
 
             if content_budget >= total_req_content:
-                # Enough room — give everyone their minimum, expand text cols with leftover.
                 extra = content_budget - total_req_content
                 for key in fixed_keys:
                     table.columns[key].width = req_widths[key]
@@ -2064,16 +2380,11 @@ class TogglTUI(App):
                     table.columns[key].width = req_widths[key] + expand_extra + (1 if i < rem else 0)
                     table.columns[key].auto_width = False
             else:
-                # Not enough room — compress columns to fit.
-                # Use header label widths as minimums for fixed cols so that
-                # the expandable (text) column gets the lion's share of space,
-                # rather than being squeezed to near-zero by inflated req_widths.
                 min_widths = {key: max(3, len(col.label.plain))
                               for key, col in table.columns.items()}
                 total_min = sum(min_widths.values())
 
                 if content_budget <= total_min:
-                    # Extremely narrow — split content_budget equally across all cols.
                     base_w = content_budget // n_cols
                     rem = content_budget % n_cols
                     for i, key in enumerate(table.columns.keys()):
@@ -2084,14 +2395,12 @@ class TogglTUI(App):
                     widths = dict(min_widths)
                     remaining -= total_min
 
-                    # Top up fixed cols up to their req_widths (if space allows)
                     for key in fixed_keys:
                         extra = min(req_widths[key] - min_widths[key], remaining)
                         if extra > 0:
                             widths[key] += extra
                             remaining -= extra
 
-                    # Give expandable cols whatever is left
                     if remaining > 0 and expandable_keys:
                         expand_extra = remaining // len(expandable_keys)
                         rem = remaining % len(expandable_keys)
@@ -2102,15 +2411,38 @@ class TogglTUI(App):
                         table.columns[key].width = w
                         table.columns[key].auto_width = False
 
-            # Force DataTable to recompute virtual_size from the new column widths.
-            # Without this flag, _update_dimensions never runs and virtual_size
-            # stays stale (from the initial auto_width layout), causing a phantom
-            # horizontal scrollbar even though columns now fit the visible area.
             table._require_update_dimensions = True
             table.refresh(layout=True)
-            # Reset horizontal scroll — refresh(layout=True) fixes virtual size but
-            # never resets scroll_x. Without this, the table renders from a stale
-            # offset and appears unchanged even though widths are correctly computed.
+            table.scroll_to(x=0, animate=False)
+
+        # ── Spark rail tables (fixed 34-char rail) ─────────────────────────
+        # These are independent of the main content area.  Give the label col
+        # a fixed 4-char width; the Net col gets whatever remains.
+        SPARK_RAIL_W = 34
+        for t_id in ("#spark-weeks-table", "#spark-days-table"):
+            try:
+                table = self.query_one(t_id, DataTable)
+            except Exception:
+                continue
+            if not table.columns:
+                continue
+
+            col_keys = list(table.columns.keys())
+            cell_padding = table.cell_padding
+            # DataTable border = 2 chars; 2*padding per column
+            inner_w = SPARK_RAIL_W - 2
+            total_padding = 2 * cell_padding * len(col_keys)
+            content_budget = max(8, inner_w - total_padding)
+
+            label_w = 6
+            net_w = max(4, content_budget - label_w)
+
+            for i, key in enumerate(col_keys):
+                table.columns[key].width = label_w if i == 0 else net_w
+                table.columns[key].auto_width = False
+
+            table._require_update_dimensions = True
+            table.refresh(layout=True)
             table.scroll_to(x=0, animate=False)
 
 
@@ -2297,7 +2629,7 @@ def print_weekly_dashboard(label):
 
 
 # ──────────────────────────────────────────────
-# SPARKBAR HELPERS
+# SPARKBAR HELPERS (used by CLI print_report)
 # ──────────────────────────────────────────────
 
 def get_week_pos_breakdown(week_str):
@@ -2318,11 +2650,6 @@ def get_week_pos_breakdown(week_str):
     return round(logged, 1)
 
 def get_week_neg_breakdown(week_str):
-    """
-    Returns (tracked_neg_pts, logged_neg_pts) both as positive numbers.
-    tracked = points lost from negative-rate Toggl projects that week.
-    logged  = points lost from manually logged negatives that week.
-    """
     tracked = 0.0
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, "r") as f:
@@ -2351,12 +2678,6 @@ def get_week_neg_breakdown(week_str):
 
 
 def build_blame_bar(tracked, logged, n=BLAME_W):
-    """
-    Returns an n-block bar split proportionally between:
-      RED     = tracked negatives share (negative-rate Toggl projects)
-      MAGENTA = logged negatives share  (manually logged negatives)
-    Returns spaces if no negatives at all.
-    """
     total = tracked + logged
     if total == 0:
         return " " * n
@@ -2366,7 +2687,6 @@ def build_blame_bar(tracked, logged, n=BLAME_W):
 
 
 def time_left_in_week():
-    """Returns human-readable time remaining until end of Saturday."""
     now = datetime.now()
     current_sunday = get_sunday_of_week(date.today())
     end_of_sat = datetime.combine(
@@ -2382,17 +2702,12 @@ def time_left_in_week():
 
 
 # ──────────────────────────────────────────────
-# SPARKBAR (returns list of strings)
+# SPARKBAR (CLI only — TUI uses DataTables above)
 # ──────────────────────────────────────────────
 def build_week_sparkbar_lines(_week_str=None):
-    """
-    Always builds the sparkbar for the CURRENT week regardless of what week
-    the main table is displaying.  Returns a list of strings (ANSI coloured).
-    """
     week_str = get_current_week()
     start_d, _ = get_week_dates(week_str)
 
-    # ── load daily project hours ──
     daily_proj: dict[str, dict[str, float]] = {}
     if os.path.exists(DAILY_CSV_FILE):
         with open(DAILY_CSV_FILE, "r") as f:
@@ -2403,7 +2718,6 @@ def build_week_sparkbar_lines(_week_str=None):
                     row["Project"], 0.0
                 ) + float(row["Hours"])
 
-    # ── load daily negatives ──
     daily_neg_map: dict[str, dict[str, float]] = {}
     if os.path.exists(NEGATIVES_CSV_FILE):
         with open(NEGATIVES_CSV_FILE, "r") as f:
@@ -2431,7 +2745,6 @@ def build_week_sparkbar_lines(_week_str=None):
                 except ValueError:
                     pass
 
-    # ── compute per-day stats ──
     day_data = []
     for i in range(7):
         d = start_d + timedelta(days=i)
@@ -2471,17 +2784,16 @@ def build_week_sparkbar_lines(_week_str=None):
 
     lines: list[str] = []
 
-    # ════════════════════════════════
-    # PAST 4 WEEKS
-    # ════════════════════════════════
-    lines.append(f"{BOLD}{CYAN}PAST 4 WEEKS{RESET}")
-    lines.append("─" * SPARK_W)
+    BOX_W = SPARK_W + 2
+    title_p4w = f" Past 4 Weeks "
+    title_p4w_vis = len(title_p4w)
+    top_border_p4w = "┌" + f"{BOLD}{CYAN}{title_p4w}{RESET}" + "─" * (BOX_W - title_p4w_vis - 2) + "┐"
+    lines.append(top_border_p4w)
 
     current_sunday = get_sunday_of_week(date.today())
 
-    # 1. Gather data to compute max_abs for scaling the weekly bars
     past_weeks_data = []
-    max_abs_pw = 0.1  # Prevent division by zero if all weeks are exactly 0
+    max_abs_pw = 0.1
 
     for i in range(3, 0, -1):
         pw_sunday = current_sunday - timedelta(days=7 * i)
@@ -2510,23 +2822,19 @@ def build_week_sparkbar_lines(_week_str=None):
             }
         )
 
-    # 2. Render rows with rigid central alignment
     SIDE_W = SPARK_PTS_W + 1 + SPARK_BAR_W
-    TOTAL_LEFT_MARGIN = 2  # Global spaces before neg_part in normal rows
+    TOTAL_LEFT_MARGIN = 2
 
     for pwd in past_weeks_data:
         net = pwd["net"]
         label_base = f"{pwd['label']:<3}"
 
-        # Force the bar to be at least 1 char wide if net isn't 0
         bar_len = max(1, round(abs(net) / max_abs_pw * SPARK_BAR_W)) if net != 0 else 0
         bar_str = "█" * bar_len
 
-        # Initialize blame variables so they exist for all branches
         blame_str: str = ""
         blame_vis_len: int = 0
 
-        # Generate blame bar ONLY if there are negatives AND the net score is below zero
         if (pwd["tracked_neg"] + pwd["logged_neg"]) > 0 and net < 0:
             blame_str = build_blame_bar(pwd["tracked_neg"], pwd["logged_neg"])
             blame_vis_len = len(strip_ansi(blame_str))
@@ -2544,7 +2852,7 @@ def build_week_sparkbar_lines(_week_str=None):
             left_side_str = " " * pad_len + f"{RED}{pts_s}{RESET}{spacing}{blame_str}"
             pos_part = " " * SIDE_W
 
-            line = f"{left_side_str} {label_str} {pos_part}"
+            line = f"│{pad_ansi(f'{left_side_str} {label_str} {pos_part}', SPARK_W)}│"
 
         elif net > 0:
             pts_s = f"+{net}"
@@ -2562,10 +2870,9 @@ def build_week_sparkbar_lines(_week_str=None):
                 f"{GREEN}{bar_str}{RESET}{spacing}{GREEN}{pts_s}{RESET}" + " " * pad_len
             )
 
-            line = f"{left_side_str} {label_str} {pos_part}"
+            line = f"│{pad_ansi(f'{left_side_str} {label_str} {pos_part}', SPARK_W)}│"
 
         else:
-            # Zero net
             pts_s = "0.0"
             label_str = label_base
 
@@ -2577,28 +2884,27 @@ def build_week_sparkbar_lines(_week_str=None):
             pad_len = max(0, SIDE_W - content_len)
             pos_part = f"   {DIM}{pts_s}{RESET}" + " " * pad_len
 
-            line = f"{left_side_str} {label_str} {pos_part}"
+            line = f"│{pad_ansi(f'{left_side_str} {label_str} {pos_part}', SPARK_W)}│"
 
         lines.append(line)
 
-    lines.append("─" * SPARK_W)
+    lines.append("└" + "─" * (BOX_W - 2) + "┘")
 
-    # ════════════════════════════════
-    # THIS WEEK header
-    # ════════════════════════════════
     tw_logged_neg = round(sum(dd["logged_neg"] for dd in day_data), 1)
     tw_logged_pos = round(sum(dd["logged_pos"] for dd in day_data), 1)
     
-    neg_l_str = f"{MAGENTA}-{tw_logged_neg}l{RESET}" if tw_logged_neg > 0 else f"{DIM}-0l{RESET}"
-    pos_l_str = f"{GREEN}+{tw_logged_pos}l{RESET}" if tw_logged_pos > 0 else f"{DIM}+0l{RESET}"
-    l_str = f"{pos_l_str} {neg_l_str}"
+    neg_val = int(tw_logged_neg) if tw_logged_neg == int(tw_logged_neg) else tw_logged_neg
+    pos_val = int(tw_logged_pos) if tw_logged_pos == int(tw_logged_pos) else tw_logged_pos
+    neg_l_str = f"{MAGENTA}-{neg_val}l{RESET}" if tw_logged_neg > 0 else f"{DIM}-0l{RESET}"
+    pos_l_str = f"{GREEN}+{pos_val}l{RESET}" if tw_logged_pos > 0 else f"{DIM}+0l{RESET}"
 
-    lines.append(f"{BOLD}THIS WEEK{RESET} {DIM}({week_str}){RESET} {l_str}")
-    lines.append("─" * SPARK_W)
+    tw_num = week_str.split("W")[1]
+    tw_label = f"W{int(tw_num)}"
+    title_tw = f" This Week ({tw_label}) {pos_l_str} {neg_l_str} "
+    title_tw_vis = vlen(title_tw)
+    top_border_tw = "┌" + f"{BOLD}{title_tw}{RESET}" + "─" * max(0, BOX_W - title_tw_vis - 2) + "┐"
+    lines.append(top_border_tw)
 
-    # ════════════════════════════════
-    # Day rows
-    # ════════════════════════════════
     SIDE_W = SPARK_PTS_W + 1 + SPARK_BAR_W
 
     for dd in day_data:
@@ -2611,18 +2917,16 @@ def build_week_sparkbar_lines(_week_str=None):
         else:
             day_str = name
 
-        # Future or empty days: blank axis + optional today marker
         if (dd["future"] or not dd["has_data"]) and net == 0:
             neg_part = " " * SIDE_W
             pos_part = " " * SIDE_W
-            line = f"  {neg_part} {day_str} {pos_part}{today_mark}"
+            line = f"│{pad_ansi(f'  {neg_part} {day_str} {pos_part}{today_mark}', SPARK_W)}│"
             lines.append(line)
             continue
 
         bar_len = max(1, round(abs(net) / max_abs * SPARK_BAR_W)) if net != 0 else 0
         bar_str = "█" * bar_len
 
-        # Generate blame bar ONLY if there are negatives AND the net score is below zero
         has_neg = (dd["tracked_neg"] + dd["logged_neg"]) > 0 and net < 0
         blame_str_d: str = (
             build_blame_bar(dd["tracked_neg"], dd["logged_neg"]) if has_neg else ""
@@ -2655,7 +2959,6 @@ def build_week_sparkbar_lines(_week_str=None):
             )
 
         else:
-            # zero net but has data
             pts_s = "0.0"
             neg_pad = max(0, SIDE_W - blame_vis_len_d)
             neg_part = " " * neg_pad + blame_str_d
@@ -2664,14 +2967,11 @@ def build_week_sparkbar_lines(_week_str=None):
             pad_len = max(0, SIDE_W - content_len)
             pos_part = f"   {DIM}{pts_s}{RESET}" + " " * pad_len
 
-        line = f"  {neg_part} {day_str} {pos_part}{today_mark}"
+        line = f"│{pad_ansi(f'  {neg_part} {day_str} {pos_part}{today_mark}', SPARK_W)}│"
         lines.append(line)
 
-    lines.append("─" * SPARK_W)
+    lines.append("└" + "─" * (BOX_W - 2) + "┘")
 
-    # ════════════════════════════════
-    # CATCHUP
-    # ════════════════════════════════
     all_time_data = get_all_time_data()
     if all_time_data:
         all_results = calculate(all_time_data)
@@ -2698,9 +2998,11 @@ def build_week_sparkbar_lines(_week_str=None):
 
         tl_str = f"{t_hrs}h" if t_hrs > 0 else tl_raw.strip()
 
-        lines.append(
-            f"{YELLOW}CATCHUP{RESET} {RED}{deficit} Pts{RESET} {CYAN}in {tl_str}{RESET}"
-        )
+        deficit_val = int(deficit) if deficit == int(deficit) else deficit
+        title_cu = f" Catch Up {RED}{deficit_val} Pts{RESET} {CYAN}in {tl_str}{RESET} "
+        title_cu_vis = vlen(title_cu)
+        top_border_cu = "┌" + f"{BOLD}{title_cu}{RESET}" + "─" * max(0, BOX_W - title_cu_vis - 2) + "┐"
+        lines.append(top_border_cu)
 
         available_lines = max(1, 23 - len(lines))
         RIGHT_COL_W = SPARK_W
@@ -2721,7 +3023,6 @@ def build_week_sparkbar_lines(_week_str=None):
             m = int((hours_needed - h) * 60)
             h_str = f"{h}h {m:02d}m"
             rate_str = f"×{int(rate) if rate == int(rate) else rate}"
-            # Use TASK_SHORT_NAMES with guaranteed str fallback
             short: list[str] = [TASK_SHORT_NAMES.get(t) or t for t in tasks]
 
             color_ansi = group_colors[i % len(group_colors)]
@@ -2761,7 +3062,8 @@ def build_week_sparkbar_lines(_week_str=None):
                 expanded_lines.append(curr_line_ansi)
 
             if available_lines >= len(expanded_lines) + remaining_rates:
-                lines.extend(expanded_lines)
+                for el in expanded_lines:
+                    lines.append(f"│{pad_ansi(el, SPARK_W)}│")
                 available_lines -= len(expanded_lines)
             else:
                 max_task_len = max(5, RIGHT_COL_W - prefix_vis_len)
@@ -2779,11 +3081,17 @@ def build_week_sparkbar_lines(_week_str=None):
                     task_str = " ".join(short_compressed)
 
                 compact_prefix = f" {DIM}{rate_str:<3}{RESET}{YELLOW}{h_str}{RESET} "
-                lines.append(compact_prefix + f"{color_ansi}{task_str}{RESET}")
+                lines.append(f"│{pad_ansi(compact_prefix + f'{color_ansi}{task_str}{RESET}', SPARK_W)}│")
                 available_lines -= 1
 
+        lines.append("└" + "─" * (BOX_W - 2) + "┘")
+
     else:
-        lines.append(f"{GREEN}ON TRACK{RESET}  {DIM}(+{lifetime_pts} pts){RESET}")
+        title_ot = f" On Track {GREEN}+{lifetime_pts} pts{RESET} "
+        title_ot_vis = vlen(title_ot)
+        top_border_ot = "┌" + f"{BOLD}{title_ot}{RESET}" + "─" * max(0, BOX_W - title_ot_vis - 2) + "┐"
+        lines.append(top_border_ot)
+        lines.append("└" + "─" * (BOX_W - 2) + "┘")
 
     return lines
 
@@ -2849,11 +3157,9 @@ def print_recovery_cli(results, negative_results, positive_results, label, conte
 # MAIN REPORT (with inline sparkbar)
 # ──────────────────────────────────────────────
 def print_report(results, negative_results, positive_results, label, context_type="ALL"):
-    # Weekly day-by-day breakdown prints separately above the merged table
     if context_type == "WEEK":
         print_weekly_dashboard(label)
 
-    # ── compute totals ──
     total_pts = sum(r[3] for r in results if r[3] is not None)
     total_pts += sum(r[3] for r in negative_results)
     total_pts += sum(r[3] for r in positive_results)
@@ -2878,10 +3184,9 @@ def print_report(results, negative_results, positive_results, label, context_typ
         date_range = f"{start_d.strftime('%d %b %Y')} – {end_d.strftime('%d %b %Y')}"
         meta = f"  {DIM}Week: {label} ({date_range})  ·  {total_str} tracked  · Updated {last_updated}{RESET}"
 
-    # ── build table lines ──
     lines: list[str] = []
 
-    sep_len = COL1 + COL2 + COL3 + COL4 + 3  # = 52
+    sep_len = COL1 + COL2 + COL3 + COL4 + 3
 
     lines.append(meta)
 
@@ -2894,7 +3199,6 @@ def print_report(results, negative_results, positive_results, label, context_typ
     neg_rows = [r for r in results if r[3] is not None and r[3] < 0]
     null_rows = [r for r in results if r[3] is None]
 
-    # ── shared row formatter ──
     def _row_str(name, hours, rate, pts, color):
         h_str = f"{hours:.2f}h" if hours is not None else "—"
         r_str = fmt_rate(rate) if rate is not None else "—"
@@ -2906,13 +3210,11 @@ def print_report(results, negative_results, positive_results, label, context_typ
         pad = COL4 + len(p_col) - len(p_str)
         return f"  {name:<{COL1}} {h_str:>{COL2}} {r_str:>{COL3}} {p_col:>{pad}}"
 
-    # POSITIVE
     if pos_rows:
         lines.append(f"  {BOLD}{DIM}POSITIVE{RESET}")
         for r in pos_rows:
             lines.append(_row_str(r[0], r[1], r[2], r[3], GREEN))
 
-    # POSITIVES LOGGED
     if positive_results:
         pos_log_subtotal = round(sum(r[3] for r in positive_results), 1)
         lines.append("")
@@ -2923,7 +3225,6 @@ def print_report(results, negative_results, positive_results, label, context_typ
         for r in positive_results:
             lines.append(_row_str(r[0], r[1], r[2], r[3], GREEN))
 
-    # NEGATIVE  (tracked projects with negative rates)
     if neg_rows:
         neg_subtotal = round(sum(r[3] for r in neg_rows), 1)
         lines.append("")
@@ -2937,7 +3238,6 @@ def print_report(results, negative_results, positive_results, label, context_typ
         for r in neg_rows:
             lines.append(_row_str(r[0], r[1], r[2], r[3], RED))
 
-    # NEGATIVES LOGGED  (manually logged penalties)
     if negative_results:
         neg_log_subtotal = round(sum(r[3] for r in negative_results), 1)
         lines.append("")
@@ -2951,7 +3251,6 @@ def print_report(results, negative_results, positive_results, label, context_typ
         for r in negative_results:
             lines.append(_row_str(r[0], r[1], r[2], r[3], MAGENTA))
 
-    # UNSCORED
     if null_rows:
         lines.append("")
         lines.append(f"  {BOLD}{DIM}UNSCORED{RESET}")
@@ -2969,12 +3268,10 @@ def print_report(results, negative_results, positive_results, label, context_typ
     )
     lines.append("")
 
-    # ── sparkbar: show for ALL, WEEK, and DAY contexts ──
     spark_lines: list[str] = []
     if context_type in ("WEEK", "ALL", "DAY"):
         spark_lines = build_week_sparkbar_lines()
 
-    # ── merge table + sparkbar and print ──
     for i, tline in enumerate(lines):
         si = i - SPARK_START_ROW
         if spark_lines and 0 <= si < len(spark_lines):
@@ -2984,7 +3281,6 @@ def print_report(results, negative_results, positive_results, label, context_typ
         else:
             print(tline)
 
-    # any spark lines that extend below the table
     if spark_lines:
         first_remaining = len(lines) - SPARK_START_ROW
         for si in range(max(first_remaining, 0), len(spark_lines)):
