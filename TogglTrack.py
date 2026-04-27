@@ -1711,7 +1711,9 @@ class TogglTUI(App):
         footer_main.append("u", style="bold #63f3ff")
         footer_main.append(" sync  •  ", style="#8d98a7")
         footer_main.append("s", style="bold #63f3ff")
-        footer_main.append(" sparkbar  •  up/down scroll  •  enter/select  •  q quit", style="#8d98a7")
+        footer_main.append(" sparkbar  •  ", style="#8d98a7")
+        footer_main.append("q", style="bold #63f3ff")
+        footer_main.append(" quit", style="#8d98a7")
 
         self.query_one("#footer-main", Static).update(footer_main)
 
@@ -1969,8 +1971,8 @@ class TogglTUI(App):
                 text.append(f" {task_str}", style=color)
 
             catchup.update(text)
-            catchup.border_title = "[b][#ff5f5f]Catch Up[/][/]"
-            catchup.border_subtitle = f"[#ff5f5f]-{deficit_val} pts[/] [#63f3ff]in {tl_raw}[/]"
+            catchup.border_title = f"[b][#ff5f5f]Catch Up[/][/] [#ff5f5f]{deficit_val} pts[/]"
+            catchup.border_subtitle = f"[#63f3ff]in {tl_raw}[/]"
 
     def refresh_week_view(self):
         week = get_current_week()
@@ -2020,7 +2022,10 @@ class TogglTUI(App):
             for name, _, _, pts in report["negative_results"]:
                 category_table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         summary = dashboard["summary"]
-        table.border_title = f"[b][#63f3ff]Week ({week})[/][/]"
+        week_hours = sum(r["hours"] for r in dashboard["rows"])
+        wh_h = int(week_hours)
+        wh_m = int((week_hours - wh_h) * 60)
+        table.border_title = f"[b][#63f3ff]Week ({week})[/][/]   [#8d98a7]Tracked: {wh_h}hrs {wh_m:02d}min[/]"
         table.border_subtitle = f"[#8d98a7]Week net: {format_signed_rich(summary['actual'])} pts[/]"
         category_table.border_title = "[b][#63f3ff]Category Totals[/][/]"
 
@@ -2045,10 +2050,11 @@ class TogglTUI(App):
             for name, _, _, pts in report["negative_results"]:
                 table.add_row(name, "—", "logged", fmt_pts_rich(pts))
         total_hours = report["total_hours"]
-        table.border_title = "[b][#63f3ff]Overview[/][/]"
+        th_h = int(total_hours)
+        th_m = int((total_hours - th_h) * 60)
+        table.border_title = f"[b][#63f3ff]Overview[/][/]   [#8d98a7]Total Time: {th_h}hrs {th_m:02d}min[/]"
         table.border_subtitle = (
-            f"[#8d98a7]Lifetime total {format_signed_rich(report['total_points'])} pts   "
-            f"{total_hours:.2f}h tracked   This week {format_signed_rich(week_total)}[/]"
+            f"[#8d98a7]Lifetime total {format_signed_rich(report['total_points'])} pts[/]"
         )
 
     def refresh_day_view(self):
@@ -2079,13 +2085,13 @@ class TogglTUI(App):
             table.add_row("[UNSCORED]", "", "", "")
             for name, hours, rate, pts in unscored_rows:
                 table.add_row(name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
-        meta = (
-            f"[#8d98a7]Hours {metrics['total_hours']:.1f}h   Earned {format_signed_rich(metrics['earned'])}   "
-            f"Pos [#37d994]+{metrics['logged_positive']:.1f}[/]   "
+        dh = int(metrics['total_hours'])
+        dm = int((metrics['total_hours'] - dh) * 60)
+        table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]   [#8d98a7]Tracked: {dh}hrs {dm:02d}min[/]"
+        table.border_subtitle = (
+            f"[#8d98a7]Pos [#37d994]+{metrics['logged_positive']:.1f}[/]   "
             f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
         )
-        table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]"
-        table.border_subtitle = meta
 
     def refresh_negatives_view(self):
         catalog = self.query_one("#negatives-catalog-table", DataTable)
