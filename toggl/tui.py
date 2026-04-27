@@ -30,10 +30,36 @@ from toggl.api import (
 from toggl.neg import (
     log_positive_direct, log_negative_direct,
 )
-from toggl.cli import (
-    get_sync_status_data, get_negatives_for_context, get_positives_for_context,
-    get_all_time_data, get_data_for_week, get_week_neg_breakdown, get_week_pos_breakdown,
-)
+def get_sync_status_data():
+    history = _load_history()
+    from toggl.api import get_projects_cache_age_days, API_RUN_STATS
+    return {
+        "last_updated": get_last_updated_str(),
+        "projects_cache_age_days": get_projects_cache_age_days(),
+        "current_week": get_current_week(),
+        "synced_weeks": history.get("synced_weeks", {}),
+        "synced_days": history.get("synced_days", {}),
+        "quota_remaining": API_RUN_STATS["remaining"],
+        "quota_limit": API_RUN_STATS["limit"],
+        "quota_resets_in": API_RUN_STATS["resets_in"],
+    }
+
+def time_left_in_week():
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    sunday = now + timedelta(days=(6 - now.weekday()))
+    end = sunday.replace(hour=23, minute=59, second=59)
+    diff = end - now
+    if diff.total_seconds() < 0:
+        return ""
+    days, sec = diff.days, diff.seconds
+    hr = sec // 3600
+    mn = (sec % 3600) // 60
+    parts = []
+    if days > 0: parts.append(f"{days}d")
+    if hr > 0: parts.append(f"{hr}h")
+    parts.append(f"{mn}m")
+    return " ".join(parts)
 
 
 # ──────────────────────────────────────────────
@@ -512,8 +538,8 @@ class TogglTUI(App):
         self.update_tabs()
         self.update_status_line()
         self.refresh_spark_tables()
-        self.refresh_week_view()
-        self._refresh_view_by_index(self.active_view_index)
+        for idx in self._VIEW_REFRESH_MAP:
+            self._refresh_view_by_index(idx)
         self.update_view_visibility()
         self.update_sparkbar_visibility()
         self._schedule_resize()
@@ -530,7 +556,7 @@ class TogglTUI(App):
 
     def _refresh_view_by_index(self, index):
         method_name = self._VIEW_REFRESH_MAP.get(index)
-        if method_name and method_name != "refresh_week_view":
+        if method_name:
             getattr(self, method_name)()
 
     def _schedule_resize(self):
@@ -738,7 +764,6 @@ class TogglTUI(App):
             catchup.border_title = "[b][#37d994]On Track[/][/]"
         else:
             deficit = abs(lifetime_pts)
-            from toggl.cli import time_left_in_week
             tl_raw = time_left_in_week()
             deficit_val = int(deficit) if deficit == int(deficit) else deficit
 
@@ -1026,6 +1051,7 @@ class TogglTUI(App):
             self.update_tabs()
             self.update_view_visibility()
             self.focus_active_view()
+            self._schedule_resize()
 
     def action_next_view(self):
         self.active_view_index = (self.active_view_index + 1) % len(self.VIEWS)
@@ -1033,6 +1059,7 @@ class TogglTUI(App):
         self.update_tabs()
         self.update_view_visibility()
         self.focus_active_view()
+        self._schedule_resize()
 
     def action_prev_view(self):
         self.active_view_index = (self.active_view_index - 1) % len(self.VIEWS)
@@ -1040,6 +1067,7 @@ class TogglTUI(App):
         self.update_tabs()
         self.update_view_visibility()
         self.focus_active_view()
+        self._schedule_resize()
 
     def action_refresh_data(self):
         load_runtime_settings()
@@ -1242,8 +1270,8 @@ class TogglTUI(App):
                         table.columns[key].width = w
                         table.columns[key].auto_width = False
 
+            table._clear_caches()
             table.refresh(layout=True)
-            table.scroll_to(x=0, animate=False)
 
         # Spark rail tables
         SPARK_RAIL_W = 34
@@ -1270,5 +1298,6 @@ class TogglTUI(App):
                 table.columns[key].width = label_w if i == 0 else net_w
                 table.columns[key].auto_width = False
 
+            table._clear_caches()
             table.refresh(layout=True)
-            table.scroll_to(x=0, animate=False)
+
