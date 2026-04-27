@@ -41,7 +41,8 @@ def get_sunday_of_week(d):
 
 
 def get_week_str(d):
-    return get_sunday_of_week(d).strftime("%Y-W%U")
+    sunday = get_sunday_of_week(d)
+    return f"{sunday.year}-W{int(sunday.strftime('%U')) + 1:02d}"
 
 
 def get_current_week():
@@ -49,7 +50,9 @@ def get_current_week():
 
 
 def get_week_dates(week_str):
-    dt = datetime.strptime(f"{week_str}-0", "%Y-W%U-%w")
+    year, week = week_str.split("-W")
+    u_week = int(week) - 1
+    dt = datetime.strptime(f"{year}-W{u_week:02d}-0", "%Y-W%U-%w")
     start_date = dt.date()
     end_date = start_date + timedelta(days=6)
     return start_date, end_date

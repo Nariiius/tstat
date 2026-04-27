@@ -47,8 +47,9 @@ def get_sync_status_data():
 def time_left_in_week():
     from datetime import datetime, timedelta
     now = datetime.now()
-    sunday = now + timedelta(days=(6 - now.weekday()))
-    end = sunday.replace(hour=23, minute=59, second=59)
+    days_until_saturday = (5 - now.weekday()) % 7
+    saturday = now + timedelta(days=days_until_saturday)
+    end = saturday.replace(hour=23, minute=59, second=59)
     diff = end - now
     if diff.total_seconds() < 0:
         return ""
@@ -79,16 +80,19 @@ def _spark_net_rich(net, max_abs, bar_w=4, dim_zero=False,
     if abs(net) < 0.05:
         return "[dim]0.0[/]"
     bar_len = max(1, round(abs(net) / max_abs * bar_w)) if max_abs > 0 else 1
-    bar = "█" * bar_len
     if net > 0:
+        bar = "█" * bar_len
         return f"[#37d994]{bar} +{net}[/]"
     else:
         blame_total = blame_tracked + blame_logged
         if blame_total > 0 and blame_w > 0:
+            net_bar_len = max(1, bar_len - blame_w)
             red_count = round(blame_tracked / blame_total * blame_w)
             mag_count = blame_w - red_count
+            bar = "█" * net_bar_len
             blame = f"[#ff5f5f]{'█' * red_count}[/][#ff5fff]{'█' * mag_count}[/]"
             return f"[#ff5f5f]{net} {bar}[/]{blame}"
+        bar = "█" * bar_len
         return f"[#ff5f5f]{net} {bar}[/]"
 
 
@@ -153,8 +157,6 @@ class ConfirmScreen(ModalScreen[bool]):
                 yield Static("[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help")
 
     def on_mount(self):
-        self.query_one("#dialog-box").border_title = f"[b][#63f3ff]{self.title}[/][/]"
-        # Override the title set above with the actual title
         self.query_one("#dialog-box").border_title = f"[b][#63f3ff]{self.title}[/][/]"
         self.query_one("#dialog-box").border_subtitle = self.body
 
@@ -492,8 +494,8 @@ class TogglTUI(App):
         self.refresh_all_views()
         if ok:
             self.notify("Auto-refreshed stale data")
-        elif message:
-            self.notify("Auto-refresh skipped", severity="warning")
+        else:
+            self.notify(message or "Auto-refresh failed", severity="warning")
 
     def _setup_tables(self):
         week_table = self.query_one("#week-table", DataTable)
@@ -636,7 +638,7 @@ class TogglTUI(App):
         current_sunday = get_sunday_of_week(date.today())
         weeks_data = []
 
-        for i in range(3, 0, -1):
+        for i in range(4, 0, -1):
             pw_sunday = current_sunday - timedelta(days=7 * i)
             pw = get_week_str(pw_sunday)
             pw_num = pw.split("W")[1]
@@ -663,9 +665,7 @@ class TogglTUI(App):
                                        blame_tracked=tracked, blame_logged=logged)
             table.add_row(label, net_cell, key=wk)
 
-        table.border_title = "[b][#63f3ff]Past 3 Weeks[/][/]"
-        # Fix: border_title was set twice in original, keep the last one
-        table.border_title = "[b][#63f3ff]Past 3 Weeks[/][/]"
+        table.border_title = "[b][#63f3ff]Past 4 Weeks[/][/]"
 
     def _refresh_spark_days(self):
         cache = self._data_cache
@@ -862,8 +862,6 @@ class TogglTUI(App):
     def refresh_overview_view(self):
         cache = self._data_cache
         report = cache.get_report_sections("ALL_TIME", "ALL")
-        current_week = get_current_week()
-        week_total = cache.get_report_sections(current_week, "WEEK")["total_points"]
         table = self.query_one("#overview-table", DataTable)
         table.clear(columns=False)
         rows = []
