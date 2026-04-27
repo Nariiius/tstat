@@ -436,7 +436,6 @@ class TogglTUI(App):
         self.sparkbar_collapsed = False
         self.sparkbar_forced_open = True
         self._table_resize_timer = None
-        self._is_syncing_cursors = False
         self._data_cache: DataCache | None = None
 
     def compose(self) -> ComposeResult:
@@ -727,7 +726,8 @@ class TogglTUI(App):
                 cursor_row = table.row_count - 1
 
         if cursor_row is not None:
-            table.move_cursor(row=cursor_row)
+            with table.prevent(DataTable.RowHighlighted):
+                table.move_cursor(row=cursor_row)
 
         tw_num = week_str.split("W")[1]
         tw_label = f"W{int(tw_num)}"
@@ -831,7 +831,8 @@ class TogglTUI(App):
             default_date = self.selected_day if any(r["date"] == self.selected_day for r in dashboard["rows"]) else dashboard["rows"][0]["date"]
             self.selected_day = default_date
             row_index = next(i for i, row in enumerate(dashboard["rows"]) if row["date"] == default_date)
-            table.move_cursor(row=row_index, column=0)
+            with table.prevent(DataTable.RowHighlighted):
+                table.move_cursor(row=row_index, column=0)
         category_table = self.query_one("#week-category-table", DataTable)
         category_table.clear(columns=False)
         cat_rows = []
@@ -1002,51 +1003,41 @@ class TogglTUI(App):
 
     @on(DataTable.RowHighlighted, "#week-table")
     def update_selected_day(self, event: DataTable.RowHighlighted):
-        if self._is_syncing_cursors:
+        if event.row_key is None:
             return
-        if event.row_key is not None:
-            self.selected_day = str(event.row_key.value)
-            self.refresh_day_view()
-            self._sync_spark_days_cursor()
+        new_day = str(event.row_key.value)
+        if new_day == self.selected_day:
+            return
+        self.selected_day = new_day
+        self.refresh_day_view()
+        self._sync_spark_days_cursor()
 
     @on(DataTable.RowHighlighted, "#spark-days-table")
     def spark_day_highlighted(self, event: DataTable.RowHighlighted):
-        if self._is_syncing_cursors:
+        if event.row_key is None:
             return
-        if event.row_key is not None:
-            self.selected_day = str(event.row_key.value)
-            self.refresh_day_view()
-            self._sync_week_table_cursor()
+        new_day = str(event.row_key.value)
+        if new_day == self.selected_day:
+            return
+        self.selected_day = new_day
+        self.refresh_day_view()
+        self._sync_week_table_cursor()
 
     def _sync_spark_days_cursor(self):
-        self._is_syncing_cursors = True
-        try:
-            table = self.query_one("#spark-days-table", DataTable)
-            for i in range(table.row_count):
-                try:
-                    key = list(table.rows.keys())[i]
-                    if str(key.value) == self.selected_day:
-                        table.move_cursor(row=i, animate=False)
-                        break
-                except (IndexError, AttributeError):
-                    pass
-        finally:
-            self._is_syncing_cursors = False
+        table = self.query_one("#spark-days-table", DataTable)
+        for i, key in enumerate(table.rows.keys()):
+            if str(key.value) == self.selected_day:
+                with table.prevent(DataTable.RowHighlighted):
+                    table.move_cursor(row=i, animate=False)
+                break
 
     def _sync_week_table_cursor(self):
-        self._is_syncing_cursors = True
-        try:
-            table = self.query_one("#week-table", DataTable)
-            try:
-                keys = list(table.rows.keys())
-                for i, key in enumerate(keys):
-                    if str(key.value) == self.selected_day:
-                        table.move_cursor(row=i, animate=False)
-                        break
-            except (IndexError, AttributeError):
-                pass
-        finally:
-            self._is_syncing_cursors = False
+        table = self.query_one("#week-table", DataTable)
+        for i, key in enumerate(table.rows.keys()):
+            if str(key.value) == self.selected_day:
+                with table.prevent(DataTable.RowHighlighted):
+                    table.move_cursor(row=i, animate=False)
+                break
 
     @on(Click, ".view-tab")
     def click_view_tab(self, event: Click):
