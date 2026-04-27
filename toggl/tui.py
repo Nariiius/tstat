@@ -691,15 +691,15 @@ class TogglTUI(App):
             net = round(earned - tracked_neg - neg_cost + pos_bonus, 1)
             has_data = bool(projs or neg_entries or pos_entries)
             logged_neg = round(neg_cost, 1)
-            day_entries.append((d, d_str, net, has_data, tracked_neg, logged_neg))
+            day_entries.append((d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus))
 
         max_abs = max(
-            (abs(net) for _, _, net, has, _, _ in day_entries if has and abs(net) >= 0.05),
+            (abs(net) for _, _, net, has, _, _, _, _ in day_entries if has and abs(net) >= 0.05),
             default=1,
         ) or 1
 
         cursor_row = None
-        for i, (d, d_str, net, has_data, tracked_neg, logged_neg) in enumerate(day_entries):
+        for i, (d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus) in enumerate(day_entries):
             if not has_data and d > date.today():
                 continue
 
@@ -732,10 +732,13 @@ class TogglTUI(App):
         tw_num = week_str.split("W")[1]
         tw_label = f"W{int(tw_num)}"
 
-        tw_logged_neg = round(sum(e["points"] for entries in cache.negatives_raw.values() for e in entries), 1)
-        tw_logged_pos = round(sum(e["points"] for entries in cache.positives_raw.values() for e in entries), 1)
-        neg_s = f"[#ff5f5f]-{int(tw_logged_neg) if tw_logged_neg == int(tw_logged_neg) else tw_logged_neg}l[/]" if tw_logged_neg > 0 else "[dim]-0l[/]"
-        pos_s = f"[#37d994]+{int(tw_logged_pos) if tw_logged_pos == int(tw_logged_pos) else tw_logged_pos}l[/]" if tw_logged_pos > 0 else "[dim]+0l[/]"
+        tw_total_neg = round(sum(dd[4] + dd[5] for dd in day_entries if dd[3]), 1)
+        tw_total_pos = round(sum(dd[6] + dd[7] for dd in day_entries if dd[3]), 1)
+        neg_val = int(tw_total_neg) if tw_total_neg == int(tw_total_neg) else tw_total_neg
+        pos_val = int(tw_total_pos) if tw_total_pos == int(tw_total_pos) else tw_total_pos
+        
+        neg_s = f"[#ff5f5f]-{neg_val}[/]" if tw_total_neg > 0 else "[dim]-0[/]"
+        pos_s = f"[#37d994]+{pos_val}[/]" if tw_total_pos > 0 else "[dim]+0[/]"
 
         table.border_title = f"[b][#63f3ff]This Week ({tw_label})[/][/]"
         table.border_subtitle = f"{pos_s} {neg_s}"
@@ -793,7 +796,7 @@ class TogglTUI(App):
                 text.append(f" {task_str}", style=color)
 
             catchup.update(text)
-            catchup.border_title = f"[b][#ff5f5f]Catch Up[/][/] [#ff5f5f]{deficit_val} pts[/]"
+            catchup.border_title = f"[b][#ff5f5f]Catch Up :[/][/] [#ff5f5f]{deficit_val} pts[/]"
             catchup.border_subtitle = f"[#63f3ff]in {tl_raw}[/]"
 
     # ── View refresh methods ──
@@ -808,7 +811,7 @@ class TogglTUI(App):
         week_rows = []
         for row in dashboard["rows"]:
             neg_text = "—" if row["negative_total"] == 0 else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
-            pos_text = "—" if row["logged_positive"] == 0 else f"[#37d994]+{row['logged_positive']:.1f}[/]"
+            pos_text = "—" if row["positive_total"] == 0 else f"[#37d994]+{row['positive_total']:.1f}[/]"
             hour_text = "—" if row["hours"] == 0 else f"{row['hours']:.1f}h"
             earned_text = "—" if row["hours"] == 0 and row["earned"] == 0 else format_signed_rich(row["earned"])
             week_rows.append((
@@ -920,9 +923,11 @@ class TogglTUI(App):
         dh = int(metrics['total_hours'])
         dm = int((metrics['total_hours'] - dh) * 60)
         table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]   [#8d98a7]Tracked: {dh}hrs {dm:02d}min[/]"
+        total_pos = round(metrics['earned'] + metrics['logged_positive'], 1)
+        total_neg = round(metrics['tracked_negative'] + metrics['logged_negative'], 1)
         table.border_subtitle = (
-            f"[#8d98a7]Pos [#37d994]+{metrics['logged_positive']:.1f}[/]   "
-            f"Negs [#ff5f5f]-{metrics['logged_negative']:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
+            f"[#8d98a7]Pos [#37d994]+{total_pos:.1f}[/]   "
+            f"Negs [#ff5f5f]-{total_neg:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
         )
 
     def refresh_negatives_view(self):
