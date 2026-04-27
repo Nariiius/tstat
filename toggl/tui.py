@@ -670,63 +670,64 @@ class TogglTUI(App):
     def _refresh_spark_days(self):
         cache = self._data_cache
         table = self.query_one("#spark-days-table", DataTable)
-        table.clear(columns=False)
+        
+        with table.prevent(DataTable.RowHighlighted):
+            table.clear(columns=False)
 
-        week_str = get_current_week()
-        start_d, _ = get_week_dates(week_str)
+            week_str = get_current_week()
+            start_d, _ = get_week_dates(week_str)
 
-        day_entries = []
-        for i in range(7):
-            d = start_d + timedelta(days=i)
-            d_str = d.strftime("%Y-%m-%d")
-            projs = cache.daily_data.get(d_str, {})
-            neg_entries = cache.negatives_raw.get(d_str, [])
-            pos_entries = cache.positives_raw.get(d_str, [])
-            neg_cost = sum(e["points"] for e in neg_entries)
-            pos_bonus = sum(e["points"] for e in pos_entries)
-            results = calculate(projs)
-            earned = sum(r[3] for r in results if r[3] is not None and r[3] > 0)
-            tracked_neg = sum(abs(r[3]) for r in results if r[3] is not None and r[3] < 0)
-            net = round(earned - tracked_neg - neg_cost + pos_bonus, 1)
-            has_data = bool(projs or neg_entries or pos_entries)
-            logged_neg = round(neg_cost, 1)
-            day_entries.append((d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus))
+            day_entries = []
+            for i in range(7):
+                d = start_d + timedelta(days=i)
+                d_str = d.strftime("%Y-%m-%d")
+                projs = cache.daily_data.get(d_str, {})
+                neg_entries = cache.negatives_raw.get(d_str, [])
+                pos_entries = cache.positives_raw.get(d_str, [])
+                neg_cost = sum(e["points"] for e in neg_entries)
+                pos_bonus = sum(e["points"] for e in pos_entries)
+                results = calculate(projs)
+                earned = sum(r[3] for r in results if r[3] is not None and r[3] > 0)
+                tracked_neg = sum(abs(r[3]) for r in results if r[3] is not None and r[3] < 0)
+                net = round(earned - tracked_neg - neg_cost + pos_bonus, 1)
+                has_data = bool(projs or neg_entries or pos_entries)
+                logged_neg = round(neg_cost, 1)
+                day_entries.append((d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus))
 
-        max_abs = max(
-            (abs(net) for _, _, net, has, _, _, _, _ in day_entries if has and abs(net) >= 0.05),
-            default=1,
-        ) or 1
+            max_abs = max(
+                (abs(net) for _, _, net, has, _, _, _, _ in day_entries if has and abs(net) >= 0.05),
+                default=1,
+            ) or 1
 
-        cursor_row = None
-        for i, (d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus) in enumerate(day_entries):
-            if not has_data and d > date.today():
-                continue
+            cursor_row = None
+            for i, (d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus) in enumerate(day_entries):
+                if not has_data and d > date.today():
+                    continue
 
-            day_name = d.strftime("%a")
-            is_today = d == date.today()
+                day_name = d.strftime("%a")
+                is_today = d == date.today()
 
-            if is_today:
-                label_cell = f"[bold #e2b714]{day_name} ◀[/]"
-            elif not has_data:
-                label_cell = f"[dim]{day_name}[/]"
-            else:
-                label_cell = day_name
+                if is_today:
+                    label_cell = f"[bold #e2b714]{day_name} ◀[/]"
+                elif not has_data:
+                    label_cell = f"[dim]{day_name}[/]"
+                else:
+                    label_cell = day_name
 
-            net_cell = _spark_net_rich(
-                net if has_data else None,
-                max_abs,
-                dim_zero=(not has_data),
-                blame_tracked=tracked_neg if has_data and net < 0 else 0,
-                blame_logged=logged_neg if has_data and net < 0 else 0,
-            )
+                net_cell = _spark_net_rich(
+                    net if has_data else None,
+                    max_abs,
+                    dim_zero=(not has_data),
+                    blame_tracked=tracked_neg if has_data and net < 0 else 0,
+                    blame_logged=logged_neg if has_data and net < 0 else 0,
+                )
 
-            table.add_row(label_cell, net_cell, key=d_str)
+                table.add_row(label_cell, net_cell, key=d_str)
 
-            if d_str == self.selected_day:
-                cursor_row = table.row_count - 1
+                if d_str == self.selected_day:
+                    cursor_row = table.row_count - 1
 
-        if cursor_row is not None:
-            with table.prevent(DataTable.RowHighlighted):
+            if cursor_row is not None:
                 table.move_cursor(row=cursor_row)
 
         tw_num = week_str.split("W")[1]
@@ -807,31 +808,40 @@ class TogglTUI(App):
         dashboard = cache.get_week_dashboard_rows(week)
         report = cache.get_report_sections(week, "WEEK")
         table = self.query_one("#week-table", DataTable)
-        table.clear(columns=False)
-        week_rows = []
-        for row in dashboard["rows"]:
-            neg_text = "—" if row["negative_total"] == 0 else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
-            pos_text = "—" if row["positive_total"] == 0 else f"[#37d994]+{row['positive_total']:.1f}[/]"
-            hour_text = "—" if row["hours"] == 0 else f"{row['hours']:.1f}h"
-            earned_text = "—" if row["hours"] == 0 and row["earned"] == 0 else format_signed_rich(row["earned"])
-            week_rows.append((
-                row["day"],
-                row["date_short"],
-                hour_text,
-                earned_text,
-                pos_text,
-                neg_text,
-                format_signed_rich(row["net"]),
-                row["date"],
-            ))
-        for cells in week_rows:
-            key = cells[7]
-            table.add_row(*cells[:7], key=key)
-        if dashboard["rows"]:
-            default_date = self.selected_day if any(r["date"] == self.selected_day for r in dashboard["rows"]) else dashboard["rows"][0]["date"]
-            self.selected_day = default_date
-            row_index = next(i for i, row in enumerate(dashboard["rows"]) if row["date"] == default_date)
-            with table.prevent(DataTable.RowHighlighted):
+        
+        with table.prevent(DataTable.RowHighlighted):
+            table.clear(columns=False)
+            week_rows = []
+            for row in dashboard["rows"]:
+                neg_text = "—" if row["negative_total"] == 0 else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
+                pos_text = "—" if row["positive_total"] == 0 else f"[#37d994]+{row['positive_total']:.1f}[/]"
+                hour_text = "—" if row["hours"] == 0 else f"{row['hours']:.1f}h"
+                earned_text = "—" if row["hours"] == 0 and row["earned"] == 0 else format_signed_rich(row["earned"])
+                week_rows.append((
+                    row["day"],
+                    row["date_short"],
+                    hour_text,
+                    earned_text,
+                    pos_text,
+                    neg_text,
+                    format_signed_rich(row["net"]),
+                    row["date"],
+                ))
+            for cells in week_rows:
+                key = cells[7]
+                table.add_row(*cells[:7], key=key)
+            
+            if dashboard["rows"]:
+                today_str = date.today().strftime("%Y-%m-%d")
+                row_dates = [r["date"] for r in dashboard["rows"]]
+                if self.selected_day in row_dates:
+                    default_date = self.selected_day
+                elif today_str in row_dates:
+                    default_date = today_str
+                else:
+                    default_date = dashboard["rows"][0]["date"]
+                self.selected_day = default_date
+                row_index = next(i for i, row in enumerate(dashboard["rows"]) if row["date"] == default_date)
                 table.move_cursor(row=row_index, column=0)
         category_table = self.query_one("#week-category-table", DataTable)
         category_table.clear(columns=False)

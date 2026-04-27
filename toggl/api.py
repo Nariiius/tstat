@@ -277,8 +277,8 @@ def get_projects_map(token, use_cache=False):
         with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)
             return {int(k): v for k, v in raw.items()}
-    projects_data = toggl_request("me/projects", token)
-    result = {p["id"]: p["name"] for p in projects_data if p.get("active")}
+    projects_data = toggl_request("me/projects?active=both", token)
+    result = {p["id"]: p["name"] for p in projects_data}
     with open(PROJECTS_FILE, "w", encoding="utf-8") as f:
         json.dump({str(k): v for k, v in result.items()}, f, indent=2)
     return result

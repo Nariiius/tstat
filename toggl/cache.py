@@ -430,29 +430,34 @@ def get_cache():
     """Lazy-initialised DataCache singleton for CLI paths."""
     global _cache
     if _cache is None:
-        _cache = DataCache()
-        _cache.load()
+        _cache = DataCache.load()
     return _cache
 
 
 def reset_cache():
     """Force cache reload after sync."""
     global _cache
-    if _cache is not None:
-        _cache.load()
+    _cache = DataCache.load()
 
 
 # ──────────────────────────────────────────────
 # SYNC LOGIC
 # ──────────────────────────────────────────────
-def _write_daily_csv(day_str, daily_data):
+def _patch_daily_csv(week_str, daily_data):
+    start_d, end_d = get_week_dates(week_str)
+    week_dates = set((start_d + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7))
+
     existing = []
     if os.path.exists(DAILY_CSV_FILE):
         with open(DAILY_CSV_FILE, "r", encoding="utf-8") as f:
-            existing = [row for row in csv.DictReader(f) if row["Date"] != day_str]
-    for proj, hours in daily_data.items():
-        if hours > 0:
-            existing.append({"Date": day_str, "Project": proj, "Hours": round(hours, 4)})
+            existing = [row for row in csv.DictReader(f) if row["Date"] not in week_dates]
+
+    for day_str, projs in daily_data.items():
+        if day_str in week_dates:
+            for proj, hours in projs.items():
+                if hours > 0:
+                    existing.append({"Date": day_str, "Project": proj, "Hours": round(hours, 4)})
+
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=["Date", "Project", "Hours"])
     writer.writeheader()
@@ -494,7 +499,16 @@ def fetch_week_data(week_str, token, projects_map):
             continue
         hrs = dur / 3600.0
         weekly_data[proj_name] = weekly_data.get(proj_name, 0.0) + hrs
-        day_str = entry.get("start", "")[:10]
+        start_raw = entry.get("start", "")
+        if start_raw:
+            dt = parse_iso(start_raw)
+            if dt is not None:
+                day_str = dt.astimezone().strftime("%Y-%m-%d")
+            else:
+                day_str = start_raw[:10]
+        else:
+            day_str = ""
+
         if day_str:
             if day_str not in daily_data:
                 daily_data[day_str] = {}
@@ -509,7 +523,7 @@ def sync_api_to_csv(weeks_back=4, prompt_on_warning=True):
         raise ValueError("--update-all expects a positive number of weeks")
     token = get_api_token()
     _reset_api_stats()
-    estimated = weeks_back * 7 + 2
+    estimated = weeks_back + 2
     if not _confirm_sync_quota(token, estimated, "full sync", prompt_on_warning):
         return {"success": False, "message": "Sync cancelled (low quota)"}
     projects_map = get_projects_map(token)
@@ -518,9 +532,11 @@ def sync_api_to_csv(weeks_back=4, prompt_on_warning=True):
         week_str = get_week_str(sunday)
         weekly_data, daily_data = fetch_week_data(week_str, token, projects_map)
         _patch_weekly_csv(week_str, weekly_data)
-        for d_str, d_projs in daily_data.items():
-            _write_daily_csv(d_str, d_projs)
-    _save_history({"last_updated": datetime.now().isoformat(), "synced_weeks": {}})
+        _patch_daily_csv(week_str, daily_data)
+    
+    history = _load_history()
+    history["last_updated"] = datetime.now().isoformat()
+    _save_history(history)
     return {"success": True, "message": f"Successfully synced {weeks_back} week(s)"}
 
 
@@ -529,7 +545,7 @@ def sync_current_week_light(auto_refresh=False, prompt_on_warning=True):
     token = get_api_token()
     refresh_projects = is_projects_cache_stale()
     _reset_api_stats()
-    estimated = 9 if refresh_projects else 8
+    estimated = 3 if refresh_projects else 2
     label = "auto-refresh" if auto_refresh else "weekly sync"
     if not _confirm_sync_quota(token, estimated, label, prompt_on_warning):
         return {"success": False, "message": "Sync cancelled (low quota)"}
@@ -537,7 +553,9 @@ def sync_current_week_light(auto_refresh=False, prompt_on_warning=True):
     week_str = get_current_week()
     weekly_data, daily_data = fetch_week_data(week_str, token, projects_map)
     _patch_weekly_csv(week_str, weekly_data)
-    for d_str, d_projs in daily_data.items():
-        _write_daily_csv(d_str, d_projs)
-    _save_history({"last_updated": datetime.now().isoformat(), "synced_weeks": {}})
+    _patch_daily_csv(week_str, daily_data)
+    
+    history = _load_history()
+    history["last_updated"] = datetime.now().isoformat()
+    _save_history(history)
     return {"success": True, "message": "Synced current week"}
