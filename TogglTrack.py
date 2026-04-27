@@ -1504,7 +1504,7 @@ class TogglTUI(App):
         self.active_view_index = 1
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
-        self.sparkbar_forced_open = False
+        self.sparkbar_forced_open = True   # open by default; `s` can toggle it closed
         self._resize_timer = None
 
     def compose(self) -> ComposeResult:
@@ -1595,6 +1595,12 @@ class TogglTUI(App):
         self.update_view_visibility()
         self.update_sparkbar_visibility()
         self._schedule_resize()
+
+    def _schedule_resize(self):
+        """Debounced resize: cancels any pending resize before scheduling a new one."""
+        if self._resize_timer is not None:
+            self._resize_timer.stop()
+        self._resize_timer = self.set_timer(0.1, self._resize_tables)
 
     def update_tabs(self):
         for index, view in enumerate(self.VIEWS):
@@ -1892,6 +1898,9 @@ class TogglTUI(App):
             self.sparkbar_collapsed = not self.sparkbar_collapsed
             self.sparkbar_forced_open = False
         self.update_sparkbar_visibility()
+        # Reflow columns — sparkbar appearing/disappearing changes #content width.
+        # Without this call, column widths stay frozen at the pre-toggle dimensions.
+        self._schedule_resize()
 
     def action_show_help(self):
         self.notify("Left/right switch views, n add negative, u sync, U full sync, s toggle sparkbar, q quit")
@@ -1948,34 +1957,18 @@ class TogglTUI(App):
 
         self.push_screen(PositiveInputScreen(), after_input)
 
-    def on_resize(self):
+    def watch_size(self, size) -> None:
+        """Fires whenever the terminal dimensions change.
+        Replaces on_resize: Textual's Resize event has bubble=False so it is
+        dispatched to the Screen, not the App — on_resize on App is unreliable.
+        watch_size is a reactive watcher on App.size and always fires correctly."""
+        if size.width == 0 or size.height == 0:
+            return
         self.update_sparkbar_visibility()
         self._schedule_resize()
 
-    def _schedule_resize(self):
-        if self._resize_timer is not None:
-            self._resize_timer.stop()
-        self._resize_timer = self.set_timer(0.05, self._resize_tables)
-
     def _resize_tables(self):
         from rich.text import Text
-        
-        if self.size.width <= 0:
-            return
-            
-        content_node = self.query_one("#content")
-        content_w = content_node.size.width
-        
-        expected_width = content_w - 2 # -2 for DataTable border
-        if expected_width <= 0:
-            rail = self.query_one("#spark-rail")
-            rail_w = 34 if not rail.has_class("-hidden") else 0  # 32 + 2 border
-            expected_width = self.size.width - rail_w - 2  # -2 for DataTable border only
-            
-        if expected_width <= 0:
-            return
-
-        available_width = max(10, expected_width)
 
         table_ids = [
             "#week-table", "#week-category-table", "#overview-table",
@@ -1984,80 +1977,110 @@ class TogglTUI(App):
             "#sync-table"
         ]
         text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
-        
+
+        # Compute available width once — #content is always visible regardless of active view.
+        content_w = self.query_one("#content").size.width
+        if content_w <= 0:
+            # Layout hasn't settled yet (can happen during early mount).
+            # Use terminal size minus the spark rail (32 declared + 2 border) when visible.
+            rail = self.query_one("#spark-rail")
+            rail_w = 34 if not rail.has_class("-hidden") else 0
+            content_w = self.size.width - rail_w
+        if content_w <= 0:
+            # Terminal size also unknown — bail and wait for the next resize event.
+            return
+
+        # -2 for the DataTable's own left+right border.
+        available_width = max(10, content_w - 2)
+
         for t_id in table_ids:
             try:
                 table = self.query_one(t_id, DataTable)
             except Exception:
                 continue
-                
+
             if not table.columns:
                 continue
-            
-            req_widths = {}
+
             col_keys = list(table.columns.keys())
-            
-            for key, col in table.columns.items():
-                req_widths[key] = len(col.label.plain) + 3
-                
+            n_cols = len(col_keys)
+            cell_padding = table.cell_padding  # default 1; get_render_width adds 2*cell_padding per col
+
+            # req_widths stores PURE CONTENT widths (no padding).
+            # column.width must be pure content — get_render_width() adds 2*cell_padding on top.
+            # If we put padding into column.width it gets double-counted and columns overflow.
+            req_widths = {key: len(col.label.plain) for key, col in table.columns.items()}
+
             for row_idx in range(table.row_count):
                 row_data = table.get_row_at(row_idx)
                 for col_idx, col_key in enumerate(col_keys):
                     val = str(row_data[col_idx])
                     try:
-                        cell_w = Text.from_markup(val).cell_len + 2
+                        cell_w = Text.from_markup(val).cell_len
                     except Exception:
-                        cell_w = len(strip_ansi(val)) + 2
+                        cell_w = len(strip_ansi(val))
                     if cell_w > req_widths[col_key]:
                         req_widths[col_key] = cell_w
-                        
-            total_req_width = sum(req_widths.values())
-            
+
+            # Total space consumed by padding across all columns (added automatically by get_render_width).
+            total_padding = 2 * cell_padding * n_cols
+            # Space available for pure column content after accounting for padding.
+            content_budget = available_width - total_padding
+            # Total pure content width required to fit every cell without clipping.
+            total_req_content = sum(req_widths.values())
+
             expandable_keys = []
             fixed_keys = []
             for key, col in table.columns.items():
-                # Allow partial matches for Category since labels might get truncated if we did earlier
                 label_str = col.label.plain
                 if label_str in text_cols or label_str.startswith("Cat"):
                     expandable_keys.append(key)
                 else:
                     fixed_keys.append(key)
-                    
+
             if not expandable_keys:
                 expandable_keys = list(table.columns.keys())
                 fixed_keys = []
-                
-            if available_width >= total_req_width:
-                extra = available_width - total_req_width
+
+            if content_budget >= total_req_content:
+                # Enough room — give everyone their minimum, expand text cols with leftover.
+                extra = content_budget - total_req_content
                 for key in fixed_keys:
                     table.columns[key].width = req_widths[key]
                     table.columns[key].auto_width = False
-                    
                 expand_extra = extra // len(expandable_keys)
                 rem = extra % len(expandable_keys)
                 for i, key in enumerate(expandable_keys):
                     table.columns[key].width = req_widths[key] + expand_extra + (1 if i < rem else 0)
                     table.columns[key].auto_width = False
             else:
-                fixed_req = sum(req_widths[k] for k in fixed_keys)
-                if available_width > fixed_req and expandable_keys:
+                # Not enough room — give fixed cols their minimum, squeeze text cols.
+                fixed_content_req = sum(req_widths[k] for k in fixed_keys)
+                expandable_budget = content_budget - fixed_content_req
+                if expandable_budget > 0 and expandable_keys:
                     for key in fixed_keys:
                         table.columns[key].width = req_widths[key]
                         table.columns[key].auto_width = False
-                    rem_width = available_width - fixed_req
-                    base_w = rem_width // len(expandable_keys)
-                    rem = rem_width % len(expandable_keys)
+                    base_w = expandable_budget // len(expandable_keys)
+                    rem = expandable_budget % len(expandable_keys)
                     for i, key in enumerate(expandable_keys):
                         table.columns[key].width = max(1, base_w + (1 if i < rem else 0))
                         table.columns[key].auto_width = False
                 else:
+                    # Extremely narrow — split content_budget equally across all cols.
+                    base_w = content_budget // n_cols
+                    rem = content_budget % n_cols
                     for i, key in enumerate(table.columns.keys()):
-                        base_w = available_width // len(table.columns)
-                        rem = available_width % len(table.columns)
                         table.columns[key].width = max(1, base_w + (1 if i < rem else 0))
                         table.columns[key].auto_width = False
-                        
+
+            # layout=True forces DataTable to recompute its virtual size (scroll bounds)
+            # from the new column widths — without this the repaint uses stale dimensions.
             table.refresh(layout=True)
+            # Reset horizontal scroll — refresh(layout=True) fixes virtual size but
+            # never resets scroll_x. Without this, the table renders from a stale
+            # offset and appears unchanged even though widths are correctly computed.
+            table.scroll_to(x=0, animate=False)
 
 
 def fmt_rate(rate):
