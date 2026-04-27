@@ -8,7 +8,7 @@ from toggl.const import (
     GREEN, RED, YELLOW, CYAN, MAGENTA, BLUE, BOLD, DIM, RESET,
     TABLE_W, SPARK_W, BLAME_W, SPARK_BAR_W, SPARK_PTS_W,
 )
-from toggl.config import POINTS, NEGATIVES, POSITIVES, DAILY_TARGET
+from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target
 from toggl.cache import (
     DataCache, get_cache, reset_cache,
     get_current_week, get_week_dates, get_sunday_of_week, get_week_str,
@@ -158,8 +158,8 @@ def print_weekly_dashboard(label):
             e_str = "—"
         p_str = f"+{pos_bonus:.1f}" if pos_bonus > 0 else "—"
         n_str = f"-{neg_cost:.1f}" if neg_cost > 0 else "—"
-        g_str = f"{DAILY_TARGET:.0f}"
-        delta = net - DAILY_TARGET
+        g_str = f"{get_daily_target():.0f}"
+        delta = net - get_daily_target()
         d_str_fmt = format_signed(delta)
         net_str = format_signed(net)
         if d <= cutoff:
@@ -169,7 +169,7 @@ def print_weekly_dashboard(label):
             f"  {day_name:<10} {date_short:<8} {h_str:>8} {e_str:>9} {p_str:>8} {n_str:>8} {g_str:>8} {d_str_fmt:>8} {net_str:>8}"
         )
     print("  " + "─" * table_width)
-    expected = round(DAILY_TARGET * cumulative_days, 1)
+    expected = round(get_daily_target() * cumulative_days, 1)
     actual = round(cumulative_net, 1)
     delta = round(actual - expected, 1)
     print(

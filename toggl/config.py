@@ -74,7 +74,13 @@ DAILY_TARGET = DEFAULT_DAILY_TARGET
 def load_runtime_settings():
     global POINTS, NEGATIVES, POSITIVES, DAILY_TARGET
     cfg = Config.load()
-    POINTS = cfg.points
-    NEGATIVES = cfg.negatives
-    POSITIVES = cfg.positives
+    POINTS.clear()
+    POINTS.update(cfg.points)
+    NEGATIVES.clear()
+    NEGATIVES.update(cfg.negatives)
+    POSITIVES.clear()
+    POSITIVES.update(cfg.positives)
     DAILY_TARGET = cfg.daily_target
+
+def get_daily_target():
+    return DAILY_TARGET

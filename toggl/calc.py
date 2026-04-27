@@ -1,6 +1,6 @@
 """Calculation engine and format helpers."""
 
-from toggl.config import POINTS, NEGATIVES, POSITIVES, DAILY_TARGET
+from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target
 
 
 def calculate(projects):

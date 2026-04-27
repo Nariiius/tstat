@@ -14,7 +14,7 @@ from textual.worker import Worker, get_current_worker
 from textual._work_decorator import work
 
 from toggl.const import TASK_SHORT_NAMES, SPARK_W, BLAME_W, strip_ansi
-from toggl.config import POINTS, NEGATIVES, POSITIVES, DAILY_TARGET, load_runtime_settings
+from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target, load_runtime_settings
 from toggl.cache import (
     DataCache, get_cache, reset_cache,
     get_current_week, get_week_dates, get_sunday_of_week, get_week_str,

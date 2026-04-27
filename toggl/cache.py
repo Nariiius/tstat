@@ -9,7 +9,7 @@ from toggl.const import (
     CSV_FILE, DAILY_CSV_FILE, NEGATIVES_CSV_FILE, POSITIVES_CSV_FILE,
     HISTORY_FILE,
 )
-from toggl.config import POINTS, NEGATIVES, POSITIVES, DAILY_TARGET
+from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target
 from toggl.calc import calculate
 
 
@@ -328,7 +328,7 @@ class DataCache:
             "logged_positive": logged_pos,
             "total_hours": total_hours,
             "net": net,
-            "delta": round(net - DAILY_TARGET, 1),
+            "delta": round(net - get_daily_target(), 1),
         }
 
     def get_week_dashboard_rows(self, label):
@@ -358,13 +358,13 @@ class DataCache:
                 "positive_total": round(metrics["earned"] + metrics["logged_positive"], 1),
                 "logged_negative": metrics["logged_negative"],
                 "negative_total": round(metrics["tracked_negative"] + metrics["logged_negative"], 1),
-                "goal": DAILY_TARGET,
+                "goal": get_daily_target(),
                 "delta": metrics["delta"],
                 "net": metrics["net"],
                 "has_activity": has_activity,
                 "is_today": d == date.today(),
             })
-        expected = round(DAILY_TARGET * cumulative_days, 1)
+        expected = round(get_daily_target() * cumulative_days, 1)
         return {
             "rows": rows,
             "summary": {
