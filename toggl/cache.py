@@ -477,10 +477,10 @@ def fetch_week_data(week_str, token, projects_map):
     start_d, end_d = get_week_dates(week_str)
     start_iso = get_iso_format(start_d, is_end=False)
     end_iso = get_iso_format(end_d, is_end=True)
-    endpoint = f"time_entries?start_date={start_iso}&end_date={end_iso}"
+    endpoint = f"me/time_entries?start_date={start_iso}&end_date={end_iso}"
     entries = toggl_request(endpoint, token)
     weekly_data: dict[str, float] = {}
-    daily_data: dict[str, float] = {}
+    daily_data: dict[str, dict[str, float]] = {}
     for entry in entries:
         pid = entry.get("pid")
         if pid is None or pid not in projects_map:
@@ -493,7 +493,9 @@ def fetch_week_data(week_str, token, projects_map):
         weekly_data[proj_name] = weekly_data.get(proj_name, 0.0) + hrs
         day_str = entry.get("start", "")[:10]
         if day_str:
-            daily_data[proj_name] = daily_data.get(proj_name, 0.0) + hrs
+            if day_str not in daily_data:
+                daily_data[day_str] = {}
+            daily_data[day_str][proj_name] = daily_data[day_str].get(proj_name, 0.0) + hrs
     return weekly_data, daily_data
 
 

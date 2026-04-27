@@ -1176,14 +1176,11 @@ class TogglTUI(App):
         ]
         text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
 
-        rail = self.query_one("#spark-rail")
-        rail_w = 34 if not rail.has_class("-hidden") else 0
-        content_w = self.size.width - rail_w
+        content_container = self.query_one("#content")
+        available_width = max(10, content_container.size.width)
 
-        if content_w <= 0:
+        if available_width <= 10:
             return
-
-        available_width = max(10, content_w - 2)
 
         for t_id in table_ids:
             try:
@@ -1215,60 +1212,14 @@ class TogglTUI(App):
             content_budget = available_width - total_padding
             total_req_content = sum(req_widths.values())
 
-            expandable_keys = []
-            fixed_keys = []
-            for key, col in table.columns.items():
-                label_str = col.label.plain
-                if label_str in text_cols or label_str.startswith("Cat"):
-                    expandable_keys.append(key)
-                else:
-                    fixed_keys.append(key)
-
-            if not expandable_keys:
-                expandable_keys = list(table.columns.keys())
-                fixed_keys = []
-
-            if content_budget >= total_req_content:
-                extra = content_budget - total_req_content
-                for key in fixed_keys:
-                    table.columns[key].width = req_widths[key]
-                    table.columns[key].auto_width = False
-                expand_extra = extra // len(expandable_keys)
-                rem = extra % len(expandable_keys)
-                for i, key in enumerate(expandable_keys):
-                    table.columns[key].width = req_widths[key] + expand_extra + (1 if i < rem else 0)
-                    table.columns[key].auto_width = False
-            else:
-                min_widths = {key: max(3, len(col.label.plain))
-                              for key, col in table.columns.items()}
-                total_min = sum(min_widths.values())
-
-                if content_budget <= total_min:
-                    base_w = content_budget // n_cols
-                    rem = content_budget % n_cols
-                    for i, key in enumerate(table.columns.keys()):
-                        table.columns[key].width = max(1, base_w + (1 if i < rem else 0))
-                        table.columns[key].auto_width = False
-                else:
-                    remaining = content_budget
-                    widths = dict(min_widths)
-                    remaining -= total_min
-
-                    for key in fixed_keys:
-                        extra = min(req_widths[key] - min_widths[key], remaining)
-                        if extra > 0:
-                            widths[key] += extra
-                            remaining -= extra
-
-                    if remaining > 0 and expandable_keys:
-                        expand_extra = remaining // len(expandable_keys)
-                        rem = remaining % len(expandable_keys)
-                        for i, key in enumerate(expandable_keys):
-                            widths[key] += expand_extra + (1 if i < rem else 0)
-
-                    for key, w in widths.items():
-                        table.columns[key].width = w
-                        table.columns[key].auto_width = False
+            # User Steering: Expand ALL columns to fix maximum space instead of pushing to the right.
+            total_req = sum(req_widths.values())
+            extra = max(0, content_budget - total_req)
+            per_col, rem = divmod(extra, n_cols)
+            for i, key in enumerate(col_keys):
+                w = req_widths[key] + per_col + (1 if i < rem else 0)
+                table.columns[key].width = w
+                table.columns[key].auto_width = False
 
             table._clear_caches()
             table.refresh(layout=True)
