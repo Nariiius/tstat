@@ -1,7 +1,0 @@
-on_resize App called
-on_resize App called
-_resize_tables called, app size: Size(width=80, height=24), content size: Size(width=80, height=18)
-col width: 8
-on_resize App called
-_resize_tables called, app size: Size(width=100, height=24), content size: Size(width=80, height=18)
-col width: 8
