@@ -21,6 +21,8 @@ def log_positive_direct(pos_name):
     if os.path.exists(POSITIVES_CSV_FILE):
         with open(POSITIVES_CSV_FILE, "r", newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
+                if "Bonus" in row and "Positive" not in row:
+                    row = {"Date": row["Date"], "Positive": row["Bonus"], "Points": row["Points"]}
                 rows.append(row)
     rows.append({
         "Date": date.today().strftime("%Y-%m-%d"),
@@ -42,9 +44,12 @@ def log_negative_direct(neg_name):
     if not canonical:
         return False, f"Negative '{neg_name}' not found"
     rows = []
+# NEW
     if os.path.exists(NEGATIVES_CSV_FILE):
         with open(NEGATIVES_CSV_FILE, "r", newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
+                if "Penalty" in row and "Negative" not in row:
+                    row = {"Date": row["Date"], "Negative": row["Penalty"], "Points": row["Points"]}
                 rows.append(row)
     rows.append({
         "Date": date.today().strftime("%Y-%m-%d"),
