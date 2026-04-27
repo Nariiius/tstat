@@ -1978,16 +1978,14 @@ class TogglTUI(App):
         ]
         text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
 
-        # Compute available width once — #content is always visible regardless of active view.
-        content_w = self.query_one("#content").size.width
+        # Always compute width from App size rather than #content.size
+        # to avoid race conditions with Textual's async layout pass.
+        rail = self.query_one("#spark-rail")
+        rail_w = 34 if not rail.has_class("-hidden") else 0
+        content_w = self.size.width - rail_w
+
         if content_w <= 0:
-            # Layout hasn't settled yet (can happen during early mount).
-            # Use terminal size minus the spark rail (32 declared + 2 border) when visible.
-            rail = self.query_one("#spark-rail")
-            rail_w = 34 if not rail.has_class("-hidden") else 0
-            content_w = self.size.width - rail_w
-        if content_w <= 0:
-            # Terminal size also unknown — bail and wait for the next resize event.
+            # Terminal size unknown — bail and wait for the next resize event.
             return
 
         # -2 for the DataTable's own left+right border.
