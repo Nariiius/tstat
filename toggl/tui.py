@@ -1,38 +1,66 @@
 """TogglTUI — Textual terminal UI for TogglTrack."""
 
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 
 from rich.text import Text
 from textual import on
+from textual._work_decorator import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import Click
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Label, Static, OptionList
+from textual.widgets import DataTable, Input, Label, OptionList, Static
 from textual.worker import Worker, get_current_worker
-from textual._work_decorator import work
 
-from toggl.const import TASK_SHORT_NAMES, SPARK_W, BLAME_W, strip_ansi
-from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target, load_runtime_settings
-from toggl.cache import (
-    DataCache, get_cache, reset_cache,
-    get_current_week, get_week_dates, get_sunday_of_week, get_week_str,
-    needs_auto_update, get_last_updated_str, _load_history,
-    sync_current_week_light, sync_api_to_csv,
-)
-from toggl.calc import calculate, format_signed, get_negative_catalog_rows, get_positive_catalog_rows
 from toggl.api import (
-    API_RUN_STATS, _reset_api_stats, _print_api_usage_summary, _format_reset_window,
-    get_api_token, check_quota,
-    TogglRateLimitError, TogglAPIError,
+    API_RUN_STATS,
+    TogglAPIError,
+    TogglRateLimitError,
+    _format_reset_window,
+    _print_api_usage_summary,
+    _reset_api_stats,
+    check_quota,
+    get_api_token,
 )
+from toggl.cache import (
+    DataCache,
+    _load_history,
+    get_cache,
+    get_current_week,
+    get_last_updated_str,
+    get_sunday_of_week,
+    get_week_dates,
+    get_week_str,
+    needs_auto_update,
+    reset_cache,
+    sync_api_to_csv,
+    sync_current_week_light,
+)
+from toggl.calc import (
+    calculate,
+    format_signed,
+    get_negative_catalog_rows,
+    get_positive_catalog_rows,
+)
+from toggl.config import (
+    NEGATIVES,
+    POINTS,
+    POSITIVES,
+    get_daily_target,
+    load_runtime_settings,
+)
+from toggl.const import BLAME_W, SPARK_W, TASK_SHORT_NAMES, strip_ansi
 from toggl.neg import (
-    log_positive_direct, log_negative_direct,
+    log_negative_direct,
+    log_positive_direct,
 )
+
+
 def get_sync_status_data():
     history = _load_history()
-    from toggl.api import get_projects_cache_age_days, API_RUN_STATS
+    from toggl.api import API_RUN_STATS, get_projects_cache_age_days
+
     return {
         "last_updated": get_last_updated_str(),
         "projects_cache_age_days": get_projects_cache_age_days(),
@@ -44,8 +72,10 @@ def get_sync_status_data():
         "quota_resets_in": API_RUN_STATS["resets_in"],
     }
 
+
 def time_left_in_week():
     from datetime import datetime, timedelta
+
     now = datetime.now()
     days_until_saturday = (5 - now.weekday()) % 7
     saturday = now + timedelta(days=days_until_saturday)
@@ -57,8 +87,10 @@ def time_left_in_week():
     hr = sec // 3600
     mn = (sec % 3600) // 60
     parts = []
-    if days > 0: parts.append(f"{days}d")
-    if hr > 0: parts.append(f"{hr}h")
+    if days > 0:
+        parts.append(f"{days}d")
+    if hr > 0:
+        parts.append(f"{hr}h")
     parts.append(f"{mn}m")
     return " ".join(parts)
 
@@ -67,8 +99,10 @@ def time_left_in_week():
 # SPARK TABLE CELL RENDERER
 # ──────────────────────────────────────────────
 
-def _spark_net_rich(net, max_abs, bar_w=4, dim_zero=False,
-                     blame_tracked=0, blame_logged=0, blame_w=3):
+
+def _spark_net_rich(
+    net, max_abs, bar_w=4, dim_zero=False, blame_tracked=0, blame_logged=0, blame_w=3
+):
     """
     Return Rich markup for a net-points cell in the interactive spark tables.
     Positive → green bar on left of value.  Negative → red value + bar on right.
@@ -135,6 +169,7 @@ def fmt_pts_rich(pts):
 # MODAL SCREENS
 # ──────────────────────────────────────────────
 
+
 class ConfirmScreen(ModalScreen[bool]):
     BINDINGS = [
         ("y", "confirm", "Confirm"),
@@ -154,7 +189,9 @@ class ConfirmScreen(ModalScreen[bool]):
         with Container(id="dialog"):
             with Container(id="dialog-box"):
                 yield Static(self.body, classes="dialog-body")
-                yield Static("[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help")
+                yield Static(
+                    "[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help"
+                )
 
     def on_mount(self):
         self.query_one("#dialog-box").border_title = f"[b][#63f3ff]{self.title}[/][/]"
@@ -216,6 +253,7 @@ class PositiveInputScreen(ModalScreen[str | None]):
 # ──────────────────────────────────────────────
 # MAIN TUI APP
 # ──────────────────────────────────────────────
+
 
 class TogglTUI(App):
     CSS = """
@@ -429,7 +467,15 @@ class TogglTUI(App):
         Binding("question_mark", "show_help", "Help"),
     ]
 
-    VIEWS = ["Overview", "Day", "Week", "Negatives", "Positives", "Recovery", "Sync/Quota"]
+    VIEWS = [
+        "Overview",
+        "Day",
+        "Week",
+        "Negatives",
+        "Positives",
+        "Recovery",
+        "Sync/Quota",
+    ]
 
     def __init__(self):
         super().__init__()
@@ -449,25 +495,65 @@ class TogglTUI(App):
             with Horizontal(id="main"):
                 with Container(id="content"):
                     with Container(id="overview-view", classes="view -active"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="overview-table")
+                        yield DataTable(
+                            zebra_stripes=False, cursor_type="row", id="overview-table"
+                        )
                     with Container(id="day-view", classes="view"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="day-table")
+                        yield DataTable(
+                            zebra_stripes=False, cursor_type="row", id="day-table"
+                        )
                     with Container(id="week-view", classes="view"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="week-table")
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="week-category-table")
+                        yield DataTable(
+                            zebra_stripes=False, cursor_type="row", id="week-table"
+                        )
+                        yield DataTable(
+                            zebra_stripes=False,
+                            cursor_type="row",
+                            id="week-category-table",
+                        )
                     with Container(id="negatives-view", classes="view"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-catalog-table")
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="negatives-log-table")
+                        yield DataTable(
+                            zebra_stripes=False,
+                            cursor_type="row",
+                            id="negatives-catalog-table",
+                        )
+                        yield DataTable(
+                            zebra_stripes=False,
+                            cursor_type="row",
+                            id="negatives-log-table",
+                        )
                     with Container(id="positives-view", classes="view"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="positives-catalog-table")
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="positives-log-table")
+                        yield DataTable(
+                            zebra_stripes=False,
+                            cursor_type="row",
+                            id="positives-catalog-table",
+                        )
+                        yield DataTable(
+                            zebra_stripes=False,
+                            cursor_type="row",
+                            id="positives-log-table",
+                        )
                     with Container(id="recovery-view", classes="view"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="recovery-table")
+                        yield DataTable(
+                            zebra_stripes=False, cursor_type="row", id="recovery-table"
+                        )
                     with Container(id="sync-view", classes="view"):
-                        yield DataTable(zebra_stripes=False, cursor_type="row", id="sync-table")
+                        yield DataTable(
+                            zebra_stripes=False, cursor_type="row", id="sync-table"
+                        )
                 with Vertical(id="spark-rail"):
-                    yield DataTable(show_header=False, cursor_type="row", id="spark-weeks-table", zebra_stripes=False)
-                    yield DataTable(show_header=False, cursor_type="row", id="spark-days-table", zebra_stripes=False)
+                    yield DataTable(
+                        show_header=False,
+                        cursor_type="row",
+                        id="spark-weeks-table",
+                        zebra_stripes=False,
+                    )
+                    yield DataTable(
+                        show_header=False,
+                        cursor_type="row",
+                        id="spark-days-table",
+                        zebra_stripes=False,
+                    )
                     yield Static(id="spark-catchup")
             with Vertical(id="footer"):
                 yield Static(id="footer-main")
@@ -598,8 +684,13 @@ class TogglTUI(App):
 
     def update_view_visibility(self):
         view_ids = [
-            "#overview-view", "#day-view", "#week-view",
-            "#negatives-view", "#positives-view", "#recovery-view", "#sync-view",
+            "#overview-view",
+            "#day-view",
+            "#week-view",
+            "#negatives-view",
+            "#positives-view",
+            "#recovery-view",
+            "#sync-view",
         ]
         for index, view_id in enumerate(view_ids):
             widget = self.query_one(view_id, Container)
@@ -607,9 +698,13 @@ class TogglTUI(App):
 
     def focus_active_view(self):
         focus_targets = {
-            0: "#overview-table", 1: "#day-table", 2: "#week-table",
-            3: "#negatives-catalog-table", 4: "#positives-catalog-table",
-            5: "#recovery-table", 6: "#sync-table",
+            0: "#overview-table",
+            1: "#day-table",
+            2: "#week-table",
+            3: "#negatives-catalog-table",
+            4: "#positives-catalog-table",
+            5: "#recovery-table",
+            6: "#sync-table",
         }
         selector = focus_targets.get(self.active_view_index)
         if selector:
@@ -619,7 +714,8 @@ class TogglTUI(App):
         rail = self.query_one("#spark-rail", Vertical)
         auto_collapse = self.size.width < 120
         rail.set_class(
-            self.sparkbar_collapsed or (auto_collapse and not self.sparkbar_forced_open),
+            self.sparkbar_collapsed
+            or (auto_collapse and not self.sparkbar_forced_open),
             "-hidden",
         )
 
@@ -647,8 +743,12 @@ class TogglTUI(App):
             pw_data = cache.get_week_projects(pw)
             if pw_data:
                 pw_results = calculate(pw_data)
-                pw_earned = sum(r[3] for r in pw_results if r[3] is not None and r[3] > 0)
-                pw_tracked_neg = sum(abs(r[3]) for r in pw_results if r[3] is not None and r[3] < 0)
+                pw_earned = sum(
+                    r[3] for r in pw_results if r[3] is not None and r[3] > 0
+                )
+                pw_tracked_neg = sum(
+                    abs(r[3]) for r in pw_results if r[3] is not None and r[3] < 0
+                )
             else:
                 pw_earned = 0.0
                 pw_tracked_neg = 0.0
@@ -661,8 +761,9 @@ class TogglTUI(App):
         max_abs = max((abs(w[2]) for w in weeks_data), default=1) or 1
 
         for label, wk, net, tracked, logged in weeks_data:
-            net_cell = _spark_net_rich(net, max_abs,
-                                       blame_tracked=tracked, blame_logged=logged)
+            net_cell = _spark_net_rich(
+                net, max_abs, blame_tracked=tracked, blame_logged=logged
+            )
             table.add_row(label, net_cell, key=wk)
 
         table.border_title = "[b][#63f3ff]Past 4 Weeks[/][/]"
@@ -670,7 +771,7 @@ class TogglTUI(App):
     def _refresh_spark_days(self):
         cache = self._data_cache
         table = self.query_one("#spark-days-table", DataTable)
-        
+
         with table.prevent(DataTable.RowHighlighted):
             table.clear(columns=False)
 
@@ -688,19 +789,48 @@ class TogglTUI(App):
                 pos_bonus = sum(e["points"] for e in pos_entries)
                 results = calculate(projs)
                 earned = sum(r[3] for r in results if r[3] is not None and r[3] > 0)
-                tracked_neg = sum(abs(r[3]) for r in results if r[3] is not None and r[3] < 0)
+                tracked_neg = sum(
+                    abs(r[3]) for r in results if r[3] is not None and r[3] < 0
+                )
                 net = round(earned - tracked_neg - neg_cost + pos_bonus, 1)
                 has_data = bool(projs or neg_entries or pos_entries)
                 logged_neg = round(neg_cost, 1)
-                day_entries.append((d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus))
+                day_entries.append(
+                    (
+                        d,
+                        d_str,
+                        net,
+                        has_data,
+                        tracked_neg,
+                        logged_neg,
+                        earned,
+                        pos_bonus,
+                    )
+                )
 
-            max_abs = max(
-                (abs(net) for _, _, net, has, _, _, _, _ in day_entries if has and abs(net) >= 0.05),
-                default=1,
-            ) or 1
+            max_abs = (
+                max(
+                    (
+                        abs(net)
+                        for _, _, net, has, _, _, _, _ in day_entries
+                        if has and abs(net) >= 0.05
+                    ),
+                    default=1,
+                )
+                or 1
+            )
 
             cursor_row = None
-            for i, (d, d_str, net, has_data, tracked_neg, logged_neg, earned, pos_bonus) in enumerate(day_entries):
+            for i, (
+                d,
+                d_str,
+                net,
+                has_data,
+                tracked_neg,
+                logged_neg,
+                earned,
+                pos_bonus,
+            ) in enumerate(day_entries):
                 if not has_data and d > date.today():
                     continue
 
@@ -735,9 +865,13 @@ class TogglTUI(App):
 
         tw_total_neg = round(sum(dd[4] + dd[5] for dd in day_entries if dd[3]), 1)
         tw_total_pos = round(sum(dd[6] + dd[7] for dd in day_entries if dd[3]), 1)
-        neg_val = int(tw_total_neg) if tw_total_neg == int(tw_total_neg) else tw_total_neg
-        pos_val = int(tw_total_pos) if tw_total_pos == int(tw_total_pos) else tw_total_pos
-        
+        neg_val = (
+            int(tw_total_neg) if tw_total_neg == int(tw_total_neg) else tw_total_neg
+        )
+        pos_val = (
+            int(tw_total_pos) if tw_total_pos == int(tw_total_pos) else tw_total_pos
+        )
+
         neg_s = f"[#ff5f5f]-{neg_val}[/]" if tw_total_neg > 0 else "[dim]-0[/]"
         pos_s = f"[#37d994]+{pos_val}[/]" if tw_total_pos > 0 else "[dim]+0[/]"
 
@@ -761,7 +895,9 @@ class TogglTUI(App):
         catchup = self.query_one("#spark-catchup", Static)
 
         if lifetime_pts >= 0:
-            pts_val = int(lifetime_pts) if lifetime_pts == int(lifetime_pts) else lifetime_pts
+            pts_val = (
+                int(lifetime_pts) if lifetime_pts == int(lifetime_pts) else lifetime_pts
+            )
             text = Text()
             text.append(f"+{pts_val} pts", style="bold #37d994")
             catchup.update(text)
@@ -797,7 +933,9 @@ class TogglTUI(App):
                 text.append(f" {task_str}", style=color)
 
             catchup.update(text)
-            catchup.border_title = f"[b][#ff5f5f]Catch Up :[/][/] [#ff5f5f]{deficit_val} pts[/]"
+            catchup.border_title = (
+                f"[b][#ff5f5f]Catch Up :[/][/] [#ff5f5f]{deficit_val} pts[/]"
+            )
             catchup.border_subtitle = f"[#63f3ff]in {tl_raw}[/]"
 
     # ── View refresh methods ──
@@ -808,29 +946,43 @@ class TogglTUI(App):
         dashboard = cache.get_week_dashboard_rows(week)
         report = cache.get_report_sections(week, "WEEK")
         table = self.query_one("#week-table", DataTable)
-        
+
         with table.prevent(DataTable.RowHighlighted):
             table.clear(columns=False)
             week_rows = []
             for row in dashboard["rows"]:
-                neg_text = "—" if row["negative_total"] == 0 else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
-                pos_text = "—" if row["positive_total"] == 0 else f"[#37d994]+{row['positive_total']:.1f}[/]"
+                neg_text = (
+                    "—"
+                    if row["negative_total"] == 0
+                    else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
+                )
+                pos_text = (
+                    "—"
+                    if row["positive_total"] == 0
+                    else f"[#37d994]+{row['positive_total']:.1f}[/]"
+                )
                 hour_text = "—" if row["hours"] == 0 else f"{row['hours']:.1f}h"
-                earned_text = "—" if row["hours"] == 0 and row["earned"] == 0 else format_signed_rich(row["earned"])
-                week_rows.append((
-                    row["day"],
-                    row["date_short"],
-                    hour_text,
-                    earned_text,
-                    pos_text,
-                    neg_text,
-                    format_signed_rich(row["net"]),
-                    row["date"],
-                ))
+                earned_text = (
+                    "—"
+                    if row["hours"] == 0 and row["earned"] == 0
+                    else format_signed_rich(row["earned"])
+                )
+                week_rows.append(
+                    (
+                        row["day"],
+                        row["date_short"],
+                        hour_text,
+                        earned_text,
+                        pos_text,
+                        neg_text,
+                        format_signed_rich(row["net"]),
+                        row["date"],
+                    )
+                )
             for cells in week_rows:
                 key = cells[7]
                 table.add_row(*cells[:7], key=key)
-            
+
             if dashboard["rows"]:
                 today_str = date.today().strftime("%Y-%m-%d")
                 row_dates = [r["date"] for r in dashboard["rows"]]
@@ -841,7 +993,11 @@ class TogglTUI(App):
                 else:
                     default_date = dashboard["rows"][0]["date"]
                 self.selected_day = default_date
-                row_index = next(i for i, row in enumerate(dashboard["rows"]) if row["date"] == default_date)
+                row_index = next(
+                    i
+                    for i, row in enumerate(dashboard["rows"])
+                    if row["date"] == default_date
+                )
                 table.move_cursor(row=row_index, column=0)
         category_table = self.query_one("#week-category-table", DataTable)
         category_table.clear(columns=False)
@@ -851,7 +1007,9 @@ class TogglTUI(App):
             if rows:
                 cat_rows.append((f"[{section_name.upper()}]", "", "", ""))
             for name, hours, rate, pts in rows:
-                cat_rows.append((name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts)))
+                cat_rows.append(
+                    (name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
+                )
         if report["positive_results"]:
             cat_rows.append(("[LOGGED POSITIVE]", "", "", ""))
             for name, _, _, pts in report["positive_results"]:
@@ -866,7 +1024,9 @@ class TogglTUI(App):
         wh_h = int(week_hours)
         wh_m = int((week_hours - wh_h) * 60)
         table.border_title = f"[b][#63f3ff]Week ({week})[/][/]   [#8d98a7]Tracked: {wh_h}hrs {wh_m:02d}min[/]"
-        table.border_subtitle = f"[#8d98a7]Week net: {format_signed_rich(summary['actual'])} pts[/]"
+        table.border_subtitle = (
+            f"[#8d98a7]Week net: {format_signed_rich(summary['actual'])} pts[/]"
+        )
         category_table.border_title = "[b][#63f3ff]Category Totals[/][/]"
 
     def refresh_overview_view(self):
@@ -894,9 +1054,7 @@ class TogglTUI(App):
         th_h = int(total_hours)
         th_m = int((total_hours - th_h) * 60)
         table.border_title = f"[b][#63f3ff]Overview[/][/]   [#8d98a7]Total Time: {th_h}hrs {th_m:02d}min[/]"
-        table.border_subtitle = (
-            f"[#8d98a7]Lifetime total {format_signed_rich(report['total_points'])} pts[/]"
-        )
+        table.border_subtitle = f"[#8d98a7]Lifetime total {format_signed_rich(report['total_points'])} pts[/]"
 
     def refresh_day_view(self):
         cache = self._data_cache
@@ -929,11 +1087,11 @@ class TogglTUI(App):
             for name, hours, rate, pts in unscored_rows:
                 rows.append((name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts)))
         table.add_rows(rows)
-        dh = int(metrics['total_hours'])
-        dm = int((metrics['total_hours'] - dh) * 60)
+        dh = int(metrics["total_hours"])
+        dm = int((metrics["total_hours"] - dh) * 60)
         table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]   [#8d98a7]Tracked: {dh}hrs {dm:02d}min[/]"
-        total_pos = round(metrics['earned'] + metrics['logged_positive'], 1)
-        total_neg = round(metrics['tracked_negative'] + metrics['logged_negative'], 1)
+        total_pos = round(metrics["earned"] + metrics["logged_positive"], 1)
+        total_neg = round(metrics["tracked_negative"] + metrics["logged_negative"], 1)
         table.border_subtitle = (
             f"[#8d98a7]Pos [#37d994]+{total_pos:.1f}[/]   "
             f"Negs [#ff5f5f]-{total_neg:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
@@ -943,11 +1101,21 @@ class TogglTUI(App):
         cache = self._data_cache
         catalog = self.query_one("#negatives-catalog-table", DataTable)
         catalog.clear(columns=False)
-        catalog.add_rows([(name, fmt_pts_rich(-points)) for name, points in get_negative_catalog_rows()])
+        catalog.add_rows(
+            [
+                (name, fmt_pts_rich(-points))
+                for name, points in get_negative_catalog_rows()
+            ]
+        )
         recent = self.query_one("#negatives-log-table", DataTable)
         recent.clear(columns=False)
         recent_rows = cache.get_negative_log_rows()
-        recent.add_rows([(row["date"], row["name"], fmt_pts_rich(-row["points"])) for row in recent_rows])
+        recent.add_rows(
+            [
+                (row["date"], row["name"], fmt_pts_rich(-row["points"]))
+                for row in recent_rows
+            ]
+        )
         total_recent = sum(row["points"] for row in recent_rows)
         catalog.border_title = "[b][#63f3ff]Catalog[/][/]"
         recent.border_title = "[b][#63f3ff]Recent Log[/][/]"
@@ -957,11 +1125,21 @@ class TogglTUI(App):
         cache = self._data_cache
         catalog = self.query_one("#positives-catalog-table", DataTable)
         catalog.clear(columns=False)
-        catalog.add_rows([(name, fmt_pts_rich(points)) for name, points in get_positive_catalog_rows()])
+        catalog.add_rows(
+            [
+                (name, fmt_pts_rich(points))
+                for name, points in get_positive_catalog_rows()
+            ]
+        )
         recent = self.query_one("#positives-log-table", DataTable)
         recent.clear(columns=False)
         recent_rows = cache.get_positive_log_rows()
-        recent.add_rows([(row["date"], row["name"], fmt_pts_rich(row["points"])) for row in recent_rows])
+        recent.add_rows(
+            [
+                (row["date"], row["name"], fmt_pts_rich(row["points"]))
+                for row in recent_rows
+            ]
+        )
         total_recent = sum(row["points"] for row in recent_rows)
         catalog.border_title = "[b][#63f3ff]Catalog[/][/]"
         recent.border_title = "[b][#63f3ff]Recent Log[/][/]"
@@ -975,8 +1153,18 @@ class TogglTUI(App):
         rows = []
         for row in data["rows"]:
             rate = row["rate"]
-            color = "[#37d994]" if rate >= 2 else ("[#63f3ff]" if rate >= 1 else "[#d7dde8]")
-            rows.append((f"{color}{row['category']}[/]", f"{color}{fmt_rate(rate)}[/]", f"{color}{row['hours_needed']}[/]"))
+            color = (
+                "[#37d994]"
+                if rate >= 2
+                else ("[#63f3ff]" if rate >= 1 else "[#d7dde8]")
+            )
+            rows.append(
+                (
+                    f"{color}{row['category']}[/]",
+                    f"{color}{fmt_rate(rate)}[/]",
+                    f"{color}{row['hours_needed']}[/]",
+                )
+            )
         table.add_rows(rows)
         table.border_title = "[b][#63f3ff]Recovery[/][/]"
         table.border_subtitle = (
@@ -990,22 +1178,35 @@ class TogglTUI(App):
         table = self.query_one("#sync-table", DataTable)
         table.clear(columns=False)
         cache_age = status["projects_cache_age_days"]
-        remaining = status["quota_remaining"] if status["quota_remaining"] is not None else "Unknown"
-        limit = status["quota_limit"] if status["quota_limit"] is not None else "Unknown"
+        remaining = (
+            status["quota_remaining"]
+            if status["quota_remaining"] is not None
+            else "Unknown"
+        )
+        limit = (
+            status["quota_limit"] if status["quota_limit"] is not None else "Unknown"
+        )
         rows = [
             ("Current week", status["current_week"]),
             ("Last updated", status["last_updated"]),
-            ("Projects cache", "missing" if cache_age is None else f"{cache_age:.1f} days old"),
+            (
+                "Projects cache",
+                "missing" if cache_age is None else f"{cache_age:.1f} days old",
+            ),
             ("Synced weeks", str(len(status["synced_weeks"]))),
             ("Synced days", str(len(status["synced_days"]))),
             ("Requests made", str(API_RUN_STATS["requests_made"])),
             ("Quota remaining", f"{remaining}/{limit}"),
         ]
         if status["quota_resets_in"] is not None:
-            rows.append(("Quota resets in", _format_reset_window(status["quota_resets_in"])))
+            rows.append(
+                ("Quota resets in", _format_reset_window(status["quota_resets_in"]))
+            )
         table.add_rows(rows)
         table.border_title = "[b][#63f3ff]Sync Status[/][/]"
-        table.border_subtitle = "[#8d98a7]u syncs current week. U refreshes projects and syncs 4 weeks.[/]"
+        table.border_subtitle = (
+            "[#8d98a7]u syncs current week. U refreshes projects and syncs 4 weeks.[/]"
+        )
 
     # ── Event handlers ──
 
@@ -1089,7 +1290,9 @@ class TogglTUI(App):
         self._schedule_resize()
 
     def action_show_help(self):
-        self.notify("Left/right switch views, n add negative, u sync, U full sync, s toggle sparkbar, q quit")
+        self.notify(
+            "Left/right switch views, n add negative, u sync, U full sync, s toggle sparkbar, q quit"
+        )
 
     def action_sync_current_week(self):
         def after_confirm(confirmed):
@@ -1097,7 +1300,10 @@ class TogglTUI(App):
                 self.notify("Syncing current week...")
                 self._do_sync_current_week()
 
-        self.push_screen(ConfirmScreen("Sync current week", "Run a current-week sync now?"), after_confirm)
+        self.push_screen(
+            ConfirmScreen("Sync current week", "Run a current-week sync now?"),
+            after_confirm,
+        )
 
     @work(thread=True)
     def _do_sync_current_week(self):
@@ -1116,7 +1322,10 @@ class TogglTUI(App):
                 self.notify("Syncing last 4 weeks...")
                 self._do_sync_full()
 
-        self.push_screen(ConfirmScreen("Full sync", "Refresh projects and sync the last 4 weeks?"), after_confirm)
+        self.push_screen(
+            ConfirmScreen("Full sync", "Refresh projects and sync the last 4 weeks?"),
+            after_confirm,
+        )
 
     @work(thread=True)
     def _do_sync_full(self):
@@ -1176,10 +1385,16 @@ class TogglTUI(App):
 
         # ── Main content tables ────────────────────────────────────────────
         table_ids = [
-            "#week-table", "#week-category-table", "#overview-table",
-            "#day-table", "#negatives-catalog-table", "#negatives-log-table",
-            "#positives-catalog-table", "#positives-log-table", "#recovery-table",
-            "#sync-table"
+            "#week-table",
+            "#week-category-table",
+            "#overview-table",
+            "#day-table",
+            "#negatives-catalog-table",
+            "#negatives-log-table",
+            "#positives-catalog-table",
+            "#positives-log-table",
+            "#recovery-table",
+            "#sync-table",
         ]
         text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
 
@@ -1209,7 +1424,9 @@ class TogglTUI(App):
             n_cols = len(col_keys)
             cell_padding = table.cell_padding
 
-            req_widths = {key: len(col.label.plain) for key, col in table.columns.items()}
+            req_widths = {
+                key: len(col.label.plain) for key, col in table.columns.items()
+            }
 
             for row_idx in range(table.row_count):
                 row_data = table.get_row_at(row_idx)
@@ -1247,18 +1464,24 @@ class TogglTUI(App):
                 expand_extra = extra // len(expandable_keys)
                 rem = extra % len(expandable_keys)
                 for i, key in enumerate(expandable_keys):
-                    table.columns[key].width = req_widths[key] + expand_extra + (1 if i < rem else 0)
+                    table.columns[key].width = (
+                        req_widths[key] + expand_extra + (1 if i < rem else 0)
+                    )
                     table.columns[key].auto_width = False
             else:
-                min_widths = {key: max(3, len(col.label.plain))
-                              for key, col in table.columns.items()}
+                min_widths = {
+                    key: max(3, len(col.label.plain))
+                    for key, col in table.columns.items()
+                }
                 total_min = sum(min_widths.values())
 
                 if content_budget <= total_min:
                     base_w = content_budget // n_cols
                     rem = content_budget % n_cols
                     for i, key in enumerate(table.columns.keys()):
-                        table.columns[key].width = max(1, base_w + (1 if i < rem else 0))
+                        table.columns[key].width = max(
+                            1, base_w + (1 if i < rem else 0)
+                        )
                         table.columns[key].auto_width = False
                 else:
                     remaining = content_budget
@@ -1316,4 +1539,3 @@ class TogglTUI(App):
             table._require_update_dimensions = True
             table.refresh(layout=True)
             table.scroll_to(x=0, animate=False)
-
