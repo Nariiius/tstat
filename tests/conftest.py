@@ -72,12 +72,12 @@ def stub_api(monkeypatch):
         if week_str == "2023-W01":
             weekly = {"Learning to Code": 10.5, "Building Projects": 4.2}
             for d_off in range(7):
-                ds = f"2023-01-0{d_off + 1:02d}" if d_off < 9 else f"2023-01-{d_off + 1:02d}"
+                ds = f"2023-01-{d_off + 1:02d}"
                 daily[ds] = {"Learning to Code": 1.5, "Building Projects": 0.6}
         elif week_str == "2023-W02":
             weekly = {"Learning to Code": 8.0}
             for d_off in range(7):
-                ds = f"2023-01-0{d_off + 8:02d}" if d_off + 8 < 10 else f"2023-01-{d_off + 8:02d}"
+                ds = f"2023-01-{d_off + 8:02d}"
                 daily[ds] = {"Learning to Code": 1.2}
         elif week_str == "2023-W03":
             weekly = {"Fitness": 5.0}
@@ -95,10 +95,15 @@ def stub_api(monkeypatch):
 def sample_config(tmp_data_dir, monkeypatch):
     """Set up a minimal points config so calculate() works."""
     import toggl.config
+    import toggl.calc
+    import toggl.cache
 
-    monkeypatch.setattr(toggl.config, "POINTS", {
+    points = {
         "Learning to Code": 1.5,
         "Building Projects": 2.0,
         "Fitness": 1.0,
-    })
+    }
+    monkeypatch.setattr(toggl.config, "POINTS", points)
+    monkeypatch.setattr(toggl.calc, "POINTS", points)
+    monkeypatch.setattr(toggl.cache, "POINTS", points)
     monkeypatch.setattr(toggl.config, "DAILY_TARGET", 13.0)

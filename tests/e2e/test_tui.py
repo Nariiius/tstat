@@ -54,9 +54,10 @@ def tui_data(tmp_data_dir, monkeypatch):
             f.write(f"{d},Building Projects,0.6\n")
 
     # -- Empty negatives / positives CSVs --
-    for fp in [toggl.const.NEGATIVES_CSV_FILE, toggl.const.POSITIVES_CSV_FILE]:
-        with open(fp, "w") as f:
-            f.write("Date,Negative,Points\n")
+    with open(toggl.const.NEGATIVES_CSV_FILE, "w") as f:
+        f.write("Date,Negative,Points\n")
+    with open(toggl.const.POSITIVES_CSV_FILE, "w") as f:
+        f.write("Date,Positive,Points\n")
 
     # -- Sync history --
     with open(toggl.const.HISTORY_FILE, "w") as f:
