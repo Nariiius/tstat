@@ -147,8 +147,8 @@ def toggl_request(endpoint, token):
             "x-toggl-quota-limit", "30"
         )
         msg = f"Rate limit reached ({limit} req/hr)"
-        if resets_in:
-            secs = int(resets_in)
+        secs = _parse_int(resets_in)
+        if secs is not None:
             mins, s = divmod(secs, 60)
             wait = f"{mins}m {s:02d}s" if mins else f"{s}s"
             msg += f" — resets in {wait}"
@@ -167,8 +167,8 @@ def check_quota(token):
         resets_in = headers.get("X-Toggl-Quota-Resets-In") or headers.get("x-toggl-quota-resets-in", "Unknown")
         print(f"  {GREEN}✓ Request successful{RESET}")
         print(f"  Requests remaining  {CYAN}{BOLD}{remaining}{RESET}")
-        if resets_in != "Unknown":
-            secs = int(resets_in)
+        secs = _parse_int(resets_in)
+        if secs is not None:
             mins, s = divmod(secs, 60)
             wait = f"{mins}m {s:02d}s" if mins else f"{s}s"
             print(f"  Window resets in    {YELLOW}{BOLD}{wait}{RESET}")
@@ -178,10 +178,10 @@ def check_quota(token):
         print(f"  {RED}✗ HTTP 429 — Rate limit exceeded.{RESET}")
         print(f"  {DIM}Making requests too fast. Safe limit is ~1 req/sec.{RESET}")
     elif err == 402:
-        resets_in = headers.get("X-Toggl-Quota-Resets-In") or headers.get("x-toggl-quota-resets-in", "Unknown")
+        resets_in = headers.get("X-Toggl-Quota-Resets-In") or headers.get("x-toggl-quota-resets-in")
         print(f"  {RED}✗ HTTP 402 — Hourly quota exhausted.{RESET}")
-        if resets_in != "Unknown":
-            secs = int(resets_in)
+        secs = _parse_int(resets_in)
+        if secs is not None:
             mins, s = divmod(secs, 60)
             wait = f"{mins}m {s:02d}s" if mins else f"{s}s"
             print(f"  Window resets in    {YELLOW}{BOLD}{wait}{RESET}")
