@@ -463,18 +463,11 @@ class DataCache:
             hours = 0.0
             net = 0.0
 
-            if month == 1:
-                first_day = date(year, 1, 1)
-            else:
-                first_day = date(year, month, 1)
+            first_day = date(year, month, 1)
             if month == 12:
                 last_day = date(year, 12, 31)
             else:
-                next_month = month + 1
-                next_year = year if next_month <= 12 else year + 1
-                if next_month > 12:
-                    next_month = 1
-                last_day = date(next_year if next_month == 1 else year, next_month, 1) - timedelta(days=1)
+                last_day = date(year, month + 1, 1) - timedelta(days=1)
 
             d = first_day
             while d <= last_day:
