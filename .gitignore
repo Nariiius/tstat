@@ -7,6 +7,9 @@ venv/
 env/
 .ruff_cache/
 
+# --- Worktrees ---
+.worktrees/
+
 # --- Local Data and Logs (Best practice to keep these out of Git) ---
 *.csv
 *.json

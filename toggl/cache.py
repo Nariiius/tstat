@@ -41,8 +41,14 @@ def get_sunday_of_week(d):
 
 
 def get_week_str(d):
-    sunday = get_sunday_of_week(d)
-    return f"{sunday.year}-W{int(sunday.strftime('%U')) + 1:02d}"
+    """Return the week label for date *d*.
+
+    Weeks start on Jan 1 each year and are 7 days long.
+    ``get_week_str`` and ``get_week_dates`` are bijective.
+    """
+    jan1 = date(d.year, 1, 1)
+    week_num = (d - jan1).days // 7 + 1
+    return f"{d.year}-W{week_num:02d}"
 
 
 def get_current_week():
@@ -51,9 +57,9 @@ def get_current_week():
 
 def get_week_dates(week_str):
     year, week = week_str.split("-W")
-    u_week = int(week) - 1
-    dt = datetime.strptime(f"{year}-W{u_week:02d}-0", "%Y-W%U-%w")
-    start_date = dt.date()
+    week_num = int(week)
+    jan1 = date(int(year), 1, 1)
+    start_date = jan1 + timedelta(weeks=week_num - 1)
     end_date = start_date + timedelta(days=6)
     return start_date, end_date
 
@@ -402,6 +408,105 @@ class DataCache:
             "total_points": total_pts,
             "total_hours": round(sum(r[1] for r in results if r[1] is not None), 2),
         }
+
+    def get_yearly_day_net_map(self, year: int) -> dict[str, float]:
+        if not hasattr(self, "_yearly_day_net"):
+            self._yearly_day_net: dict[int, dict[str, float]] = {}
+
+        if year in self._yearly_day_net:
+            return self._yearly_day_net[year]
+
+        result: dict[str, float] = {}
+        start_d = date(year, 1, 1)
+        end_d = date(year, 12, 31)
+        d = start_d
+        while d <= end_d:
+            d_str = d.strftime("%Y-%m-%d")
+            projs = self.daily_data.get(d_str, {})
+            if projs:
+                res = calculate(projs)
+                earned = sum(r[3] for r in res if r[3] is not None and r[3] > 0)
+                tracked_neg = sum(abs(r[3]) for r in res if r[3] is not None and r[3] < 0)
+            else:
+                earned = 0.0
+                tracked_neg = 0.0
+
+            neg_entries = self.negatives_raw.get(d_str, [])
+            pos_entries = self.positives_raw.get(d_str, [])
+            logged_neg = sum(e["points"] for e in neg_entries)
+            logged_pos = sum(e["points"] for e in pos_entries)
+
+            net = round(earned - tracked_neg - logged_neg + logged_pos, 1)
+            if projs or neg_entries or pos_entries:
+                result[d_str] = net
+            d += timedelta(days=1)
+
+        self._yearly_day_net[year] = result
+        return result
+
+    def get_monthly_aggregates(self, last_n_months: int = 12) -> list[dict]:
+        if not hasattr(self, "_monthly_aggregates"):
+            self._monthly_aggregates: dict[int, list[dict]] = {}
+
+        if last_n_months in self._monthly_aggregates:
+            return self._monthly_aggregates[last_n_months]
+
+        today = date.today()
+        result = []
+        year = today.year
+        month = today.month
+
+        for _ in range(last_n_months):
+            month_str = f"{year}-{month:02d}"
+            hours = 0.0
+            net = 0.0
+
+            if month == 1:
+                first_day = date(year, 1, 1)
+            else:
+                first_day = date(year, month, 1)
+            if month == 12:
+                last_day = date(year, 12, 31)
+            else:
+                next_month = month + 1
+                next_year = year if next_month <= 12 else year + 1
+                if next_month > 12:
+                    next_month = 1
+                last_day = date(next_year if next_month == 1 else year, next_month, 1) - timedelta(days=1)
+
+            d = first_day
+            while d <= last_day:
+                d_str = d.strftime("%Y-%m-%d")
+                projs = self.daily_data.get(d_str, {})
+                if projs:
+                    res = calculate(projs)
+                    earned = sum(r[3] for r in res if r[3] is not None and r[3] > 0)
+                    tracked_neg = sum(abs(r[3]) for r in res if r[3] is not None and r[3] < 0)
+                    hours += sum(projs.values())
+                else:
+                    earned = 0.0
+                    tracked_neg = 0.0
+
+                neg_entries = self.negatives_raw.get(d_str, [])
+                pos_entries = self.positives_raw.get(d_str, [])
+                logged_neg = sum(e["points"] for e in neg_entries)
+                logged_pos = sum(e["points"] for e in pos_entries)
+                net += round(earned - tracked_neg - logged_neg + logged_pos, 1)
+                d += timedelta(days=1)
+
+            result.insert(0, {
+                "month": month_str,
+                "hours": round(hours, 1),
+                "net": round(net, 1),
+            })
+
+            month -= 1
+            if month < 1:
+                month = 12
+                year -= 1
+
+        self._monthly_aggregates[last_n_months] = result
+        return result
 
     def get_recovery_rows(self, label, context_type):
         report = self.get_report_sections(label, context_type)

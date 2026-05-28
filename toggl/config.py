@@ -7,6 +7,9 @@ import json
 from toggl.const import CONFIG_FILE, DEFAULT_DAILY_TARGET, RED, RESET
 from toggl.const import GREEN, YELLOW, CYAN, DIM
 
+CONFIG_EXAMPLE_FILE = CONFIG_FILE.replace(".json", ".json.example")
+_REQUIRED_RATE_MAPS = ("points", "negatives", "positives")
+
 
 class Config:
     """Encapsulates all runtime configuration loaded from toggl_config.json."""
@@ -30,14 +33,39 @@ class Config:
         return cls(points, negatives, positives, daily_target)
 
 
+def _config_setup_hint():
+    if os.path.exists(CONFIG_EXAMPLE_FILE):
+        return (
+            f"  Copy the template and edit your values:\n"
+            f"    cp {CONFIG_EXAMPLE_FILE} {CONFIG_FILE}"
+        )
+    return (
+        f"  Create {CONFIG_FILE} with objects: "
+        f"{', '.join(_REQUIRED_RATE_MAPS)}, plus optional daily_target and api_token."
+    )
+
+
+def _exit_config_error(message):
+    print(f"{RED}{message}{RESET}")
+    hint = _config_setup_hint()
+    if hint:
+        print(hint)
+    sys.exit(1)
+
+
 def load_config():
     if not os.path.exists(CONFIG_FILE):
-        return {}
+        _exit_config_error(f"Error: Config file not found: {CONFIG_FILE}")
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        print(f"{RED}Error: {CONFIG_FILE} must contain a JSON object.{RESET}")
-        sys.exit(1)
+        _exit_config_error(f"Error: {CONFIG_FILE} must contain a JSON object.")
+    missing = [key for key in _REQUIRED_RATE_MAPS if data.get(key) is None]
+    if missing:
+        keys = ", ".join(f"'{k}'" for k in missing)
+        _exit_config_error(
+            f"Error: {CONFIG_FILE} is missing required object(s): {keys}."
+        )
     return data
 
 
@@ -52,12 +80,10 @@ def _coerce_number(value, label):
 
 def _load_rate_map(config, key):
     raw = config.get(key)
-    if raw is None:
-        print(f"{RED}Error: Missing required '{key}' object in {CONFIG_FILE}.{RESET}")
-        sys.exit(1)
     if not isinstance(raw, dict):
-        print(f"{RED}Error: '{key}' in {CONFIG_FILE} must be an object.{RESET}")
-        sys.exit(1)
+        _exit_config_error(
+            f"Error: '{key}' in {CONFIG_FILE} must be a JSON object mapping names to numbers."
+        )
     result = {}
     for name, rate in raw.items():
         result[str(name)] = _coerce_number(rate, f"{key}.{name}")

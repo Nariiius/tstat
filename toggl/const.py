@@ -88,6 +88,7 @@ POSITIVES_CSV_FILE = os.path.join(DATA_DIR, "toggl_positives.csv")
 HISTORY_FILE = os.path.join(DATA_DIR, "toggl_sync_history.json")
 CONFIG_FILE = os.path.join(DIR_PATH, "toggl_config.json")
 PROJECTS_FILE = os.path.join(DATA_DIR, "toggl_projects.json")
+BACKFILL_DB = os.path.join(DATA_DIR, "toggl_backfill.db")
 
 DEFAULT_DAILY_TARGET = 13.0
 LOW_QUOTA_WARNING = 5

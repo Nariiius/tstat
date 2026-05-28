@@ -1,5 +1,6 @@
 """TogglTUI — Textual terminal UI for TogglTrack."""
 
+from calendar import month_name, monthrange
 from datetime import date, datetime, timedelta
 
 from rich.text import Text
@@ -61,6 +62,13 @@ def get_sync_status_data():
     history = _load_history()
     from toggl.api import API_RUN_STATS, get_projects_cache_age_days
 
+    backfill = {}
+    try:
+        from toggl.backfill import get_backfill_status
+        backfill = get_backfill_status()
+    except Exception:
+        backfill = {"status": "error"}
+
     return {
         "last_updated": get_last_updated_str(),
         "projects_cache_age_days": get_projects_cache_age_days(),
@@ -70,6 +78,7 @@ def get_sync_status_data():
         "quota_remaining": API_RUN_STATS["remaining"],
         "quota_limit": API_RUN_STATS["limit"],
         "quota_resets_in": API_RUN_STATS["resets_in"],
+        "backfill_status": backfill,
     }
 
 
@@ -435,6 +444,25 @@ class TogglTUI(App):
         color: #63f3ff;
     }
 
+    #context-banner {
+        height: 1;
+        color: #8d98a7;
+        padding: 0 1;
+    }
+
+    #heatmap-grid {
+        height: 1fr;
+        border: solid #2e3947;
+        padding: 0 1;
+        background: #0b1016;
+    }
+
+    .heatmap-legend {
+        height: auto;
+        color: #8d98a7;
+        padding: 0 1;
+    }
+
     Toast {
         background: #0b1016;
         color: #d7dde8;
@@ -465,12 +493,18 @@ class TogglTUI(App):
         Binding("p", "add_positive", "Add Positive"),
         Binding("s", "toggle_sparkbar", "Sparkbar"),
         Binding("question_mark", "show_help", "Help"),
+        Binding("shift+up", "nav_month_prev", "Month -", priority=True),
+        Binding("shift+down", "nav_month_next", "Month +", priority=True),
+        Binding("{", "nav_month_prev", "Month -", priority=True),
+        Binding("}", "nav_month_next", "Month +", priority=True),
     ]
 
     VIEWS = [
         "Overview",
         "Day",
         "Week",
+        "Month",
+        "Heatmap",
         "Negatives",
         "Positives",
         "Recovery",
@@ -485,6 +519,7 @@ class TogglTUI(App):
         self.sparkbar_forced_open = True
         self._table_resize_timer = None
         self._data_cache: DataCache | None = None
+        self._active_week = get_current_week()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -492,6 +527,7 @@ class TogglTUI(App):
                 with Horizontal(id="view-tabs"):
                     for index, view in enumerate(self.VIEWS):
                         yield Static(view, classes="view-tab", id=f"view-tab-{index}")
+                yield Static(id="context-banner", classes="context-banner")
             with Horizontal(id="main"):
                 with Container(id="content"):
                     with Container(id="overview-view", classes="view -active"):
@@ -511,6 +547,13 @@ class TogglTUI(App):
                             cursor_type="row",
                             id="week-category-table",
                         )
+                    with Container(id="month-view", classes="view"):
+                        yield DataTable(
+                            zebra_stripes=False, cursor_type="row", id="month-table"
+                        )
+                    with Container(id="heatmap-view", classes="view"):
+                        yield Static(id="heatmap-grid")
+                        yield Label(id="heatmap-legend", classes="heatmap-legend")
                     with Container(id="negatives-view", classes="view"):
                         yield DataTable(
                             zebra_stripes=False,
@@ -614,11 +657,27 @@ class TogglTUI(App):
         sync_table = self.query_one("#sync-table", DataTable)
         sync_table.add_columns("Metric", "Value")
 
+        month_table = self.query_one("#month-table", DataTable)
+        month_table.add_columns("Month", "Hours", "Net")
+
         spark_weeks = self.query_one("#spark-weeks-table", DataTable)
         spark_weeks.add_columns("Label", "Net")
 
         spark_days = self.query_one("#spark-days-table", DataTable)
         spark_days.add_columns("Day", "Net")
+
+        for table_id in [
+            "#overview-table", "#day-table", "#week-table", "#month-table",
+            "#negatives-catalog-table", "#negatives-log-table",
+            "#positives-catalog-table", "#positives-log-table",
+            "#recovery-table", "#sync-table",
+        ]:
+            try:
+                t = self.query_one(table_id, DataTable)
+                t.styles.min_height = 1
+                t.show_cursor = True
+            except Exception:
+                pass
 
     def refresh_all_views(self):
         self._data_cache = DataCache.load()
@@ -635,10 +694,12 @@ class TogglTUI(App):
         0: "refresh_overview_view",
         1: "refresh_day_view",
         2: "refresh_week_view",
-        3: "refresh_negatives_view",
-        4: "refresh_positives_view",
-        5: "refresh_recovery_view",
-        6: "refresh_sync_view",
+        3: "refresh_month_view",
+        4: "refresh_heatmap_view",
+        5: "refresh_negatives_view",
+        6: "refresh_positives_view",
+        7: "refresh_recovery_view",
+        8: "refresh_sync_view",
     }
 
     def _refresh_view_by_index(self, index):
@@ -680,6 +741,22 @@ class TogglTUI(App):
         footer_main.append("q", style="bold #63f3ff")
         footer_main.append(" quit", style="#8d98a7")
 
+        # Context banner showing current context
+        ctx_text = Text()
+        ctx_text.append("  ", style="#8d98a7")
+        current_view = self.VIEWS[self.active_view_index]
+        if current_view == "Day":
+            ctx_text.append(f"Day: {self.selected_day}", style="bold")
+        elif current_view == "Week":
+            ctx_text.append(f"Week: {self._active_week}", style="bold")
+        elif current_view == "Month":
+            ctx_text.append("Month view", style="bold")
+        elif current_view == "Heatmap":
+            ctx_text.append("Heatmap", style="bold")
+        else:
+            ctx_text.append(f"View: {current_view}", style="bold")
+        self.query_one("#context-banner", Static).update(ctx_text)
+
         self.query_one("#footer-main", Static).update(footer_main)
 
     def update_view_visibility(self):
@@ -687,6 +764,8 @@ class TogglTUI(App):
             "#overview-view",
             "#day-view",
             "#week-view",
+            "#month-view",
+            "#heatmap-view",
             "#negatives-view",
             "#positives-view",
             "#recovery-view",
@@ -701,14 +780,16 @@ class TogglTUI(App):
             0: "#overview-table",
             1: "#day-table",
             2: "#week-table",
-            3: "#negatives-catalog-table",
-            4: "#positives-catalog-table",
-            5: "#recovery-table",
-            6: "#sync-table",
+            3: "#month-table",
+            4: "#heatmap-grid",
+            5: "#negatives-catalog-table",
+            6: "#positives-catalog-table",
+            7: "#recovery-table",
+            8: "#sync-table",
         }
         selector = focus_targets.get(self.active_view_index)
         if selector:
-            self.query_one(selector, DataTable).focus()
+            self.query_one(selector).focus()
 
     def update_sparkbar_visibility(self):
         rail = self.query_one("#spark-rail", Vertical)
@@ -942,7 +1023,7 @@ class TogglTUI(App):
 
     def refresh_week_view(self):
         cache = self._data_cache
-        week = get_current_week()
+        week = self._active_week
         dashboard = cache.get_week_dashboard_rows(week)
         report = cache.get_report_sections(week, "WEEK")
         table = self.query_one("#week-table", DataTable)
@@ -1202,11 +1283,105 @@ class TogglTUI(App):
             rows.append(
                 ("Quota resets in", _format_reset_window(status["quota_resets_in"]))
             )
+        bf = status.get("backfill_status", {})
+        if bf.get("status") is not None:
+            rows.append(("Backfill status", bf["status"]))
+        if bf.get("earliest_week"):
+            rows.append(("Earliest week", bf["earliest_week"]))
+        if bf.get("last_completed_week"):
+            rows.append(("Last completed", bf["last_completed_week"]))
+        if bf.get("weeks_backfilled", 0) > 0:
+            rows.append(("Weeks backfilled", str(bf["weeks_backfilled"])))
+        if bf.get("total_weeks", 0) > 0:
+            rows.append(("Total weeks", str(bf["total_weeks"])))
+        if not bf.get("status") and not bf.get("earliest_week"):
+            rows.append(("Backfill", "Not yet run"))
         table.add_rows(rows)
         table.border_title = "[b][#63f3ff]Sync Status[/][/]"
         table.border_subtitle = (
             "[#8d98a7]u syncs current week. U refreshes projects and syncs 4 weeks.[/]"
         )
+
+    def refresh_month_view(self):
+        cache = self._data_cache
+        if cache is None:
+            return
+        table = self.query_one("#month-table", DataTable)
+        with table.prevent(DataTable.RowHighlighted):
+            table.clear(columns=False)
+            months = cache.get_monthly_aggregates(12)
+            for m in months:
+                net_str = format_signed_rich(m["net"])
+                table.add_row(m["month"], f"{m['hours']:.1f}h", net_str, key=m["month"])
+        table.border_title = "[b][#63f3ff]Month Overview (Last 12)[/][/]"
+
+    def refresh_heatmap_view(self):
+        cache = self._data_cache
+        if cache is None:
+            return
+        grid = self.query_one("#heatmap-grid", Static)
+        legend = self.query_one("#heatmap-legend", Label)
+
+        year = date.today().year
+        day_net_map = cache.get_yearly_day_net_map(year)
+
+        if not day_net_map:
+            grid.update("[dim]No data for this year yet.[/]")
+            legend.update("")
+            return
+
+        values = sorted(day_net_map.values())
+        n = len(values)
+        p10_idx = max(0, int(n * 0.1))
+        p90_idx = min(n - 1, int(n * 0.9) - 1)
+        p10 = values[p10_idx]
+        p90 = values[p90_idx]
+        abs_max = max(abs(p10), abs(p90))
+
+        lines = []
+        header = "     "
+        for m in range(1, 13):
+            _, days = monthrange(year, m)
+            first_weekday = date(year, m, 1).weekday()
+            pos = first_weekday
+            header += f"{month_name[m][:3]:^{pos+3}}"
+        lines.append(header)
+
+        day_labels = ["Mon", "", "Wed", "", "Fri", "", "Sun"]
+        for dow in range(7):
+            row = f"{day_labels[dow]:>5} "
+            d = date(year, 1, 1)
+            while d.weekday() != dow:
+                d += timedelta(days=1)
+            while d.year == year:
+                d_str = d.strftime("%Y-%m-%d")
+                net = day_net_map.get(d_str)
+                if net is None:
+                    ch = "\u00b7"
+                elif abs_max > 0:
+                    intensity = abs(net) / abs_max
+                    if net > 0:
+                        level = min(4, int(intensity * 5))
+                        shades = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585"]
+                        ch = f"[#37d994]{shades[level]}[/]"
+                    else:
+                        level = min(4, int(intensity * 5))
+                        shades = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585"]
+                        ch = f"[#ff5f5f]{shades[level]}[/]"
+                else:
+                    ch = "\u00b7"
+                row += ch + " "
+                d += timedelta(days=7)
+            lines.append(row)
+
+        grid.update("\n".join(lines))
+
+        legend.update(
+            f"[dim]Less[/] [dim]▁[/][#37d994]▂▃▄▅[/] [dim]More  •  "
+            f"Red = negative  •  Green = positive  •  "
+            f"P10={p10:.1f}  P90={p90:.1f}[/]"
+        )
+        grid.border_title = f"[b][#63f3ff]Heatmap \u2014 {year}[/][/]"
 
     # ── Event handlers ──
 
@@ -1231,6 +1406,36 @@ class TogglTUI(App):
         self.selected_day = new_day
         self.refresh_day_view()
         self._sync_week_table_cursor()
+
+    @on(DataTable.RowHighlighted, "#month-table")
+    def month_row_highlighted(self, event: DataTable.RowHighlighted):
+        if self.active_view_index != 3:
+            return
+        if event.row_key is None:
+            return
+        month_str = str(event.row_key.value)
+        year_str, month_str_part = month_str.split("-")
+        first = date(int(year_str), int(month_str_part), 1)
+        week_str = get_week_str(first)
+        self._active_week = week_str
+        self.refresh_week_view()
+
+    @on(Click, "#heatmap-grid")
+    def heatmap_click(self, event: Click):
+        year = date.today().year
+        dow = event.y - 1
+        week_idx = (event.x - 6) // 2
+        if 0 <= dow <= 6 and week_idx >= 0:
+            d = date(year, 1, 1)
+            while d.weekday() != dow:
+                d += timedelta(days=1)
+            clicked_date = d + timedelta(weeks=week_idx)
+            if clicked_date.year == year and clicked_date <= date.today():
+                self.selected_day = clicked_date.strftime("%Y-%m-%d")
+                self._active_week = get_week_str(clicked_date)
+                self.refresh_week_view()
+                self.refresh_day_view()
+                self._sync_week_table_cursor()
 
     def _sync_spark_days_cursor(self):
         table = self.query_one("#spark-days-table", DataTable)
@@ -1273,6 +1478,23 @@ class TogglTUI(App):
         self.update_view_visibility()
         self.focus_active_view()
         self._schedule_resize()
+
+    def action_nav_month_prev(self):
+        if self.active_view_index == 3:
+            table = self.query_one("#month-table", DataTable)
+            cursor = table.cursor_row
+            if cursor is None or cursor == 0:
+                return
+            table.move_cursor(row=cursor - 1, animate=False)
+
+    def action_nav_month_next(self):
+        if self.active_view_index == 3:
+            table = self.query_one("#month-table", DataTable)
+            cursor = table.cursor_row
+            if cursor is None:
+                table.move_cursor(row=0, animate=False)
+            elif cursor < len(table.rows) - 1:
+                table.move_cursor(row=cursor + 1, animate=False)
 
     def action_refresh_data(self):
         load_runtime_settings()

@@ -1,0 +1,43 @@
+{
+  "api_token": "YOUR_TOGGL_API_TOKEN",
+  "daily_target": 13,
+  "points": {
+    "Building Projects": 3,
+    "Finance / Markets": 3,
+    "Learning to Code": 3,
+    "Fitness": 3,
+    "Learning Japanese": 3,
+    "Obligations / Social": 2,
+    "Personal Development": 2,
+    "Acads / Study": 1,
+    "Plan / Org / Review": 1,
+    "Focus Thoughts": 1,
+    "Sleep / Rest": 0,
+    "Chores / Waste": 0.2,
+    "Leisure / Entertainment": -2,
+    "Timepass / Trash": -4
+  },
+  "negatives": {
+    "Mistake": 20,
+    "Junk / Treat": 15,
+    "Doomscrolling": 5,
+    "GI Dailies": 10,
+    "Report": 5,
+    "Lazy": 2,
+    "Emo Control": 5
+  },
+  "positives": {
+    "Care": 4,
+    "Meditation": 5,
+    "GI Dailies": 3,
+    "Abs Cinema": 5,
+    "Cold Shower": 2,
+    "Sleep 8+ Hours": 5,
+    "Socialising": 8,
+    "Energy Spent": 2,
+    "ProteinShake/Fit": 3,
+    "Journaling": 2,
+    "Restraint": 3,
+    "Existence Extrovert": 8
+  }
+}
