@@ -88,7 +88,7 @@ def time_left_in_week():
     now = datetime.now()
     days_until_saturday = (5 - now.weekday()) % 7
     saturday = now + timedelta(days=days_until_saturday)
-    end = saturday.replace(hour=23, minute=59, second=59)
+    end = saturday.replace(hour=23, minute=59, second=59, microsecond=999999)
     diff = end - now
     if diff.total_seconds() < 0:
         return ""
@@ -270,7 +270,6 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def on_mount(self):
         self.query_one("#dialog-box").border_title = f"[b][#63f3ff]{self.title}[/][/]"
-        self.query_one("#dialog-box").border_subtitle = self.body
 
     def action_confirm(self):
         self.dismiss(True)
