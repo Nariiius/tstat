@@ -579,7 +579,7 @@ class TogglTUI(App):
 
     def __init__(self):
         super().__init__()
-        self.active_view_index = 0
+        self.active_view_index = 0  # Overview is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
         self.sparkbar_forced_open = True
@@ -598,11 +598,11 @@ class TogglTUI(App):
                 yield Static(id="context-banner", classes="context-banner")
             with Horizontal(id="main"):
                 with Container(id="content"):
-                    with Container(id="overview-view", classes="view -active"):
+                    with Container(id="overview-view", classes="view"):
                         yield DataTable(
                             zebra_stripes=False, cursor_type="row", id="overview-table"
                         )
-                    with Container(id="day-view", classes="view"):
+                    with Container(id="day-view", classes="view -active"):
                         yield DataTable(
                             zebra_stripes=False, cursor_type="row", id="day-table"
                         )
