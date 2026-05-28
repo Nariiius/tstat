@@ -191,97 +191,97 @@ def backfill_week(week_str, token, projects_map):
 def run_backfill(token, projects_map):
     init_backfill_db()
     conn = _get_conn()
-    now = datetime.now().isoformat()
+    try:
+        now = datetime.now().isoformat()
 
-    cursor = conn.execute(
-        "INSERT INTO runs (status, started_at) VALUES (?, ?)",
-        ("started", now),
-    )
-    run_id = cursor.lastrowid
+        cursor = conn.execute(
+            "INSERT INTO runs (status, started_at) VALUES (?, ?)",
+            ("started", now),
+        )
+        run_id = cursor.lastrowid
 
-    checkpoint = _get_latest_checkpoint(conn)
-    earliest = None
+        checkpoint = _get_latest_checkpoint(conn)
+        earliest = None
 
-    if checkpoint and checkpoint["earliest_week"]:
-        earliest = checkpoint["earliest_week"]
-    else:
-        earliest = find_earliest_week(token, projects_map)
-        if earliest:
+        if checkpoint and checkpoint["earliest_week"]:
+            earliest = checkpoint["earliest_week"]
+        else:
+            earliest = find_earliest_week(token, projects_map)
+            if earliest:
+                conn.execute(
+                    "INSERT INTO checkpoints (run_id, earliest_week) VALUES (?, ?)",
+                    (run_id, earliest),
+                )
+                conn.commit()
+
+        if earliest is None:
             conn.execute(
-                "INSERT INTO checkpoints (run_id, earliest_week) VALUES (?, ?)",
-                (run_id, earliest),
+                "UPDATE runs SET status=?, finished_at=?, stopped_reason=? WHERE id=?",
+                ("success", datetime.now().isoformat(), "no_data", run_id),
+            )
+            conn.commit()
+            return {
+                "status": "success",
+                "weeks_discovered": 0,
+                "weeks_backfilled": 0,
+                "stopped_reason": "no_data",
+            }
+
+        missing = find_missing_weeks(earliest)
+        if not missing:
+            conn.execute(
+                "UPDATE runs SET status=?, finished_at=?, stopped_reason=? WHERE id=?",
+                ("success", datetime.now().isoformat(), "complete", run_id),
+            )
+            conn.execute(
+                "UPDATE checkpoints SET last_verified_at=?, last_verified_week=? WHERE run_id=?",
+                (datetime.now().isoformat(), get_current_week(), run_id),
+            )
+            conn.commit()
+            return {
+                "status": "success",
+                "weeks_discovered": 0,
+                "weeks_backfilled": 0,
+                "stopped_reason": "complete",
+            }
+
+        api_requests = 0
+        weeks_backfilled = 0
+        stopped_reason = "complete"
+
+        for week_str in missing:
+            remaining = API_RUN_STATS.get("remaining")
+            if remaining is not None and remaining <= 2:
+                stopped_reason = "quota"
+                break
+
+            result = backfill_week(week_str, token, projects_map)
+            api_requests += 1
+
+            if not result["success"]:
+                stopped_reason = result.get("reason", "error")
+                break
+
+            weeks_backfilled += 1
+
+            conn.execute(
+                "UPDATE runs SET weeks_backfilled=?, api_requests_made=? WHERE id=?",
+                (weeks_backfilled, api_requests, run_id),
+            )
+            conn.execute(
+                "UPDATE checkpoints SET last_completed_week=?, last_verified_at=? WHERE run_id=?",
+                (week_str, datetime.now().isoformat(), run_id),
             )
             conn.commit()
 
-    if earliest is None:
+        status = "success" if stopped_reason == "complete" else "failed"
         conn.execute(
-            "UPDATE runs SET status=?, finished_at=?, stopped_reason=? WHERE id=?",
-            ("success", datetime.now().isoformat(), "no_data", run_id),
+            "UPDATE runs SET status=?, finished_at=?, weeks_discovered=?, weeks_backfilled=?, api_requests_made=?, stopped_reason=? WHERE id=?",
+            (status, datetime.now().isoformat(), len(missing), weeks_backfilled, api_requests, stopped_reason, run_id),
         )
         conn.commit()
+    finally:
         conn.close()
-        return {
-            "status": "success",
-            "weeks_discovered": 0,
-            "weeks_backfilled": 0,
-            "stopped_reason": "no_data",
-        }
-
-    missing = find_missing_weeks(earliest)
-    if not missing:
-        conn.execute(
-            "UPDATE runs SET status=?, finished_at=?, stopped_reason=? WHERE id=?",
-            ("success", datetime.now().isoformat(), "complete", run_id),
-        )
-        conn.execute(
-            "UPDATE checkpoints SET last_verified_at=?, last_verified_week=? WHERE run_id=?",
-            (datetime.now().isoformat(), get_current_week(), run_id),
-        )
-        conn.commit()
-        conn.close()
-        return {
-            "status": "success",
-            "weeks_discovered": 0,
-            "weeks_backfilled": 0,
-            "stopped_reason": "complete",
-        }
-
-    api_requests = 0
-    weeks_backfilled = 0
-    stopped_reason = "complete"
-
-    for week_str in missing:
-        remaining = API_RUN_STATS.get("remaining")
-        if remaining is not None and remaining <= 2:
-            stopped_reason = "quota"
-            break
-
-        result = backfill_week(week_str, token, projects_map)
-        api_requests += 1
-
-        if not result["success"]:
-            stopped_reason = result.get("reason", "error")
-            break
-
-        weeks_backfilled += 1
-
-        conn.execute(
-            "UPDATE runs SET weeks_backfilled=?, api_requests_made=? WHERE id=?",
-            (weeks_backfilled, api_requests, run_id),
-        )
-        conn.execute(
-            "UPDATE checkpoints SET last_completed_week=?, last_verified_at=? WHERE run_id=?",
-            (week_str, datetime.now().isoformat(), run_id),
-        )
-        conn.commit()
-
-    status = "success" if stopped_reason == "complete" else "failed"
-    conn.execute(
-        "UPDATE runs SET status=?, finished_at=?, weeks_discovered=?, weeks_backfilled=?, api_requests_made=?, stopped_reason=? WHERE id=?",
-        (status, datetime.now().isoformat(), len(missing), weeks_backfilled, api_requests, stopped_reason, run_id),
-    )
-    conn.commit()
-    conn.close()
 
     return {
         "status": status,
