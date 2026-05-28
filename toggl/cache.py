@@ -110,7 +110,8 @@ def get_last_updated_str():
     dt = parse_iso(ts)
     if dt is None:
         return "Never"
-    diff = datetime.now() - dt
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    diff = now - dt
     secs = int(diff.total_seconds())
     if secs < 60:
         return f"{secs}s ago"
@@ -130,7 +131,8 @@ def needs_auto_update():
     dt = parse_iso(ts)
     if dt is None:
         return False
-    diff = datetime.now() - dt
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    diff = now - dt
     return diff.total_seconds() > 1800
 
 
