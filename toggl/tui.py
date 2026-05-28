@@ -579,7 +579,7 @@ class TogglTUI(App):
 
     def __init__(self):
         super().__init__()
-        self.active_view_index = 0  # Overview is the default landing view
+        self.active_view_index = 1  # Day view is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
         self.sparkbar_forced_open = True
@@ -1415,7 +1415,7 @@ class TogglTUI(App):
         values = sorted(day_net_map.values())
         n = len(values)
         p10_idx = max(0, int(n * 0.1))
-        p90_idx = min(n - 1, int(n * 0.9) - 1)
+        p90_idx = max(0, min(n - 1, int(n * 0.9)))
         p10 = values[p10_idx]
         p90 = values[p90_idx]
         abs_max = max(abs(p10), abs(p90))
@@ -1480,7 +1480,7 @@ class TogglTUI(App):
         num_weeks = self._heatmap_num_weeks
         if grid_start is None or num_weeks <= 0:
             return
-        col = (event.x - HEATMAP_ROW_PREFIX) // 2
+        col = (event.x - 1 - HEATMAP_ROW_PREFIX) // 2
         row = event.y - 1
         if not (0 <= row <= 6 and 0 <= col < num_weeks):
             return

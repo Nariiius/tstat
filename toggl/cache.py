@@ -127,10 +127,10 @@ def needs_auto_update():
     history = _load_history()
     ts = history.get("last_updated")
     if not ts:
-        return False
+        return True
     dt = parse_iso(ts)
     if dt is None:
-        return False
+        return True
     now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
     diff = now - dt
     return diff.total_seconds() > 1800
@@ -547,36 +547,64 @@ def _patch_daily_csv(week_str, daily_data):
     start_d, end_d = get_week_dates(week_str)
     week_dates = set((start_d + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7))
 
-    existing = []
+    existing_rows = []
     if os.path.exists(DAILY_CSV_FILE):
         with open(DAILY_CSV_FILE, "r", encoding="utf-8") as f:
-            existing = [row for row in csv.DictReader(f) if row["Date"] not in week_dates]
+            existing_rows = list(csv.DictReader(f))
+
+    merged = {}
+    for row in existing_rows:
+        d = row["Date"]
+        p = row["Project"]
+        h = float(row["Hours"])
+        merged.setdefault(d, {})[p] = h
 
     for day_str, projs in daily_data.items():
         if day_str in week_dates:
             for proj, hours in projs.items():
                 if hours > 0:
-                    existing.append({"Date": day_str, "Project": proj, "Hours": round(hours, 4)})
+                    merged.setdefault(day_str, {})[proj] = hours
+
+    rows = []
+    for day_str in sorted(merged.keys()):
+        for proj, hours in merged[day_str].items():
+            if hours > 0:
+                rows.append({"Date": day_str, "Project": proj, "Hours": round(hours, 4)})
 
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=["Date", "Project", "Hours"])
     writer.writeheader()
-    writer.writerows(existing)
+    writer.writerows(rows)
     _atomic_write(DAILY_CSV_FILE, buf.getvalue())
 
 
 def _patch_weekly_csv(week_str, weekly_data):
-    existing = []
+    existing_rows = []
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, "r", encoding="utf-8") as f:
-            existing = [row for row in csv.DictReader(f) if row["Week"] != week_str]
+            existing_rows = list(csv.DictReader(f))
+
+    merged = {}
+    for row in existing_rows:
+        wk = row["Week"]
+        p = row["Project"]
+        h = float(row["Hours"])
+        merged.setdefault(wk, {})[p] = h
+
     for proj, hours in weekly_data.items():
         if hours > 0:
-            existing.append({"Week": week_str, "Project": proj, "Hours": round(hours, 4)})
+            merged.setdefault(week_str, {})[proj] = hours
+
+    rows = []
+    for wk in sorted(merged.keys()):
+        for proj, hours in merged[wk].items():
+            if hours > 0:
+                rows.append({"Week": wk, "Project": proj, "Hours": round(hours, 4)})
+
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=["Week", "Project", "Hours"])
     writer.writeheader()
-    writer.writerows(existing)
+    writer.writerows(rows)
     _atomic_write(CSV_FILE, buf.getvalue())
 
 

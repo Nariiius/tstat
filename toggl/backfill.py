@@ -119,9 +119,19 @@ def find_missing_weeks(earliest_week):
     existing_weekly = _load_weekly_csv()
     existing_daily = _load_daily_csv()
 
+    weekly_hours = {}
+    weekly_path = _csv_file()
+    if os.path.exists(weekly_path):
+        import csv
+        with open(weekly_path) as f:
+            for row in csv.DictReader(f):
+                wk = row["Week"]
+                hrs = float(row.get("Hours") or 0.0)
+                weekly_hours[wk] = weekly_hours.get(wk, 0.0) + hrs
+
     for week_str in all_weeks:
         in_weekly = week_str in existing_weekly
-        in_daily = _week_has_daily_data(week_str, existing_daily)
+        in_daily = _week_has_daily_data(week_str, existing_daily, weekly_hours)
         if not in_weekly or not in_daily:
             missing.append(week_str)
 
@@ -160,17 +170,23 @@ def _load_daily_csv():
     return result
 
 
-def _week_has_daily_data(week_str, daily_data):
+def _week_has_daily_data(week_str, daily_data, weekly_hours=None):
     start_d, end_d = get_week_dates(week_str)
-    today = date.today()
-    # Only require data up to today for the current (partial) week
-    cutoff = min(end_d, today)
     week_dates = set(
         (start_d + timedelta(days=i)).strftime("%Y-%m-%d")
-        for i in range((cutoff - start_d).days + 1)
+        for i in range(7)
     )
-    present = set(d for d in daily_data if d in week_dates)
-    return len(present) == len(week_dates)
+    d_total = 0.0
+    for d_str in week_dates:
+        if d_str in daily_data:
+            d_total += sum(daily_data[d_str].values())
+
+    if weekly_hours is not None:
+        w_total = weekly_hours.get(week_str, 0.0)
+        # It has daily data if the daily total is at least close to the weekly total
+        return (w_total - d_total) < 0.05
+
+    return d_total > 0.0
 
 
 # ── Backfill single week ─────────────────────────────────────────────────────

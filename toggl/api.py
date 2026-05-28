@@ -196,18 +196,11 @@ def get_api_token():
     data = load_config()
     if data.get("api_token"):
         return data["api_token"]
-    print(f"{YELLOW}Toggl API Token not found.{RESET}")
-    print(f"Find it here: {CYAN}https://track.toggl.com/profile{RESET}")
-    token = input("Enter your Toggl API Token: ").strip()
-    if not token:
-        print(f"{RED}Error: API Token is required.{RESET}")
-        sys.exit(1)
-    data["api_token"] = token
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.chmod(CONFIG_FILE, 0o600)
-    print(f"{DIM}Token saved to {CONFIG_FILE}{RESET}\n")
-    return token
+    raise TogglAPIError(
+        "Toggl API Token not found. Please set the TOGGL_API_TOKEN environment variable "
+        "or define 'api_token' in toggl_config.json."
+    )
+
 
 
 def _prompt_yes_no(prompt):

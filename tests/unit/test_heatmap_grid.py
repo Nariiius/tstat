@@ -1,5 +1,6 @@
 """Unit tests for yearly heatmap grid layout."""
 
+import re
 from datetime import date, timedelta
 
 from toggl.tui import (
@@ -7,6 +8,11 @@ from toggl.tui import (
     _heatmap_num_week_columns,
     build_yearly_heatmap_lines,
 )
+
+
+def _plain_width(line: str) -> int:
+    """Terminal display width (Rich markup stripped)."""
+    return len(re.sub(r"\[[^\]]*\]", "", line))
 
 
 def test_heatmap_header_matches_row_width():
@@ -34,3 +40,18 @@ def test_heatmap_click_date_mapping():
     clicked = grid_start + timedelta(weeks=col, days=row)
     assert clicked.year == year
     assert clicked.weekday() == row
+
+
+def test_heatmap_plain_width_matches_with_rich_cells():
+    """Colored cells use Rich markup; display columns must still align with header."""
+    day_map = {
+        "2026-01-15": 5.0,
+        "2026-02-15": -3.0,
+        "2026-03-15": 2.0,
+        "2026-04-15": -8.0,
+    }
+    lines, _, _ = build_yearly_heatmap_lines(2026, day_map, 8.0)
+    header_w = _plain_width(lines[0])
+    assert header_w == HEATMAP_ROW_PREFIX + _heatmap_num_week_columns(2026) * 2
+    for line in lines[1:]:
+        assert _plain_width(line) == header_w

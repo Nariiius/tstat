@@ -87,7 +87,9 @@ def stub_api(monkeypatch):
         return weekly, daily
 
     import toggl.cache
+    import toggl.backfill
     monkeypatch.setattr(toggl.cache, "fetch_week_data", _fake_fetch)
+    monkeypatch.setattr(toggl.backfill, "fetch_week_data", _fake_fetch)
     return _fake_fetch
 
 

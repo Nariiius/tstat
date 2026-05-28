@@ -88,21 +88,35 @@ def tui_data(tmp_data_dir, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mount_keeps_active_week_on_day_view(tui_data):
+    """Month table refresh on mount must not repoint week away from current week."""
+    from toggl.cache import get_current_week
+
+    app = TogglTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert app.active_view_index == 1
+        assert app._active_week == get_current_week()
+        day_table = app.query_one("#day-table")
+        assert day_table.row_count > 0
+
+
+@pytest.mark.asyncio
 async def test_app_launches_and_shows_default_view(tui_data):
-    """App starts without crash; the default Overview view is active."""
+    """App starts without crash; the default Day view is active."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        assert app.active_view_index == 0
+        assert app.active_view_index == 1
 
-        overview_view = app.query_one("#overview-view")
-        assert "-active" in overview_view.classes
+        day_view = app.query_one("#day-view")
+        assert "-active" in day_view.classes
 
-        overview_table = app.query_one("#overview-table")
-        assert overview_table.row_count >= 0  # may be 0 if no data for period
+        day_table = app.query_one("#day-table")
+        assert day_table.row_count > 0
 
-        tab = app.query_one("#view-tab-0")
+        tab = app.query_one("#view-tab-1")
         assert "-active" in tab.classes
 
 
@@ -113,18 +127,18 @@ async def test_view_switching(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        assert app.active_view_index == 0
+        assert app.active_view_index == 1
 
         app.action_next_view()
         await pilot.pause()
-        assert app.active_view_index == 1
-        assert "-active" in app.query_one("#view-tab-1").classes
-        assert "-active" not in app.query_one("#view-tab-0").classes
+        assert app.active_view_index == 2
+        assert "-active" in app.query_one("#view-tab-2").classes
+        assert "-active" not in app.query_one("#view-tab-1").classes
 
         app.action_prev_view()
         await pilot.pause()
-        assert app.active_view_index == 0
-        assert "-active" in app.query_one("#view-tab-0").classes
+        assert app.active_view_index == 1
+        assert "-active" in app.query_one("#view-tab-1").classes
 
 
 @pytest.mark.asyncio
@@ -134,8 +148,6 @@ async def test_day_week_sync(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # Navigate: Overview(0) → Day(1) → Week(2)
-        app.action_next_view()
         app.action_next_view()
         await pilot.pause()
         assert app.active_view_index == 2
@@ -165,8 +177,6 @@ async def test_week_navigation(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # Navigate: Overview(0) → Day(1) → Week(2)
-        app.action_next_view()
         app.action_next_view()
         await pilot.pause()
         assert app.active_view_index == 2
@@ -194,8 +204,8 @@ async def test_sync_view_shows_backfill_status(tui_data):
 
         # 9 views: Overview(0) → Day(1) → Week(2) → Month(3) → Heatmap(4)
         # → Negatives(5) → Positives(6) → Recovery(7) → Sync/Quota(8)
-        # Starting at 0, need 8 next_view() presses to reach index 8.
-        for _ in range(8):
+        # Starting at Day(1), need 7 next_view() presses to reach Sync/Quota(8).
+        for _ in range(7):
             app.action_next_view()
             await pilot.pause()
         assert app.active_view_index == 8
