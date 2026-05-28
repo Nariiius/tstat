@@ -108,7 +108,7 @@ def log_negative(neg_name):
         sys.exit(0)
     ok, message = log_negative_direct(canonical)
     if ok:
-        print(f"\n{RED}✓ {message}{RESET}\n")
+        print(f"\n{GREEN}✓ {message}{RESET}\n")
     else:
         print(f"\n{RED}✗ {message}{RESET}\n")
     sys.exit(0)
