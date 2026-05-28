@@ -162,9 +162,15 @@ def _load_daily_csv():
 
 def _week_has_daily_data(week_str, daily_data):
     start_d, end_d = get_week_dates(week_str)
-    week_dates = set((start_d + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7))
+    today = date.today()
+    # Only require data up to today for the current (partial) week
+    cutoff = min(end_d, today)
+    week_dates = set(
+        (start_d + timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range((cutoff - start_d).days + 1)
+    )
     present = set(d for d in daily_data if d in week_dates)
-    return len(present) == 7
+    return len(present) == len(week_dates)
 
 
 # ── Backfill single week ─────────────────────────────────────────────────────
