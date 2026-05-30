@@ -697,7 +697,7 @@ class TogglTUI(App):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Container(id="chrome"):
-                yield Label("TStat v1.2.0", classes="app-title")
+                yield Label("TStat v1.3.1", classes="app-title")
                 tabs = Tabs(
                     *[Tab(view, id=f"tab-{index}") for index, view in enumerate(self.VIEWS)],
                     id="view-tabs",
