@@ -1,6 +1,5 @@
 """TogglTUI — Textual terminal UI for TStat."""
 
-from calendar import month_name
 from datetime import date, datetime, timedelta
 
 from rich.text import Text
@@ -158,71 +157,6 @@ def fmt_rate(rate):
     r = int(rate) if rate == int(rate) else rate
     return f"×{r}"
 
-
-HEATMAP_ROW_PREFIX = 6  # width of "  Mon " style row labels
-
-
-def _heatmap_grid_start(year: int) -> date:
-    """Monday on or before Jan 1 — column 0 of the yearly week grid."""
-    jan1 = date(year, 1, 1)
-    return jan1 - timedelta(days=jan1.weekday())
-
-
-def _heatmap_num_week_columns(year: int) -> int:
-    grid_start = _heatmap_grid_start(year)
-    end = date(year, 12, 31)
-    return ((end - grid_start).days // 7) + 1
-
-
-def _heatmap_cell_char(net, abs_max: float) -> str:
-    if net is None:
-        return "\u00b7"
-    if abs_max <= 0:
-        return "\u00b7"
-    intensity = abs(net) / abs_max
-    level = min(4, int(intensity * 5))
-    shades = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585"]
-    if net > 0:
-        return f"[#37d994]{shades[level]}[/]"
-    return f"[#ff5f5f]{shades[level]}[/]"
-
-
-def build_yearly_heatmap_lines(
-    year: int, day_net_map: dict[str, float], abs_max: float
-) -> tuple[list[str], date, int]:
-    """
-    GitHub-style calendar: columns = weeks, rows = Mon..Sun.
-    Header month labels align with week columns (2 chars per column).
-    """
-    grid_start = _heatmap_grid_start(year)
-    num_weeks = _heatmap_num_week_columns(year)
-
-    header = " " * HEATMAP_ROW_PREFIX
-    for col in range(num_weeks):
-        week_start = grid_start + timedelta(weeks=col)
-        label = ""
-        for m in range(1, 13):
-            d1 = date(year, m, 1)
-            if week_start <= d1 < week_start + timedelta(days=7):
-                label = month_name[m][:3]
-                break
-        header += f"{label[:2]:<2}" if label else "\u00b7 "
-
-    lines = [header]
-    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    today = date.today()
-    for dow in range(7):
-        row = f"{day_labels[dow]:>5} "
-        for col in range(num_weeks):
-            cell = grid_start + timedelta(weeks=col, days=dow)
-            if cell.year != year or cell > today:
-                row += "\u00b7 "
-            else:
-                net = day_net_map.get(cell.strftime("%Y-%m-%d"))
-                row += _heatmap_cell_char(net, abs_max) + " "
-        lines.append(row)
-
-    return lines, grid_start, num_weeks
 
 
 def fmt_pts(pts):
@@ -709,26 +643,6 @@ class TogglTUI(App):
         color: #63f3ff;
     }
 
-    #heatmap-grid {
-        height: 1fr;
-        border: round #3d4f63;
-        padding: 0 1;
-        background: #0b1016;
-    }
-
-    #heatmap-grid:focus,
-    #heatmap-grid:focus-within {
-        border: round $accent;
-        background: #0b1016;
-        background-tint: transparent 0%;
-    }
-
-    .heatmap-legend {
-        height: auto;
-        color: #8d98a7;
-        padding: 0 1;
-    }
-
     Toast {
         background: #0b1016;
         color: #d7dde8;
@@ -765,7 +679,6 @@ class TogglTUI(App):
         "Day",
         "Week",
         "Month",
-        "Heatmap",
         "Negatives",
         "Positives",
         "Recovery",
@@ -780,9 +693,7 @@ class TogglTUI(App):
         self._table_resize_timer = None
         self._data_cache: DataCache | None = None
         self._active_week = get_current_week()
-        self._heatmap_grid_start: date | None = None
-        self._heatmap_num_weeks: int = 0
-
+    
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Container(id="chrome"):
@@ -817,9 +728,6 @@ class TogglTUI(App):
                         yield DataTable(
                             zebra_stripes=False, cursor_type="row", id="month-table"
                         )
-                    with Container(id="heatmap-view", classes="view"):
-                        yield Static(id="heatmap-grid")
-                        yield Label(id="heatmap-legend", classes="heatmap-legend")
                     with Container(id="negatives-view", classes="view"):
                         yield DataTable(
                             zebra_stripes=False,
@@ -964,11 +872,10 @@ class TogglTUI(App):
         1: "refresh_day_view",
         2: "refresh_week_view",
         3: "refresh_month_view",
-        4: "refresh_heatmap_view",
-        5: "refresh_negatives_view",
-        6: "refresh_positives_view",
-        7: "refresh_recovery_view",
-        8: "refresh_sync_view",
+        4: "refresh_negatives_view",
+        5: "refresh_positives_view",
+        6: "refresh_recovery_view",
+        7: "refresh_sync_view",
     }
 
     def _refresh_view_by_index(self, index):
@@ -999,7 +906,6 @@ class TogglTUI(App):
             "#day-view",
             "#week-view",
             "#month-view",
-            "#heatmap-view",
             "#negatives-view",
             "#positives-view",
             "#recovery-view",
@@ -1015,11 +921,10 @@ class TogglTUI(App):
             1: "#day-table",
             2: "#week-table",
             3: "#month-table",
-            4: "#heatmap-grid",
-            5: "#negatives-catalog-table",
-            6: "#positives-catalog-table",
-            7: "#recovery-table",
-            8: "#sync-table",
+            4: "#negatives-catalog-table",
+            5: "#positives-catalog-table",
+            6: "#recovery-table",
+            7: "#sync-table",
         }
         selector = focus_targets.get(self.active_view_index)
         if selector:
@@ -1594,46 +1499,6 @@ class TogglTUI(App):
                 table.add_row(m["month"], f"{m['hours']:.1f}h", net_str, key=m["month"])
         table.border_title = "[b][#63f3ff]Month Overview (Last 12)[/][/]"
 
-    def refresh_heatmap_view(self):
-        cache = self._data_cache
-        if cache is None:
-            return
-        grid = self.query_one("#heatmap-grid", Static)
-        legend = self.query_one("#heatmap-legend", Label)
-
-        year = date.today().year
-        day_net_map = cache.get_yearly_day_net_map(year)
-
-        if not day_net_map:
-            grid.update("[dim]No data for this year yet.[/]")
-            legend.update("")
-            self._heatmap_grid_start = None
-            self._heatmap_num_weeks = 0
-            return
-
-        values = sorted(day_net_map.values())
-        n = len(values)
-        p10_idx = max(0, int(n * 0.1))
-        p90_idx = max(0, min(n - 1, int(n * 0.9)))
-        p10 = values[p10_idx]
-        p90 = values[p90_idx]
-        abs_max = max(abs(p10), abs(p90))
-
-        lines, grid_start, num_weeks = build_yearly_heatmap_lines(
-            year, day_net_map, abs_max
-        )
-        self._heatmap_grid_start = grid_start
-        self._heatmap_num_weeks = num_weeks
-
-        grid.update("\n".join(lines))
-
-        legend.update(
-            f"[dim]Less[/] [dim]▁[/][#37d994]▂▃▄▅[/] [dim]More  •  "
-            f"Red = negative  •  Green = positive  •  "
-            f"P10={p10:.1f}  P90={p90:.1f}[/]"
-        )
-        grid.border_title = f"[b][#63f3ff]Heatmap \u2014 {year}[/][/]"
-
     # ── Event handlers ──
 
     @on(DataTable.RowHighlighted, "#week-table")
@@ -1672,30 +1537,10 @@ class TogglTUI(App):
         self.refresh_week_view()
         self.update_status_line()
 
-    @on(Click, "#heatmap-grid")
-    def heatmap_click(self, event: Click):
-        year = date.today().year
-        grid_start = self._heatmap_grid_start
-        num_weeks = self._heatmap_num_weeks
-        if grid_start is None or num_weeks <= 0:
-            return
-        col = (event.x - 1 - HEATMAP_ROW_PREFIX) // 2
-        row = event.y - 1
-        if not (0 <= row <= 6 and 0 <= col < num_weeks):
-            return
-        clicked_date = grid_start + timedelta(weeks=col, days=row)
-        if clicked_date.year == year and clicked_date <= date.today():
-            self.selected_day = clicked_date.strftime("%Y-%m-%d")
-            self._active_week = get_week_str(clicked_date)
-            self.refresh_week_view()
-            self.refresh_day_view()
-            self._sync_week_table_cursor()
-            self.update_status_line()
-
     @on(Click, "#spark-catchup")
     def on_catchup_click(self):
         """Click catchup → navigate to Recovery view."""
-        RECOVERY_INDEX = 7
+        RECOVERY_INDEX = 6
         if self.active_view_index == RECOVERY_INDEX:
             return
         self.active_view_index = RECOVERY_INDEX

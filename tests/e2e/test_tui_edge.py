@@ -87,7 +87,7 @@ async def test_empty_data_shows_gracefully(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for i in range(9):
+        for i in range(8):
             app.active_view_index = i
             app._refresh_view_by_index(i)
             await pilot.pause()
@@ -110,7 +110,7 @@ async def test_missing_data_files_shows_gracefully(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for i in range(9):
+        for i in range(8):
             app.active_view_index = i
             app._refresh_view_by_index(i)
             await pilot.pause()
@@ -147,8 +147,8 @@ async def test_rapid_view_switching(tui_data):
             app.action_next_view()
         await pilot.pause()
 
-        # Active view is still a valid index
-        assert 0 <= app.active_view_index < 9
+        # Active view is still a valid index (8 views: 0-7)
+        assert 0 <= app.active_view_index < 8
 
 
 @pytest.mark.asyncio
@@ -209,10 +209,10 @@ async def test_sync_view_shows_all_status_fields(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for _ in range(7):
+        for _ in range(6):
             app.action_next_view()
             await pilot.pause()
-        assert app.active_view_index == 8
+        assert app.active_view_index == 7
 
         sync_table = app.query_one("#sync-table")
         all_text = " ".join(

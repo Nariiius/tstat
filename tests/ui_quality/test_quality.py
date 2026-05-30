@@ -75,12 +75,12 @@ class TestAccessibility:
             assert app.active_view_index == 1
             
             # Navigate through all views using keyboard
-            for i in range(9):
+            for i in range(8):
                 await pilot.press("ctrl+right")
                 await pilot.pause()
                 
                 # Each view should be accessible (wraps around)
-                expected_view = (1 + i + 1) % 9
+                expected_view = (1 + i + 1) % 8
                 assert app.active_view_index == expected_view
 
     @pytest.mark.asyncio

@@ -150,12 +150,12 @@ async def test_view_switching(tui_data):
 
 @pytest.mark.asyncio
 async def test_view_navigation_wraps_around(tui_data):
-    """Pressing right through all 9 views wraps back to Day (view 1)."""
+    """Pressing right through all 8 views wraps back to Day (view 1)."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for _ in range(9):
+        for _ in range(8):
             app.action_next_view()
             await pilot.pause()
 
@@ -285,11 +285,11 @@ async def test_sync_view_shows_backfill_status(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # 7 right-presses from Day(1) → Sync/Quota(8)
-        for _ in range(7):
+        # 6 right-presses from Day(1) → Sync/Quota(7)
+        for _ in range(6):
             app.action_next_view()
             await pilot.pause()
-        assert app.active_view_index == 8
+        assert app.active_view_index == 7
 
         sync_table = app.query_one("#sync-table")
         assert sync_table.row_count > 0

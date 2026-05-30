@@ -58,24 +58,11 @@ class TestViewSnapshots:
             terminal_size=(120, 40)
         )
 
-    def test_heatmap_view_snapshot(self, snap_compare, app_with_data):
-        """Heatmap view renders correctly."""
-        async def navigate_to_heatmap(pilot: Pilot):
-            # Navigate to heatmap view (4th view)
-            for _ in range(3):
-                await pilot.press("ctrl+right")
-        
-        assert snap_compare(
-            app_with_data,
-            run_before=navigate_to_heatmap,
-            terminal_size=(120, 40)
-        )
-
     def test_negatives_view_snapshot(self, snap_compare, app_with_data):
         """Negatives view renders correctly."""
         async def navigate_to_negatives(pilot: Pilot):
-            # Navigate to negatives view (5th view)
-            for _ in range(4):
+            # Navigate to negatives view (4th view)
+            for _ in range(3):
                 await pilot.press("ctrl+right")
         
         assert snap_compare(
@@ -87,8 +74,8 @@ class TestViewSnapshots:
     def test_positives_view_snapshot(self, snap_compare, app_with_data):
         """Positives view renders correctly."""
         async def navigate_to_positives(pilot: Pilot):
-            # Navigate to positives view (6th view)
-            for _ in range(5):
+            # Navigate to positives view (5th view)
+            for _ in range(4):
                 await pilot.press("ctrl+right")
         
         assert snap_compare(
@@ -100,8 +87,8 @@ class TestViewSnapshots:
     def test_recovery_view_snapshot(self, snap_compare, app_with_data):
         """Recovery view renders correctly."""
         async def navigate_to_recovery(pilot: Pilot):
-            # Navigate to recovery view (7th view)
-            for _ in range(6):
+            # Navigate to recovery view (6th view)
+            for _ in range(5):
                 await pilot.press("ctrl+right")
         
         assert snap_compare(
@@ -113,8 +100,8 @@ class TestViewSnapshots:
     def test_sync_view_snapshot(self, snap_compare, app_with_data):
         """Sync view renders correctly."""
         async def navigate_to_sync(pilot: Pilot):
-            # Navigate to sync view (8th view)
-            for _ in range(7):
+            # Navigate to sync view (7th view)
+            for _ in range(6):
                 await pilot.press("ctrl+right")
         
         assert snap_compare(
