@@ -258,31 +258,115 @@ def fmt_pts_rich(pts):
 # ──────────────────────────────────────────────
 
 
-class ConfirmScreen(ModalScreen[bool]):
+class BaseDialog(ModalScreen):
+    """Base modal dialog with consistent centered floating appearance.
+
+    Provides a standard #dialog → #dialog-box structure with:
+    - Centered layout (100% screen overlay → auto-sized box)
+    - Consistent round #3d4f63 border, $accent on focus
+    - Shared escape/cancel binding
+    - border_title from the title argument
+
+    Subclasses override ``body()`` to yield dialog content inside #dialog-box.
+    Default action_cancel dismisses with None.
+    """
+
+    DEFAULT_CSS = """
+    $accent: #63f3ff;
+
+    BaseDialog {
+        background: $background 60%;
+    }
+
+    #dialog {
+        width: 100%;
+        height: 100%;
+        align: center middle;
+    }
+
+    #dialog-box {
+        width: auto;
+        height: auto;
+        min-width: 60;
+        max-width: 80;
+        border: round #3d4f63;
+        padding: 1 2;
+        background: #0b1016;
+    }
+
+    #dialog-box:focus,
+    #dialog-box:focus-within {
+        border: round $accent;
+        background: #0b1016;
+        background-tint: transparent 0%;
+    }
+
+    .dialog-body {
+        margin-bottom: 1;
+    }
+
+    .dialog-help {
+        color: #8d98a7;
+        margin-top: 1;
+    }
+
+    #dialog-buttons {
+        margin-top: 1;
+        height: auto;
+    }
+
+    #btn-confirm:hover, #btn-cancel:hover {
+        color: #d7dde8;
+        text-style: bold;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, title: str):
+        super().__init__()
+        self._dialog_title = title
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            with Container(id="dialog-box"):
+                yield from self.body()
+
+    def body(self) -> ComposeResult:
+        """Override to yield dialog content inside #dialog-box."""
+        return
+
+    def on_mount(self):
+        self.query_one("#dialog-box").border_title = (
+            f"[b][#63f3ff]{self._dialog_title}[/][/]"
+        )
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
+class ConfirmScreen(BaseDialog):
+    """Confirmation dialog (Yes / No)."""
+
     BINDINGS = [
         ("y", "confirm", "Confirm"),
         ("Y", "confirm", "Confirm"),
         ("enter", "confirm", "Confirm"),
         ("n", "cancel", "Cancel"),
         ("N", "cancel", "Cancel"),
-        ("escape", "cancel", "Cancel"),
     ]
 
     def __init__(self, title, body):
-        super().__init__()
-        self.title = title
-        self.body = body
+        self._body_text = body
+        super().__init__(title)
 
-    def compose(self) -> ComposeResult:
-        with Container(id="dialog"):
-            with Container(id="dialog-box"):
-                yield Static(self.body, classes="dialog-body")
-                with Horizontal(id="dialog-buttons"):
-                    yield Static("[Y/Enter] confirm", id="btn-confirm", classes="dialog-help")
-                    yield Static("  " "[N/Esc] cancel", id="btn-cancel", classes="dialog-help")
-
-    def on_mount(self):
-        self.query_one("#dialog-box").border_title = f"[b][#63f3ff]{self.title}[/][/]"
+    def body(self) -> ComposeResult:
+        yield Static(self._body_text, classes="dialog-body")
+        with Horizontal(id="dialog-buttons"):
+            yield Static("[Y/Enter] confirm", id="btn-confirm", classes="dialog-help")
+            yield Static("  " "[N/Esc] cancel", id="btn-cancel", classes="dialog-help")
 
     @on(Click, "#btn-confirm")
     def on_confirm_click(self):
@@ -299,16 +383,19 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class NegativeInputScreen(ModalScreen[str | None]):
-    def compose(self) -> ComposeResult:
-        with Container(id="dialog"):
-            with Container(id="dialog-box"):
-                yield Static("Select a negative action to log.", classes="dialog-body")
-                yield OptionList(id="negative-list")
-                yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
+class NegativeInputScreen(BaseDialog):
+    """Pick a negative action to log."""
+
+    def __init__(self):
+        super().__init__("Log Negative")
+
+    def body(self) -> ComposeResult:
+        yield Static("Select a negative action to log.", classes="dialog-body")
+        yield OptionList(id="negative-list")
+        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 
     def on_mount(self):
-        self.query_one("#dialog-box").border_title = "[b][#63f3ff]Log Negative[/][/]"
+        super().on_mount()
         option_list = self.query_one("#negative-list", OptionList)
         for name in NEGATIVES:
             option_list.add_option(name)
@@ -322,20 +409,20 @@ class NegativeInputScreen(ModalScreen[str | None]):
     def on_cancel_click(self):
         self.dismiss(None)
 
-    def key_escape(self):
-        self.dismiss(None)
 
+class PositiveInputScreen(BaseDialog):
+    """Pick a positive action to log."""
 
-class PositiveInputScreen(ModalScreen[str | None]):
-    def compose(self) -> ComposeResult:
-        with Container(id="dialog"):
-            with Container(id="dialog-box"):
-                yield Static("Select a positive action to log.", classes="dialog-body")
-                yield OptionList(id="positive-list")
-                yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
+    def __init__(self):
+        super().__init__("Log Positive")
+
+    def body(self) -> ComposeResult:
+        yield Static("Select a positive action to log.", classes="dialog-body")
+        yield OptionList(id="positive-list")
+        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 
     def on_mount(self):
-        self.query_one("#dialog-box").border_title = "[b][#37d994]Log Positive[/][/]"
+        super().on_mount()
         option_list = self.query_one("#positive-list", OptionList)
         for name in POSITIVES:
             option_list.add_option(name)
@@ -347,9 +434,6 @@ class PositiveInputScreen(ModalScreen[str | None]):
 
     @on(Click, "#btn-cancel")
     def on_cancel_click(self):
-        self.dismiss(None)
-
-    def key_escape(self):
         self.dismiss(None)
 
 
@@ -428,6 +512,8 @@ class ScrollableFooter(Footer):
 
 class TogglTUI(App):
     CSS = """
+    $accent: #63f3ff;
+
     * {
         scrollbar-size: 0 0;
     }
@@ -500,15 +586,39 @@ class TogglTUI(App):
         color: #d7dde8;
     }
 
+    DataTable:focus,
+    DataTable:focus-within {
+        border: round $accent;
+        background: #0b1016;
+        background-tint: transparent 0%;
+    }
+
+    DataTable:focus > .datatable--cursor,
+    DataTable:focus-within > .datatable--cursor {
+        background: transparent;
+        color: $accent;
+        text-style: bold;
+    }
+
+    DataTable:focus > .datatable--fixed-cursor,
+    DataTable:focus-within > .datatable--fixed-cursor {
+        background: transparent;
+        color: $accent;
+    }
+
+    DataTable > .datatable--cursor {
+        background: transparent;
+        color: #d7dde8;
+    }
+
+    DataTable > .datatable--fixed-cursor {
+        background: transparent;
+    }
+
     DataTable > .datatable--header {
         background: #0b1016;
         color: #63f3ff;
         text-style: bold;
-    }
-
-    DataTable > .datatable--cursor {
-        background: #27323d;
-        color: #f5f7fa;
     }
 
     #spark-rail {
@@ -528,15 +638,17 @@ class TogglTUI(App):
         color: #d7dde8;
     }
 
+    #spark-weeks-table:focus,
+    #spark-weeks-table:focus-within {
+        border: round $accent;
+        background: #0b1016;
+        background-tint: transparent 0%;
+    }
+
     #spark-weeks-table > .datatable--header {
         background: #0b1016;
         color: #63f3ff;
         text-style: bold;
-    }
-
-    #spark-weeks-table > .datatable--cursor {
-        background: #27323d;
-        color: #f5f7fa;
     }
 
     #spark-days-table {
@@ -546,25 +658,25 @@ class TogglTUI(App):
         color: #d7dde8;
     }
 
-    #spark-days-table > .datatable--header {
+    #spark-days-table:focus,
+    #spark-days-table:focus-within {
+        border: round $accent;
         background: #0b1016;
-        color: #63f3ff;
-        text-style: bold;
-    }
-
-    #spark-days-table > .datatable--cursor {
-        background: #27323d;
-        color: #f5f7fa;
+        background-tint: transparent 0%;
     }
 
     #spark-catchup {
         height: auto;
         border: round #3d4f63;
         padding: 0 1;
+        background: #0b1016;
     }
 
-    #spark-catchup:hover {
-        background: #27323d;
+    #spark-catchup:focus,
+    #spark-catchup:focus-within {
+        border: round #fab387;
+        background: #0b1016;
+        background-tint: transparent 0%;
     }
 
     Footer {
@@ -578,38 +690,6 @@ class TogglTUI(App):
 
     Footer > FooterKey .footer-key--description {
         color: #8d98a7;
-    }
-
-    #dialog {
-        width: 100%;
-        height: 100%;
-        align: center middle;
-    }
-
-    #dialog-box {
-        width: 60;
-        height: auto;
-        border: round #3d4f63;
-        padding: 1 2;
-        background: #0b1016;
-    }
-
-    .dialog-body {
-        margin-bottom: 1;
-    }
-
-    .dialog-help {
-        color: #8d98a7;
-        margin-top: 1;
-    }
-
-    #dialog-buttons {
-        margin-top: 1;
-    }
-
-    #btn-confirm:hover, #btn-cancel:hover {
-        color: #d7dde8;
-        text-style: bold;
     }
 
     OptionList {
@@ -634,6 +714,13 @@ class TogglTUI(App):
         border: round #3d4f63;
         padding: 0 1;
         background: #0b1016;
+    }
+
+    #heatmap-grid:focus,
+    #heatmap-grid:focus-within {
+        border: round $accent;
+        background: #0b1016;
+        background-tint: transparent 0%;
     }
 
     .heatmap-legend {
