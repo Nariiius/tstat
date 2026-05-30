@@ -1,4 +1,4 @@
-"""TogglTUI — Textual terminal UI for TogglTrack."""
+"""TogglTUI — Textual terminal UI for TStat."""
 
 from calendar import month_name
 from datetime import date, datetime, timedelta
@@ -11,7 +11,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import Click
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Label, OptionList, Static
+from textual.widgets import DataTable, Input, Label, OptionList, Static, Tab, Tabs
 from textual.worker import Worker, get_current_worker
 
 from toggl.api import (
@@ -358,25 +358,36 @@ class TogglTUI(App):
     }
 
     #chrome {
-        height: 3;
-        border: solid #2e3947;
+        layout: horizontal;
+        height: auto;
         padding: 0 1;
     }
 
-    #view-tabs {
-        height: 1;
-        color: #8d98a7;
-    }
-
-    .view-tab {
-        width: auto;
-        margin-right: 2;
-        color: #8d98a7;
-    }
-
-    .view-tab.-active {
+    .app-title {
         color: #63f3ff;
         text-style: bold;
+        padding: 0 1;
+        width: auto;
+    }
+
+    #view-tabs {
+        width: 1fr;
+        margin: 0 1;
+    }
+
+    #view-tabs > .-active {
+        color: #63f3ff;
+        text-style: bold;
+    }
+
+    #view-tabs > .-hidden {
+        display: none;
+    }
+
+    #sync-status {
+        color: #8d98a7;
+        width: auto;
+        padding: 0 1;
     }
 
     #main {
@@ -425,13 +436,9 @@ class TogglTUI(App):
         display: block;
     }
 
-    #spark-rail.-hidden {
-        display: none;
-    }
-
     #spark-weeks-table {
-        height: auto;
-        min-height: 5;
+        height: 1fr;
+        min-height: 0;
         border: solid #2e3947;
         background: #0b1016;
         color: #d7dde8;
@@ -449,7 +456,7 @@ class TogglTUI(App):
     }
 
     #spark-days-table {
-        height: 1fr;
+        height: auto;
         border: solid #2e3947;
         background: #0b1016;
         color: #d7dde8;
@@ -470,6 +477,10 @@ class TogglTUI(App):
         height: auto;
         border: solid #2e3947;
         padding: 0 1;
+    }
+
+    #spark-catchup:hover {
+        background: #27323d;
     }
 
     #footer {
@@ -520,12 +531,6 @@ class TogglTUI(App):
     OptionList > .option-list--option-highlighted {
         background: #27323d;
         color: #63f3ff;
-    }
-
-    #context-banner {
-        height: 1;
-        color: #8d98a7;
-        padding: 0 1;
     }
 
     #heatmap-grid {
@@ -592,6 +597,7 @@ class TogglTUI(App):
 
     def __init__(self):
         super().__init__()
+        self._initialized = False
         self.active_view_index = 1  # Day view is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self.sparkbar_collapsed = False
@@ -605,10 +611,14 @@ class TogglTUI(App):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Container(id="chrome"):
-                with Horizontal(id="view-tabs"):
-                    for index, view in enumerate(self.VIEWS):
-                        yield Static(view, classes="view-tab", id=f"view-tab-{index}")
-                yield Static(id="context-banner", classes="context-banner")
+                yield Label("TStat v1.2.0", classes="app-title")
+                tabs = Tabs(
+                    *[Tab(view, id=f"tab-{index}") for index, view in enumerate(self.VIEWS)],
+                    id="view-tabs",
+                )
+                tabs.can_focus = False
+                yield tabs
+                yield Static(id="sync-status", classes="sync-status")
             with Horizontal(id="main"):
                 with Container(id="content"):
                     with Container(id="overview-view", classes="view"):
@@ -685,6 +695,10 @@ class TogglTUI(App):
     def on_mount(self):
         self._setup_tables()
         load_runtime_settings()
+        # Set initial tab silently (prevent auto-activation of tab-0)
+        tabs = self.query_one("#view-tabs", Tabs)
+        with tabs.prevent(Tabs.TabActivated):
+            tabs.active = f"tab-{self.active_view_index}"
         if needs_auto_update():
             self._do_auto_refresh()
         self.refresh_all_views()
@@ -794,18 +808,16 @@ class TogglTUI(App):
         self._table_resize_timer = self.set_timer(0.1, self._resize_tables)
 
     def update_tabs(self):
-        for index, view in enumerate(self.VIEWS):
-            tab = self.query_one(f"#view-tab-{index}", Static)
-            tab.update(view)
-            tab.set_class(index == self.active_view_index, "-active")
+        tabs = self.query_one("#view-tabs", Tabs)
+        with tabs.prevent(Tabs.TabActivated):
+            tabs.active = f"tab-{self.active_view_index}"
 
     def update_status_line(self):
         current_week = get_current_week()
         synced = get_last_updated_str()
 
-        chrome = self.query_one("#chrome", Container)
-        chrome.border_title = "[b][#63f3ff]Toggl Stats[/][/]"
-        chrome.border_subtitle = f"  | [#8d98a7]Updated {synced}[/]"
+        sync_widget = self.query_one("#sync-status", Static)
+        sync_widget.update(f"Last synced: {synced}")
 
         footer_main = Text()
         footer_main.append("Views ", style="bold #63f3ff")
@@ -821,34 +833,6 @@ class TogglTUI(App):
         footer_main.append(" sparkbar  •  ", style="#8d98a7")
         footer_main.append("q", style="bold #63f3ff")
         footer_main.append(" quit", style="#8d98a7")
-
-        # Context banner showing current context
-        ctx_text = Text()
-        ctx_text.append("  ", style="#8d98a7")
-        current_view = self.VIEWS[self.active_view_index]
-        if current_view == "Day":
-            ctx_text.append(f"Day: {self.selected_day}", style="bold")
-        elif current_view == "Week":
-            ctx_text.append(f"Week: {self._active_week}", style="bold")
-        elif current_view == "Month":
-            month_table = self.query_one("#month-table", DataTable)
-            cursor = month_table.cursor_row
-            if cursor is not None and month_table.row_count > 0:
-                keys = list(month_table.rows.keys())
-                if 0 <= cursor < len(keys):
-                    ctx_text.append(f"Month: {keys[cursor].value}", style="bold")
-                else:
-                    ctx_text.append("Month view", style="bold")
-            else:
-                ctx_text.append("Month view", style="bold")
-        elif current_view == "Heatmap":
-            ctx_text.append(
-                f"Heatmap {date.today().year} — click a day to jump",
-                style="bold",
-            )
-        else:
-            ctx_text.append(f"View: {current_view}", style="bold")
-        self.query_one("#context-banner", Static).update(ctx_text)
 
         self.query_one("#footer-main", Static).update(footer_main)
 
@@ -905,32 +889,35 @@ class TogglTUI(App):
         table = self.query_one("#spark-weeks-table", DataTable)
         table.clear(columns=False)
 
-        current_sunday = get_sunday_of_week(date.today())
+        # Show ALL weeks that have data, from earliest to latest
+        all_weeks = sorted(cache.weekly_data.keys())
+        if not all_weeks:
+            table.border_title = "[b][#63f3ff]Past Weeks[/][/]"
+            return
+
         weeks_data = []
 
-        for i in range(4, 0, -1):
-            pw_sunday = current_sunday - timedelta(days=7 * i)
-            pw = get_week_str(pw_sunday)
-            pw_num = pw.split("W")[1]
-            pw_label = f"W{int(pw_num)}"
+        for wk in all_weeks:
+            wk_num = wk.split("W")[1]
+            wk_label = f"W{int(wk_num)}"
 
-            pw_data = cache.get_week_projects(pw)
-            if pw_data:
-                pw_results = calculate(pw_data)
-                pw_earned = sum(
-                    r[3] for r in pw_results if r[3] is not None and r[3] > 0
+            wk_projs = cache.get_week_projects(wk)
+            if wk_projs:
+                wk_results = calculate(wk_projs)
+                wk_earned = sum(
+                    r[3] for r in wk_results if r[3] is not None and r[3] > 0
                 )
-                pw_tracked_neg = sum(
-                    abs(r[3]) for r in pw_results if r[3] is not None and r[3] < 0
+                wk_tracked_neg = sum(
+                    abs(r[3]) for r in wk_results if r[3] is not None and r[3] < 0
                 )
             else:
-                pw_earned = 0.0
-                pw_tracked_neg = 0.0
+                wk_earned = 0.0
+                wk_tracked_neg = 0.0
 
-            pw_tracked, pw_logged = cache.get_week_neg_breakdown(pw)
-            pw_logged_pos = cache.get_week_pos_breakdown(pw)
-            pw_net = round(pw_earned - pw_tracked_neg - pw_logged + pw_logged_pos, 1)
-            weeks_data.append((pw_label, pw, pw_net, pw_tracked, pw_logged))
+            wk_tracked, wk_logged = cache.get_week_neg_breakdown(wk)
+            wk_logged_pos = cache.get_week_pos_breakdown(wk)
+            wk_net = round(wk_earned - wk_tracked_neg - wk_logged + wk_logged_pos, 1)
+            weeks_data.append((wk_label, wk, wk_net, wk_tracked, wk_logged))
 
         max_abs = max((abs(w[2]) for w in weeks_data), default=1) or 1
 
@@ -940,7 +927,8 @@ class TogglTUI(App):
             )
             table.add_row(label, net_cell, key=wk)
 
-        table.border_title = "[b][#63f3ff]Past 4 Weeks[/][/]"
+        n_weeks = len(weeks_data)
+        table.border_title = f"[b][#63f3ff]Past Weeks ({n_weeks})[/][/]"
 
     def _refresh_spark_days(self):
         cache = self._data_cache
@@ -1005,9 +993,6 @@ class TogglTUI(App):
                 earned,
                 pos_bonus,
             ) in enumerate(day_entries):
-                if not has_data and d > date.today():
-                    continue
-
                 day_name = d.strftime("%a")
                 is_today = d == date.today()
 
@@ -1558,6 +1543,20 @@ class TogglTUI(App):
             self._sync_week_table_cursor()
             self.update_status_line()
 
+    @on(Click, "#spark-catchup")
+    def on_catchup_click(self):
+        """Click catchup → navigate to Recovery view."""
+        RECOVERY_INDEX = 7
+        if self.active_view_index == RECOVERY_INDEX:
+            return
+        self.active_view_index = RECOVERY_INDEX
+        self._refresh_view_by_index(RECOVERY_INDEX)
+        self.update_tabs()
+        self.update_view_visibility()
+        self.update_status_line()
+        self.focus_active_view()
+        self._schedule_resize()
+
     def _sync_spark_days_cursor(self):
         table = self.query_one("#spark-days-table", DataTable)
         for i, key in enumerate(table.rows.keys()):
@@ -1574,10 +1573,17 @@ class TogglTUI(App):
                     table.move_cursor(row=i, animate=False)
                 break
 
-    @on(Click, ".view-tab")
-    def click_view_tab(self, event: Click):
-        if event.widget.id and event.widget.id.startswith("view-tab-"):
-            self.active_view_index = int(event.widget.id.rsplit("-", 1)[1])
+    @on(Tabs.TabActivated, "#view-tabs")
+    def on_tab_activated(self, event: Tabs.TabActivated):
+        if event.tab.id and event.tab.id.startswith("tab-"):
+            # Guard against stale events: verify this tab is actually active
+            tabs = self.query_one("#view-tabs", Tabs)
+            if tabs.active != event.tab.id:
+                return
+            new_index = int(event.tab.id.rsplit("-", 1)[1])
+            if new_index == self.active_view_index:
+                return
+            self.active_view_index = new_index
             self._refresh_view_by_index(self.active_view_index)
             self.update_tabs()
             self.update_view_visibility()

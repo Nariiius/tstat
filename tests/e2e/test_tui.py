@@ -116,8 +116,8 @@ async def test_app_launches_and_shows_default_view(tui_data):
         day_table = app.query_one("#day-table")
         assert day_table.row_count > 0
 
-        tab = app.query_one("#view-tab-1")
-        assert "-active" in tab.classes
+        tab = app.query_one("#view-tabs")
+        assert tab.active == "tab-1"
 
 
 @pytest.mark.asyncio
@@ -132,13 +132,13 @@ async def test_view_switching(tui_data):
         app.action_next_view()
         await pilot.pause()
         assert app.active_view_index == 2
-        assert "-active" in app.query_one("#view-tab-2").classes
-        assert "-active" not in app.query_one("#view-tab-1").classes
+        tabs = app.query_one("#view-tabs")
+        assert tabs.active == "tab-2"
 
         app.action_prev_view()
         await pilot.pause()
         assert app.active_view_index == 1
-        assert "-active" in app.query_one("#view-tab-1").classes
+        assert tabs.active == "tab-1"
 
 
 @pytest.mark.asyncio
