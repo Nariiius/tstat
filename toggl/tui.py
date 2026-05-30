@@ -495,7 +495,7 @@ class TogglTUI(App):
 
     DataTable {
         height: 1fr;
-        border: solid #2e3947;
+        border: round #3d4f63;
         background: #0b1016;
         color: #d7dde8;
     }
@@ -523,7 +523,7 @@ class TogglTUI(App):
     #spark-weeks-table {
         height: 1fr;
         min-height: 0;
-        border: solid #2e3947;
+        border: round #3d4f63;
         background: #0b1016;
         color: #d7dde8;
     }
@@ -541,7 +541,7 @@ class TogglTUI(App):
 
     #spark-days-table {
         height: auto;
-        border: solid #2e3947;
+        border: round #3d4f63;
         background: #0b1016;
         color: #d7dde8;
     }
@@ -559,7 +559,7 @@ class TogglTUI(App):
 
     #spark-catchup {
         height: auto;
-        border: solid #2e3947;
+        border: round #3d4f63;
         padding: 0 1;
     }
 
@@ -589,7 +589,7 @@ class TogglTUI(App):
     #dialog-box {
         width: 60;
         height: auto;
-        border: solid #2e3947;
+        border: round #3d4f63;
         padding: 1 2;
         background: #0b1016;
     }
@@ -631,7 +631,7 @@ class TogglTUI(App):
 
     #heatmap-grid {
         height: 1fr;
-        border: solid #2e3947;
+        border: round #3d4f63;
         padding: 0 1;
         background: #0b1016;
     }
@@ -645,19 +645,19 @@ class TogglTUI(App):
     Toast {
         background: #0b1016;
         color: #d7dde8;
-        border: solid #2e3947;
+        border: round #3d4f63;
         padding: 0 1;
         margin: 1 1 0 0;
         height: auto;
     }
     Toast.-information {
-        border: solid #37d994;
+        border: round #37d994;
     }
     Toast.-warning {
-        border: solid #e2b714;
+        border: round #e2b714;
     }
     Toast.-error {
-        border: solid #ff5f5f;
+        border: round #ff5f5f;
     }
     """
 
