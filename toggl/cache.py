@@ -9,8 +9,8 @@ from toggl.const import (
     CSV_FILE, DAILY_CSV_FILE, NEGATIVES_CSV_FILE, POSITIVES_CSV_FILE,
     HISTORY_FILE,
 )
-from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target
-from toggl.calc import calculate
+from toggl.config import POINTS, NEGATIVES, POSITIVES, RECOVERY_IGNORE, get_daily_target
+from toggl.calc import calculate, calculate_logged_activity_totals
 
 
 def parse_iso(s):
@@ -225,7 +225,12 @@ class DataCache:
         return projects
 
     def get_negatives_for_context(self, label, context_type):
-        negatives_dict: dict[str, float] = {}
+        """Return logged negatives as (name, count, points_per_event, total_points).
+
+        Filters entries by context (DAY / WEEK / ALL), then delegates aggregation
+        to calculate_logged_activity_totals so the UI receives count and total.
+        """
+        filtered_entries: list[dict] = []
         start_d, end_d = None, None
         if context_type == "WEEK":
             start_d, end_d = get_week_dates(label)
@@ -243,12 +248,16 @@ class DataCache:
                 except ValueError:
                     pass
             if include:
-                for e in entries:
-                    negatives_dict[e["name"]] = negatives_dict.get(e["name"], 0.0) + e["points"]
-        return [(name, None, None, -pts) for name, pts in negatives_dict.items()]
+                filtered_entries.extend(entries)
+        return calculate_logged_activity_totals(filtered_entries, NEGATIVES, sign=-1)
 
     def get_positives_for_context(self, label, context_type):
-        positives_dict: dict[str, float] = {}
+        """Return logged positives as (name, count, points_per_event, total_points).
+
+        Filters entries by context (DAY / WEEK / ALL), then delegates aggregation
+        to calculate_logged_activity_totals so the UI receives count and total.
+        """
+        filtered_entries: list[dict] = []
         start_d, end_d = None, None
         if context_type == "WEEK":
             start_d, end_d = get_week_dates(label)
@@ -266,9 +275,8 @@ class DataCache:
                 except ValueError:
                     pass
             if include:
-                for e in entries:
-                    positives_dict[e["name"]] = positives_dict.get(e["name"], 0.0) + e["points"]
-        return [(name, None, None, pts) for name, pts in positives_dict.items()]
+                filtered_entries.extend(entries)
+        return calculate_logged_activity_totals(filtered_entries, POSITIVES)
 
     def get_negative_log_rows(self, limit=30):
         rows = []
@@ -506,12 +514,16 @@ class DataCache:
         return result
 
     def get_recovery_rows(self, label, context_type):
+        import math
+
         report = self.get_report_sections(label, context_type)
         total_pts = report["total_points"]
         if total_pts >= 0:
             return {"total_points": total_pts, "rows": []}
         deficit = abs(total_pts)
         rows = []
+
+        # Tracked projects with positive rates (hourly)
         for name, rate in sorted(
             [(name, rate) for name, rate in POINTS.items() if rate > 0], key=lambda item: -item[1]
         ):
@@ -519,6 +531,20 @@ class DataCache:
             h = int(hours_needed)
             m = int((hours_needed - h) * 60)
             rows.append({"category": name, "rate": rate, "hours_needed": f"{h}h {m:02d}m"})
+
+        # Logged positive actions (one-time bonuses)
+        if POSITIVES:
+            for name, points in sorted(
+                [(name, v) for name, v in POSITIVES.items() if v > 0 and name not in RECOVERY_IGNORE],
+                key=lambda item: -item[1],
+            ):
+                occurrences_needed = math.ceil(deficit / points)
+                rows.append({
+                    "category": name,
+                    "rate": points,
+                    "hours_needed": f"×{occurrences_needed}",
+                })
+
         return {"total_points": total_pts, "rows": rows}
 
 
