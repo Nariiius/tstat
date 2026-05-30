@@ -575,7 +575,6 @@ class TogglTUI(App):
         Binding("b", "backfill", "Backfill"),
         Binding("n", "add_negative", "Add Negative"),
         Binding("p", "add_positive", "Add Positive"),
-        Binding("s", "toggle_sparkbar", "Sparkbar"),
         Binding("question_mark", "show_help", "Help"),
         Binding("shift+up", "nav_month_prev", "Month -", priority=True),
         Binding("shift+down", "nav_month_next", "Month +", priority=True),
@@ -600,8 +599,6 @@ class TogglTUI(App):
         self._initialized = False
         self.active_view_index = 1  # Day view is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
-        self.sparkbar_collapsed = False
-        self.sparkbar_forced_open = True
         self._table_resize_timer = None
         self._data_cache: DataCache | None = None
         self._active_week = get_current_week()
@@ -782,7 +779,6 @@ class TogglTUI(App):
         for idx in self._VIEW_REFRESH_MAP:
             self._refresh_view_by_index(idx)
         self.update_view_visibility()
-        self.update_sparkbar_visibility()
         self._schedule_resize()
 
     _VIEW_REFRESH_MAP = {
@@ -829,8 +825,6 @@ class TogglTUI(App):
         footer_main.append(" positive  •  ", style="#8d98a7")
         footer_main.append("u", style="bold #63f3ff")
         footer_main.append(" sync  •  ", style="#8d98a7")
-        footer_main.append("s", style="bold #63f3ff")
-        footer_main.append(" sparkbar  •  ", style="#8d98a7")
         footer_main.append("q", style="bold #63f3ff")
         footer_main.append(" quit", style="#8d98a7")
 
@@ -867,15 +861,6 @@ class TogglTUI(App):
         selector = focus_targets.get(self.active_view_index)
         if selector:
             self.query_one(selector).focus()
-
-    def update_sparkbar_visibility(self):
-        rail = self.query_one("#spark-rail", Vertical)
-        auto_collapse = self.size.width < 120
-        rail.set_class(
-            self.sparkbar_collapsed
-            or (auto_collapse and not self.sparkbar_forced_open),
-            "-hidden",
-        )
 
     # ── Spark tables ──
 
@@ -1631,20 +1616,10 @@ class TogglTUI(App):
         self.refresh_all_views()
         self.notify("Reloaded local data")
 
-    def action_toggle_sparkbar(self):
-        if self.size.width < 120:
-            self.sparkbar_forced_open = not self.sparkbar_forced_open
-            self.sparkbar_collapsed = False
-        else:
-            self.sparkbar_collapsed = not self.sparkbar_collapsed
-            self.sparkbar_forced_open = False
-        self.update_sparkbar_visibility()
-        self._schedule_resize()
-
     def action_show_help(self):
         self.notify(
             "Left/right switch views, n add negative, u sync, U full sync, "
-            "b backfill, s toggle sparkbar, q quit"
+            "b backfill, q quit"
         )
 
     def action_sync_current_week(self):
@@ -1766,13 +1741,10 @@ class TogglTUI(App):
         new_size = event.size
         if new_size.width == 0 or new_size.height == 0:
             return
-        self.update_sparkbar_visibility()
         self._schedule_resize()
 
     def _resize_tables(self):
         from rich.text import Text
-
-        self.update_sparkbar_visibility()
 
         # ── Main content tables ────────────────────────────────────────────
         table_ids = [
@@ -1789,8 +1761,7 @@ class TogglTUI(App):
         ]
         text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
 
-        rail = self.query_one("#spark-rail")
-        rail_w = 34 if not rail.has_class("-hidden") else 0
+        rail_w = 34
         content_w = self.size.width - rail_w
 
         if content_w <= 0:
