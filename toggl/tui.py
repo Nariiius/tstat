@@ -9,9 +9,9 @@ from textual._work_decorator import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.events import Click
+from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Label, OptionList, Static, Tab, Tabs
+from textual.widgets import DataTable, Footer, Input, Label, OptionList, Static, Tab, Tabs
 from textual.worker import Worker, get_current_worker
 
 from toggl.api import (
@@ -277,12 +277,20 @@ class ConfirmScreen(ModalScreen[bool]):
         with Container(id="dialog"):
             with Container(id="dialog-box"):
                 yield Static(self.body, classes="dialog-body")
-                yield Static(
-                    "[Y/Enter] confirm   [N/Esc] cancel", classes="dialog-help"
-                )
+                with Horizontal(id="dialog-buttons"):
+                    yield Static("[Y/Enter] confirm", id="btn-confirm", classes="dialog-help")
+                    yield Static("  " "[N/Esc] cancel", id="btn-cancel", classes="dialog-help")
 
     def on_mount(self):
         self.query_one("#dialog-box").border_title = f"[b][#63f3ff]{self.title}[/][/]"
+
+    @on(Click, "#btn-confirm")
+    def on_confirm_click(self):
+        self.dismiss(True)
+
+    @on(Click, "#btn-cancel")
+    def on_cancel_click(self):
+        self.dismiss(False)
 
     def action_confirm(self):
         self.dismiss(True)
@@ -297,7 +305,7 @@ class NegativeInputScreen(ModalScreen[str | None]):
             with Container(id="dialog-box"):
                 yield Static("Select a negative action to log.", classes="dialog-body")
                 yield OptionList(id="negative-list")
-                yield Static("[Esc] cancel", classes="dialog-help")
+                yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 
     def on_mount(self):
         self.query_one("#dialog-box").border_title = "[b][#63f3ff]Log Negative[/][/]"
@@ -310,6 +318,10 @@ class NegativeInputScreen(ModalScreen[str | None]):
     def submit_negative(self, event: OptionList.OptionSelected):
         self.dismiss(str(event.option.prompt))
 
+    @on(Click, "#btn-cancel")
+    def on_cancel_click(self):
+        self.dismiss(None)
+
     def key_escape(self):
         self.dismiss(None)
 
@@ -320,7 +332,7 @@ class PositiveInputScreen(ModalScreen[str | None]):
             with Container(id="dialog-box"):
                 yield Static("Select a positive action to log.", classes="dialog-body")
                 yield OptionList(id="positive-list")
-                yield Static("[Esc] cancel", classes="dialog-help")
+                yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 
     def on_mount(self):
         self.query_one("#dialog-box").border_title = "[b][#37d994]Log Positive[/][/]"
@@ -333,6 +345,10 @@ class PositiveInputScreen(ModalScreen[str | None]):
     def submit_positive(self, event: OptionList.OptionSelected):
         self.dismiss(str(event.option.prompt))
 
+    @on(Click, "#btn-cancel")
+    def on_cancel_click(self):
+        self.dismiss(None)
+
     def key_escape(self):
         self.dismiss(None)
 
@@ -340,6 +356,74 @@ class PositiveInputScreen(ModalScreen[str | None]):
 # ──────────────────────────────────────────────
 # MAIN TUI APP
 # ──────────────────────────────────────────────
+
+
+class ScrollableFooter(Footer):
+    """Footer with horizontal scroll enabled without visible scrollbar.
+
+    Unmodified mouse wheel scrolls horizontally (fallback when vertical
+    scrolling is not possible, e.g. single-row footer).
+    """
+
+    @property
+    def allow_horizontal_scroll(self) -> bool:
+        return self.is_scrollable
+
+    def _on_mouse_scroll_down(self, event: MouseScrollDown) -> None:
+        if event.delta_x:
+            # Touchpad horizontal swipe — scroll in delta_x direction
+            if self.allow_horizontal_scroll:
+                self._clear_anchor()
+                moved = (
+                    self._scroll_right_for_pointer(animate=False)
+                    if event.delta_x > 0
+                    else self._scroll_left_for_pointer(animate=False)
+                )
+                if moved:
+                    event.stop()
+        elif event.ctrl or event.shift:
+            if self.allow_horizontal_scroll:
+                self._clear_anchor()
+                if self._scroll_right_for_pointer(animate=False):
+                    event.stop()
+        else:
+            if self.allow_vertical_scroll:
+                self._clear_anchor()
+                if self._scroll_down_for_pointer(animate=False):
+                    event.stop()
+            elif self.allow_horizontal_scroll:
+                # Fall back to horizontal when vertical can't scroll
+                self._clear_anchor()
+                if self._scroll_right_for_pointer(animate=False):
+                    event.stop()
+
+    def _on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
+        if event.delta_x:
+            # Touchpad horizontal swipe — scroll in delta_x direction
+            if self.allow_horizontal_scroll:
+                self._clear_anchor()
+                moved = (
+                    self._scroll_right_for_pointer(animate=False)
+                    if event.delta_x > 0
+                    else self._scroll_left_for_pointer(animate=False)
+                )
+                if moved:
+                    event.stop()
+        elif event.ctrl or event.shift:
+            if self.allow_horizontal_scroll:
+                self._clear_anchor()
+                if self._scroll_left_for_pointer(animate=False):
+                    event.stop()
+        else:
+            if self.allow_vertical_scroll:
+                self._clear_anchor()
+                if self._scroll_up_for_pointer(animate=False):
+                    event.stop()
+            elif self.allow_horizontal_scroll:
+                # Fall back to horizontal when vertical can't scroll
+                self._clear_anchor()
+                if self._scroll_left_for_pointer(animate=False):
+                    event.stop()
 
 
 class TogglTUI(App):
@@ -483,14 +567,17 @@ class TogglTUI(App):
         background: #27323d;
     }
 
-    #footer {
-        height: auto;
-        border-top: solid #2e3947;
-        padding: 0 1;
+    Footer {
+        background: #0b1016;
+        color: #8d98a7;
     }
 
-    #footer-main {
-        color: #63f3ff;
+    Footer > FooterKey .footer-key--key {
+        color: #e2b714;
+    }
+
+    Footer > FooterKey .footer-key--description {
+        color: #8d98a7;
     }
 
     #dialog {
@@ -514,6 +601,15 @@ class TogglTUI(App):
     .dialog-help {
         color: #8d98a7;
         margin-top: 1;
+    }
+
+    #dialog-buttons {
+        margin-top: 1;
+    }
+
+    #btn-confirm:hover, #btn-cancel:hover {
+        color: #d7dde8;
+        text-style: bold;
     }
 
     OptionList {
@@ -566,20 +662,15 @@ class TogglTUI(App):
     """
 
     BINDINGS = [
-        Binding("left", "prev_view", "Prev View"),
-        Binding("right", "next_view", "Next View"),
-        Binding("q", "quit", "Quit"),
+        Binding("ctrl+left", "prev_view", "Prev"),
+        Binding("ctrl+right", "next_view", "Next"),
+        Binding("q", "quit", "Quit", show=False),
         Binding("r", "refresh_data", "Refresh"),
-        Binding("u", "sync_current_week", "Sync Week"),
+        Binding("u", "sync_current_week", "Sync"),
         Binding("U", "sync_full", "Full Sync"),
         Binding("b", "backfill", "Backfill"),
-        Binding("n", "add_negative", "Add Negative"),
-        Binding("p", "add_positive", "Add Positive"),
-        Binding("question_mark", "show_help", "Help"),
-        Binding("shift+up", "nav_month_prev", "Month -", priority=True),
-        Binding("shift+down", "nav_month_next", "Month +", priority=True),
-        Binding("{", "nav_month_prev", "Month -", priority=True),
-        Binding("}", "nav_month_next", "Month +", priority=True),
+        Binding("n", "add_negative", "Neg"),
+        Binding("p", "add_positive", "Pos"),
     ]
 
     VIEWS = [
@@ -686,8 +777,7 @@ class TogglTUI(App):
                         zebra_stripes=False,
                     )
                     yield Static(id="spark-catchup")
-            with Vertical(id="footer"):
-                yield Static(id="footer-main")
+        yield ScrollableFooter(show_command_palette=False)
 
     def on_mount(self):
         self._setup_tables()
@@ -699,6 +789,7 @@ class TogglTUI(App):
         if needs_auto_update():
             self._do_auto_refresh()
         self.refresh_all_views()
+        self.query_one(ScrollableFooter).refresh_bindings()
 
     @work(thread=True)
     def _do_auto_refresh(self):
@@ -813,22 +904,7 @@ class TogglTUI(App):
         synced = get_last_updated_str()
 
         sync_widget = self.query_one("#sync-status", Static)
-        sync_widget.update(f"Last synced: {synced}")
-
-        footer_main = Text()
-        footer_main.append("Views ", style="bold #63f3ff")
-        footer_main.append("<- ->", style="bold #63f3ff")
-        footer_main.append(" switch  •  ", style="#8d98a7")
-        footer_main.append("n", style="bold #63f3ff")
-        footer_main.append(" negative  •  ", style="#8d98a7")
-        footer_main.append("p", style="bold #63f3ff")
-        footer_main.append(" positive  •  ", style="#8d98a7")
-        footer_main.append("u", style="bold #63f3ff")
-        footer_main.append(" sync  •  ", style="#8d98a7")
-        footer_main.append("q", style="bold #63f3ff")
-        footer_main.append(" quit", style="#8d98a7")
-
-        self.query_one("#footer-main", Static).update(footer_main)
+        sync_widget.update(f"\u27f3\u2002{synced}")
 
     def update_view_visibility(self):
         view_ids = [
@@ -861,6 +937,7 @@ class TogglTUI(App):
         selector = focus_targets.get(self.active_view_index)
         if selector:
             self.query_one(selector).focus()
+        self.query_one(ScrollableFooter).refresh_bindings()
 
     # ── Spark tables ──
 

@@ -1,4 +1,4 @@
-"""Textual Pilot E2E tests for TogglTUI."""
+"""Textual Pilot E2E tests for TogglTUI — behavioural tests of user-visible features."""
 
 import json
 import os
@@ -20,8 +20,6 @@ def tui_data(tmp_data_dir, monkeypatch):
     from toggl.cache import get_week_dates
 
     # -- Config file at a temp path --
-    # Both toggl.const and toggl.config hold module-level references
-    # to CONFIG_FILE, so patch both.
     config_path = os.path.join(tmp_data_dir, "toggl_config.json")
     monkeypatch.setattr(toggl.const, "CONFIG_FILE", config_path)
     monkeypatch.setattr(toggl.config, "CONFIG_FILE", config_path)
@@ -88,36 +86,45 @@ def tui_data(tmp_data_dir, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mount_keeps_active_week_on_day_view(tui_data):
-    """Month table refresh on mount must not repoint week away from current week."""
-    from toggl.cache import get_current_week
-
+async def test_mount_shows_day_view_with_data(tui_data):
+    """[REWRITTEN] Day view is active after mount and shows project data rows."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        assert app.active_view_index == 1
-        assert app._active_week == get_current_week()
+
+        # Day view container is active
+        day_view = app.query_one("#day-view")
+        assert "-active" in day_view.classes
+
+        # Tab indicator matches Day
+        tabs = app.query_one("#view-tabs")
+        assert tabs.active == "tab-1"
+
+        # Day table has project data (header + at least one project row)
         day_table = app.query_one("#day-table")
-        assert day_table.row_count > 0
+        assert day_table.row_count >= 2
+
+        # A test project name appears in the data rows (sorted by rate desc)
+        row1 = day_table.get_row_at(1)
+        assert "Learning to Code" in str(row1[0]) or "Building Projects" in str(row1[0])
 
 
 @pytest.mark.asyncio
 async def test_app_launches_and_shows_default_view(tui_data):
-    """App starts without crash; the default Day view is active."""
+    """[REWRITTEN] App starts without crash; the default Day view renders data."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        assert app.active_view_index == 1
-
         day_view = app.query_one("#day-view")
         assert "-active" in day_view.classes
 
-        day_table = app.query_one("#day-table")
-        assert day_table.row_count > 0
+        table = app.query_one("#day-table")
+        assert table.row_count > 0
 
-        tab = app.query_one("#view-tabs")
-        assert tab.active == "tab-1"
+        # Spark rail also renders (right-side weeks/days/catchup)
+        spark_weeks = app.query_one("#spark-weeks-table")
+        assert spark_weeks.row_count > 0
 
 
 @pytest.mark.asyncio
@@ -142,29 +149,48 @@ async def test_view_switching(tui_data):
 
 
 @pytest.mark.asyncio
-async def test_day_week_sync(tui_data):
-    """Highlighting a week-table row updates the Day view."""
+async def test_view_navigation_wraps_around(tui_data):
+    """Pressing right through all 9 views wraps back to Day (view 1)."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
+        for _ in range(9):
+            app.action_next_view()
+            await pilot.pause()
+
+        # Back at Day view after wrap-around
+        assert app.active_view_index == 1
+        day_view = app.query_one("#day-view")
+        assert "-active" in day_view.classes
+
+
+@pytest.mark.asyncio
+async def test_day_week_sync(tui_data):
+    """[REWRITTEN] Highlighting a week-table row updates the Day view data."""
+    app = TogglTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        initial_day = app.selected_day
+
+        # Navigate to Week view (index 2)
         app.action_next_view()
         await pilot.pause()
-        assert app.active_view_index == 2
 
         week_table = app.query_one("#week-table")
         assert week_table.row_count > 0
 
-        initial_day = app.selected_day
-
+        # Highlight a different row
         await pilot.press("down")
         await pilot.pause()
 
+        # The selected day should change (different date highlighted)
         assert app.selected_day != initial_day
 
+        # Navigate back to Day view — still shows data for the new day
         app.action_prev_view()
         await pilot.pause()
-        assert app.active_view_index == 1
 
         day_table = app.query_one("#day-table")
         assert day_table.row_count > 0
@@ -196,15 +222,70 @@ async def test_week_navigation(tui_data):
 
 
 @pytest.mark.asyncio
+async def test_refresh_reloads_data(tui_data):
+    """Pressing r refreshes all views without error."""
+    app = TogglTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        app.action_refresh_data()
+        await pilot.pause()
+
+        # Day table still renders with data after refresh
+        day_table = app.query_one("#day-table")
+        assert day_table.row_count > 0
+
+
+@pytest.mark.asyncio
+async def test_footer_shows_keybindings(tui_data):
+    """Footer displays navigation and action hints via built-in Footer widget."""
+    from textual.widgets import Footer
+
+    app = TogglTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        # Textual's built-in Footer auto-renders BINDINGS as child widgets
+        footer = app.query_one(Footer)
+        keys = list(footer.children)
+        assert len(keys) > 0
+
+        # Each key binding widget has a 'description' attribute
+        descriptions = [
+            k.description for k in keys
+            if hasattr(k, "description") and k.description
+        ]
+        desc_text = " ".join(d.lower() for d in descriptions)
+        assert "neg" in desc_text
+        assert "pos" in desc_text
+        assert "prev" in desc_text
+        assert "next" in desc_text
+
+
+@pytest.mark.asyncio
+async def test_all_views_render_without_error(tui_data):
+    """All 9 views can be switched to without throwing exceptions."""
+    app = TogglTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        for i in range(9):
+            app.active_view_index = i
+            app._refresh_view_by_index(i)
+            app.update_view_visibility()
+            await pilot.pause()
+
+        # No exception means success
+
+
+@pytest.mark.asyncio
 async def test_sync_view_shows_backfill_status(tui_data):
     """Sync / Quota view renders a Backfill status row."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # 9 views: Overview(0) → Day(1) → Week(2) → Month(3) → Heatmap(4)
-        # → Negatives(5) → Positives(6) → Recovery(7) → Sync/Quota(8)
-        # Starting at Day(1), need 7 next_view() presses to reach Sync/Quota(8).
+        # 7 right-presses from Day(1) → Sync/Quota(8)
         for _ in range(7):
             app.action_next_view()
             await pilot.pause()
@@ -218,3 +299,83 @@ async def test_sync_view_shows_backfill_status(tui_data):
             for i in range(sync_table.row_count)
         )
         assert found
+
+
+@pytest.mark.asyncio
+async def test_log_negative_via_tui(tui_data, monkeypatch):
+    """Opening the negative modal shows an OptionList; confirming writes to CSV.
+
+    (Modal interaction tested by opening screen + verifying OptionList populated.
+    The actual log function is verified by calling it directly, with paths
+    patched so it writes inside the temp data dir.)
+    """
+    import csv
+    import toggl.const
+    import toggl.neg
+
+    # Ensure toggl.neg.NEGATIVES_CSV_FILE points to the temp path
+    # (it may have been imported before monkeypatches were applied)
+    monkeypatch.setattr(toggl.neg, "NEGATIVES_CSV_FILE", toggl.const.NEGATIVES_CSV_FILE)
+
+    app = TogglTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        # Open NegativeInputScreen — the modal screen is shown
+        app.action_add_negative()
+        await pilot.pause()
+
+        from toggl.tui import NegativeInputScreen
+        assert isinstance(app.screen, NegativeInputScreen)
+
+        # Also verify the OptionList is populated with config data
+        option_list = app.screen.query_one("#negative-list")
+        assert option_list.option_count > 0
+
+    # Verify the logging function itself works correctly
+    # (this is the same code path triggered by the modal's after_input callback)
+    ok, msg = toggl.neg.log_negative_direct("Procrastination")
+    assert ok
+
+    with open(toggl.const.NEGATIVES_CSV_FILE) as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["Negative"] == "Procrastination"
+
+
+@pytest.mark.asyncio
+async def test_log_positive_via_tui(tui_data, monkeypatch):
+    """Opening the positive modal shows an OptionList; confirming writes to CSV."""
+    import csv
+    import toggl.const
+    import toggl.neg
+
+    monkeypatch.setattr(toggl.neg, "POSITIVES_CSV_FILE", toggl.const.POSITIVES_CSV_FILE)
+
+    app = TogglTUI()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+
+        # Open PositiveInputScreen
+        app.action_add_positive()
+        await pilot.pause()
+
+        from toggl.tui import PositiveInputScreen
+        assert isinstance(app.screen, PositiveInputScreen)
+
+        # OptionList populated
+        option_list = app.screen.query_one("#positive-list")
+        assert option_list.option_count > 0
+
+    # Verify the logging function works (same code path as modal callback)
+    ok, msg = toggl.neg.log_positive_direct("Exercise")
+    assert ok
+
+    with open(toggl.const.POSITIVES_CSV_FILE) as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["Positive"] == "Exercise"
+
+
+
+

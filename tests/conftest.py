@@ -10,6 +10,7 @@ def tmp_data_dir(tmp_path, monkeypatch):
     import toggl.const
     import toggl.cache
     import toggl.backfill
+    import toggl.neg
 
     d = tmp_path / "data"
     d.mkdir()
@@ -21,10 +22,15 @@ def tmp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(toggl.const, "POSITIVES_CSV_FILE", str(d / "toggl_positives.csv"))
     monkeypatch.setattr(toggl.const, "HISTORY_FILE", str(d / "toggl_sync_history.json"))
     monkeypatch.setattr(toggl.const, "PROJECTS_FILE", str(d / "toggl_projects.json"))
-    # Also patch cache & backfill module-level references
+    # Also patch cache, backfill, and neg module-level references
     monkeypatch.setattr(toggl.cache, "CSV_FILE", toggl.const.CSV_FILE)
     monkeypatch.setattr(toggl.cache, "DAILY_CSV_FILE", toggl.const.DAILY_CSV_FILE)
+    monkeypatch.setattr(toggl.cache, "NEGATIVES_CSV_FILE", toggl.const.NEGATIVES_CSV_FILE)
+    monkeypatch.setattr(toggl.cache, "POSITIVES_CSV_FILE", toggl.const.POSITIVES_CSV_FILE)
+    monkeypatch.setattr(toggl.cache, "HISTORY_FILE", toggl.const.HISTORY_FILE)
     monkeypatch.setattr(toggl.backfill, "BACKFILL_DB", toggl.const.BACKFILL_DB)
+    monkeypatch.setattr(toggl.neg, "NEGATIVES_CSV_FILE", toggl.const.NEGATIVES_CSV_FILE)
+    monkeypatch.setattr(toggl.neg, "POSITIVES_CSV_FILE", toggl.const.POSITIVES_CSV_FILE)
     return str(d)
 
 
@@ -99,13 +105,26 @@ def sample_config(tmp_data_dir, monkeypatch):
     import toggl.config
     import toggl.calc
     import toggl.cache
+    import toggl.neg
 
     points = {
         "Learning to Code": 1.5,
         "Building Projects": 2.0,
         "Fitness": 1.0,
     }
+    negatives = {
+        "Procrastination": -3.0,
+        "Junk Food": -2.0,
+    }
+    positives = {
+        "Exercise": 3.0,
+        "Reading": 2.0,
+    }
     monkeypatch.setattr(toggl.config, "POINTS", points)
     monkeypatch.setattr(toggl.calc, "POINTS", points)
     monkeypatch.setattr(toggl.cache, "POINTS", points)
+    monkeypatch.setattr(toggl.config, "NEGATIVES", negatives)
+    monkeypatch.setattr(toggl.neg, "NEGATIVES", negatives)
+    monkeypatch.setattr(toggl.config, "POSITIVES", positives)
+    monkeypatch.setattr(toggl.neg, "POSITIVES", positives)
     monkeypatch.setattr(toggl.config, "DAILY_TARGET", 13.0)
