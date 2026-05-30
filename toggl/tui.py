@@ -59,8 +59,21 @@ from toggl.neg import (
 
 
 def get_sync_status_data():
+    import csv, os
+    from toggl.const import CSV_FILE, DAILY_CSV_FILE
+
     history = _load_history()
     from toggl.api import API_RUN_STATS, get_projects_cache_age_days
+
+    # Count actual weeks/days from CSV files (not from unwritten history keys)
+    synced_weeks = 0
+    synced_days = 0
+    if os.path.exists(CSV_FILE):
+        with open(CSV_FILE) as f:
+            synced_weeks = len({row["Week"] for row in csv.DictReader(f)})
+    if os.path.exists(DAILY_CSV_FILE):
+        with open(DAILY_CSV_FILE) as f:
+            synced_days = len({row["Date"] for row in csv.DictReader(f)})
 
     backfill = {}
     try:
@@ -73,8 +86,8 @@ def get_sync_status_data():
         "last_updated": get_last_updated_str(),
         "projects_cache_age_days": get_projects_cache_age_days(),
         "current_week": get_current_week(),
-        "synced_weeks": history.get("synced_weeks", {}),
-        "synced_days": history.get("synced_days", {}),
+        "synced_weeks": synced_weeks,
+        "synced_days": synced_days,
         "quota_remaining": API_RUN_STATS["remaining"],
         "quota_limit": API_RUN_STATS["limit"],
         "quota_resets_in": API_RUN_STATS["resets_in"],
@@ -554,6 +567,7 @@ class TogglTUI(App):
         Binding("r", "refresh_data", "Refresh"),
         Binding("u", "sync_current_week", "Sync Week"),
         Binding("U", "sync_full", "Full Sync"),
+        Binding("b", "backfill", "Backfill"),
         Binding("n", "add_negative", "Add Negative"),
         Binding("p", "add_positive", "Add Positive"),
         Binding("s", "toggle_sparkbar", "Sparkbar"),
@@ -1315,8 +1329,12 @@ class TogglTUI(App):
             rate = row["rate"]
             color = (
                 "[#37d994]"
-                if rate >= 2
-                else ("[#63f3ff]" if rate >= 1 else "[#d7dde8]")
+                if rate >= 3
+                else (
+                    "[#ffd700]"
+                    if rate >= 2
+                    else ("[#63f3ff]" if rate >= 1 else "[#d7dde8]")
+                )
             )
             rows.append(
                 (
@@ -1353,28 +1371,76 @@ class TogglTUI(App):
                 "Projects cache",
                 "missing" if cache_age is None else f"{cache_age:.1f} days old",
             ),
-            ("Synced weeks", str(len(status["synced_weeks"]))),
-            ("Synced days", str(len(status["synced_days"]))),
+            ("Synced weeks", str(status["synced_weeks"])),
+            ("Synced days", str(status["synced_days"])),
             ("Requests made", str(API_RUN_STATS["requests_made"])),
             ("Quota remaining", f"{remaining}/{limit}"),
+            ("Quota resets in",
+             _format_reset_window(status["quota_resets_in"])
+             if status["quota_resets_in"] is not None
+             else "—"),
         ]
-        if status["quota_resets_in"] is not None:
-            rows.append(
-                ("Quota resets in", _format_reset_window(status["quota_resets_in"]))
-            )
+        # ── Backfill section ──────────────────────────────────────────
         bf = status.get("backfill_status", {})
-        if bf.get("status") is not None:
-            rows.append(("Backfill status", bf["status"]))
-        if bf.get("earliest_week"):
-            rows.append(("Earliest week", bf["earliest_week"]))
-        if bf.get("last_completed_week"):
-            rows.append(("Last completed", bf["last_completed_week"]))
-        if bf.get("weeks_backfilled", 0) > 0:
-            rows.append(("Weeks backfilled", str(bf["weeks_backfilled"])))
-        if bf.get("total_weeks", 0) > 0:
-            rows.append(("Total weeks", str(bf["total_weeks"])))
-        if not bf.get("status") and not bf.get("earliest_week"):
-            rows.append(("Backfill", "Not yet run"))
+        bf_status = bf.get("status")
+        weeks_done = bf.get("weeks_backfilled", 0)
+        weeks_total = bf.get("weeks_discovered", 0) or bf.get("total_weeks", 0)
+        weeks_left = bf.get("weeks_remaining", 0)
+        requests_used = bf.get("requests_used", 0)
+        requests_needed = bf.get("requests_needed", 0)
+
+        if bf_status is None and not bf.get("earliest_week"):
+            rows.append(("[b]Backfill[/b]", "[#8d98a7]Not yet run[/]"))
+        else:
+            # Status line
+            status_labels = {
+                "started": ("Running...", "#63f3ff"),
+                "success": ("Complete", "#37d994"),
+            }
+            if bf_status == "failed":
+                reason = bf.get("stopped_reason", "?")
+                status_str = f"[#ffd700]Failed ({reason})[/]"
+            elif bf_status in status_labels:
+                label, color = status_labels[bf_status]
+                status_str = f"[{color}]{label}[/]"
+            else:
+                status_str = bf_status or "[#8d98a7]—[/]"
+            rows.append(("[b]Backfill[/b]", status_str))
+
+            if weeks_total > 0:
+                pct = min(100, int(weeks_done / weeks_total * 100))
+                rows.append((" Progress",
+                             f"[#d7dde8]{weeks_done}[/]/"
+                             f"[#d7dde8]{weeks_total}[/] "
+                             f"[#63f3ff]{pct}%[/]"))
+                if weeks_left > 0:
+                    rows.append((" Remaining",
+                                 f"[#ffd700]{weeks_left}[/] "
+                                 f"([#8d98a7]~{requests_needed} req[/])"))
+            elif bf_status == "failed":
+                rows.append((" Note",
+                              "[#8d98a7]Press b to re-run[/]"))
+
+            if requests_used > 0:
+                rows.append((" Requests",
+                             f"[#d7dde8]{requests_used} used[/], "
+                             f"[#8d98a7]~{requests_needed} needed[/]"))
+
+            # Live quota estimate for backfill
+            q_rem = status.get("quota_remaining")
+            q_limit = status.get("quota_limit")
+            if q_rem is not None and weeks_left > 0:
+                try:
+                    q_rem_int = int(q_rem)
+                    possible = min(q_rem_int, weeks_left)
+                    limit_str = str(q_limit) if q_limit is not None else "?"
+                    rows.append((" Quota",
+                                 f"[#63f3ff]{q_rem_int}[/]/"
+                                 f"{limit_str} "
+                                 f"[#8d98a7]~{possible}w possible[/]"))
+                except (ValueError, TypeError):
+                    pass
+
         table.add_rows(rows)
         table.border_title = "[b][#63f3ff]Sync Status[/][/]"
         table.border_subtitle = (
@@ -1571,7 +1637,8 @@ class TogglTUI(App):
 
     def action_show_help(self):
         self.notify(
-            "Left/right switch views, n add negative, u sync, U full sync, s toggle sparkbar, q quit"
+            "Left/right switch views, n add negative, u sync, U full sync, "
+            "b backfill, s toggle sparkbar, q quit"
         )
 
     def action_sync_current_week(self):
@@ -1626,6 +1693,44 @@ class TogglTUI(App):
             self.notify(success_msg)
         else:
             self.notify(message or "Sync skipped", severity="warning")
+
+    def action_backfill(self):
+        def after_confirm(confirmed):
+            if confirmed:
+                self.notify("Starting backfill (pauses on quota, resumes automatically)...")
+                self._do_backfill()
+
+        self.push_screen(
+            ConfirmScreen("Backfill", "Fetch all historical data from Toggl? "
+                          "Pauses when quota runs out, resumes when quota resets."),
+            after_confirm,
+        )
+
+    @work(thread=True)
+    def _do_backfill(self):
+        from toggl.backfill import run_backfill
+        from toggl.api import get_api_token, get_projects_map
+
+        try:
+            token = get_api_token()
+            projects_map = get_projects_map(token)
+            result = run_backfill(token, projects_map)
+        except (TogglRateLimitError, TogglAPIError) as e:
+            self.call_from_thread(self.notify, str(e), severity="error")
+            return
+        except Exception as e:
+            self.call_from_thread(
+                self.notify, f"Backfill error: {e}", severity="error")
+            return
+
+        ok = result["status"] == "success"
+        weeks = result.get("weeks_backfilled", 0)
+        reason = result.get("stopped_reason", "")
+        if ok:
+            msg = f"Backfill complete ({weeks} weeks)"
+        else:
+            msg = f"Backfill stopped: {reason} ({weeks} weeks done)"
+        self.call_from_thread(self._on_sync_done, ok, msg, msg)
 
     def action_add_negative(self):
         def after_input(value):

@@ -6,10 +6,12 @@ Tracks progress in a SQLite DB at ``data/toggl_backfill.db``.
 
 import os
 import sqlite3
+import time
 from datetime import date, datetime, timedelta
 
 from toggl.api import (
     API_RUN_STATS,
+    TogglAPIError,
     TogglRateLimitError,
 )
 from toggl.cache import (
@@ -86,15 +88,21 @@ def _has_week_data(weekly_data, daily_data):
 # ── Binary search ────────────────────────────────────────────────────────────
 
 def find_earliest_week(token, projects_map):
-    low = date(2023, 1, 1)
+    # Toggl API only allows querying time entries from the last 90 days
+    low = date.today() - timedelta(days=90)
     high = date.today()
 
     while low <= high:
+        _check_quota_or_wait()
         mid = low + (high - low) // 2
         mid_sunday = get_sunday_of_week(mid)
         mid_week = get_week_str(mid_sunday)
 
-        weekly_data, daily_data = fetch_week_data(mid_week, token, projects_map)
+        try:
+            weekly_data, daily_data = fetch_week_data(mid_week, token, projects_map)
+        except TogglRateLimitError:
+            _quota_wait()
+            continue
 
         if _has_week_data(weekly_data, daily_data):
             high = mid_sunday - timedelta(days=1)
@@ -105,7 +113,11 @@ def find_earliest_week(token, projects_map):
     low_week = get_week_str(low_sunday)
     if low_sunday > date.today():
         return None
-    weekly_data, daily_data = fetch_week_data(low_week, token, projects_map)
+    try:
+        weekly_data, daily_data = fetch_week_data(low_week, token, projects_map)
+    except TogglRateLimitError:
+        _quota_wait()
+        weekly_data, daily_data = fetch_week_data(low_week, token, projects_map)
     return low_week if _has_week_data(weekly_data, daily_data) else None
 
 
@@ -196,10 +208,54 @@ def backfill_week(week_str, token, projects_map):
         weekly_data, daily_data = fetch_week_data(week_str, token, projects_map)
     except TogglRateLimitError:
         return {"success": False, "reason": "quota"}
+    except TogglAPIError as e:
+        return {"success": False, "reason": f"api_error: {e}"}
 
     _patch_weekly_csv(week_str, weekly_data)
     _patch_daily_csv(week_str, daily_data)
     return {"success": True}
+
+
+# ── Quota helpers ───────────────────────────────────────────────────────────
+
+MAX_QUOTA_WAIT_SECONDS = 24 * 3600  # max 24 hours total wait before giving up
+
+
+def _check_quota_or_wait(proactive=True):
+    """Check quota; if exhausted and *proactive*, sleep until reset window passes."""
+    remaining = API_RUN_STATS.get("remaining")
+    if remaining is not None and remaining <= 2 and proactive:
+        _quota_wait()
+
+
+def _quota_wait():
+    """Sleep until the quota reset window elapses, then return.
+    Prints progress every 60 seconds. Raises RuntimeError after MAX_QUOTA_WAIT_SECONDS."""
+    resets_in = _parse_quota_int("resets_in")
+    if resets_in is not None and resets_in > 0:
+        wait_secs = resets_in + 10
+    else:
+        wait_secs = 3600  # fallback: 1 hour
+
+    print(f"\n  Quota exhausted — waiting {wait_secs}s for reset...")
+    waited = 0
+    while waited < wait_secs:
+        chunk = min(60, wait_secs - waited)
+        time.sleep(chunk)
+        waited += chunk
+        if waited % 60 == 0 or waited >= wait_secs:
+            print(f"  ... waited {waited}s / {wait_secs}s")
+    print("  Resuming backfill.\n")
+
+
+def _parse_quota_int(key):
+    val = API_RUN_STATS.get(key)
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -218,11 +274,24 @@ def run_backfill(token, projects_map):
 
         checkpoint = _get_latest_checkpoint(conn)
         earliest = None
+        last_completed = None
 
         if checkpoint and checkpoint["earliest_week"]:
             earliest = checkpoint["earliest_week"]
+            last_completed = checkpoint.get("last_completed_week")
         else:
-            earliest = find_earliest_week(token, projects_map)
+            # Check quota before binary search (≈8 API calls)
+            _check_quota_or_wait()
+            try:
+                earliest = find_earliest_week(token, projects_map)
+            except (TogglAPIError, TogglRateLimitError) as e:
+                conn.execute(
+                    "UPDATE runs SET status=?, finished_at=?, stopped_reason=? "
+                    "WHERE id=?",
+                    ("failed", datetime.now().isoformat(), f"api_error: {e}", run_id),
+                )
+                conn.commit()
+                raise
             if earliest:
                 conn.execute(
                     "INSERT INTO checkpoints (run_id, earliest_week) VALUES (?, ?)",
@@ -244,6 +313,17 @@ def run_backfill(token, projects_map):
             }
 
         missing = find_missing_weeks(earliest)
+
+        # Resume from checkpoint: skip already-completed weeks
+        if last_completed:
+            try:
+                idx = missing.index(last_completed)
+                missing = missing[idx + 1:]
+                print(f"  Resuming from checkpoint after {last_completed} "
+                      f"({len(missing)} weeks remaining)")
+            except ValueError:
+                pass  # last_completed not in current missing list
+
         if not missing:
             conn.execute(
                 "UPDATE runs SET status=?, finished_at=?, stopped_reason=? WHERE id=?",
@@ -264,36 +344,78 @@ def run_backfill(token, projects_map):
         api_requests = 0
         weeks_backfilled = 0
         stopped_reason = "complete"
+        total_wait_seconds = 0
 
-        for week_str in missing:
-            remaining = API_RUN_STATS.get("remaining")
+        i = 0
+        while i < len(missing):
+            week_str = missing[i]
+
+            # Quota pre-check
+            remaining = _parse_quota_int("remaining")
             if remaining is not None and remaining <= 2:
-                stopped_reason = "quota"
-                break
+                resets_in = _parse_quota_int("resets_in")
+                wait_secs = (resets_in + 10) if (resets_in and resets_in > 0) else 3600
+                if total_wait_seconds + wait_secs > MAX_QUOTA_WAIT_SECONDS:
+                    stopped_reason = "quota_timeout"
+                    break
+                print(f"\n  Quota exhausted ({remaining} left). "
+                      f"Waiting {wait_secs}s for reset...")
+                time.sleep(wait_secs)
+                total_wait_seconds += wait_secs
+                print("  Resuming.\n")
+                continue  # retry same week after wait
 
             result = backfill_week(week_str, token, projects_map)
             api_requests += 1
 
             if not result["success"]:
-                stopped_reason = result.get("reason", "error")
-                break
+                reason = result.get("reason", "error")
+                if reason == "quota":
+                    # Auto-retry once after quota reset
+                    resets_in = _parse_quota_int("resets_in")
+                    wait_secs = (resets_in + 5) if (resets_in and resets_in > 0) else 60
+                    if total_wait_seconds + wait_secs > MAX_QUOTA_WAIT_SECONDS:
+                        stopped_reason = "quota_timeout"
+                        break
+                    print(f"  Rate limited. Waiting {wait_secs}s...")
+                    time.sleep(wait_secs)
+                    total_wait_seconds += wait_secs
+                    # Retry the same week; if it fails again, stop
+                    result = backfill_week(week_str, token, projects_map)
+                    api_requests += 1
+                    if not result["success"]:
+                        stopped_reason = "quota"
+                        break
+                else:
+                    stopped_reason = reason
+                    break
 
             weeks_backfilled += 1
 
+            # Persist progress after every week
             conn.execute(
                 "UPDATE runs SET weeks_backfilled=?, api_requests_made=? WHERE id=?",
                 (weeks_backfilled, api_requests, run_id),
             )
             conn.execute(
-                "UPDATE checkpoints SET last_completed_week=?, last_verified_at=? WHERE run_id=?",
+                "UPDATE checkpoints SET last_completed_week=?, last_verified_at=? "
+                "WHERE run_id=?",
                 (week_str, datetime.now().isoformat(), run_id),
             )
             conn.commit()
 
+            # Rate limit: 1 second between API calls
+            if i + 1 < len(missing):
+                time.sleep(1)
+
+            i += 1
+
         status = "success" if stopped_reason == "complete" else "failed"
         conn.execute(
-            "UPDATE runs SET status=?, finished_at=?, weeks_discovered=?, weeks_backfilled=?, api_requests_made=?, stopped_reason=? WHERE id=?",
-            (status, datetime.now().isoformat(), len(missing), weeks_backfilled, api_requests, stopped_reason, run_id),
+            "UPDATE runs SET status=?, finished_at=?, weeks_discovered=?, "
+            "weeks_backfilled=?, api_requests_made=?, stopped_reason=? WHERE id=?",
+            (status, datetime.now().isoformat(), len(missing) + (0 if last_completed is None else 1),
+             weeks_backfilled, api_requests, stopped_reason, run_id),
         )
         conn.commit()
     finally:
@@ -309,6 +431,16 @@ def run_backfill(token, projects_map):
 
 
 # ── Status ────────────────────────────────────────────────────────────────────
+
+def _csv_week_count():
+    """Count unique weeks in the weekly CSV, or 0 if CSV is missing/empty."""
+    weekly_path = _csv_file()
+    if not os.path.exists(weekly_path):
+        return 0
+    import csv
+    with open(weekly_path) as f:
+        return len({row["Week"] for row in csv.DictReader(f)})
+
 
 def _get_latest_checkpoint(conn):
     cursor = conn.execute(
@@ -332,13 +464,19 @@ def get_backfill_status():
             "status": None,
             "earliest_week": None,
             "last_completed_week": None,
+            "weeks_discovered": 0,
             "weeks_backfilled": 0,
+            "weeks_remaining": 0,
             "total_weeks": 0,
+            "requests_used": 0,
+            "requests_needed": 0,
+            "stopped_reason": None,
         }
 
     conn = _get_conn()
     cursor = conn.execute(
-        "SELECT status, weeks_discovered, weeks_backfilled, stopped_reason "
+        "SELECT status, weeks_discovered, weeks_backfilled, api_requests_made, "
+        "stopped_reason "
         "FROM runs ORDER BY id DESC LIMIT 1"
     )
     run_row = cursor.fetchone()
@@ -355,18 +493,34 @@ def get_backfill_status():
         status_info["status"] = run_row[0]
         status_info["weeks_discovered"] = run_row[1] or 0
         status_info["weeks_backfilled"] = run_row[2] or 0
-        status_info["stopped_reason"] = run_row[3]
+        status_info["requests_used"] = run_row[3] or 0
+        status_info["stopped_reason"] = run_row[4]
     else:
         status_info["status"] = None
         status_info["weeks_discovered"] = 0
         status_info["weeks_backfilled"] = 0
+        status_info["requests_used"] = 0
         status_info["stopped_reason"] = None
 
     if status_info["earliest_week"]:
         all_weeks = _weeks_in_range(status_info["earliest_week"], get_current_week())
         status_info["total_weeks"] = len(all_weeks)
+    elif status_info["weeks_discovered"] > 0:
+        # DB has discovered weeks but no earliest_week checkpoint
+        status_info["total_weeks"] = status_info["weeks_discovered"]
     else:
-        status_info["total_weeks"] = 0
+        # No DB data — estimate from CSV as fallback
+        csv_total = _csv_week_count()
+        status_info["total_weeks"] = csv_total
+        if csv_total > 0:
+            status_info["weeks_discovered"] = csv_total
+
+    # Derived: remaining and estimated requests needed
+    completed = status_info["weeks_backfilled"]
+    total = status_info["weeks_discovered"] or status_info["total_weeks"]
+    status_info["weeks_remaining"] = max(0, total - completed)
+    # Each remaining week costs ~1 API request
+    status_info["requests_needed"] = status_info["weeks_remaining"]
 
     return status_info
 

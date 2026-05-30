@@ -124,7 +124,13 @@ def _make_auth_request(url, token, method="GET"):
     except urllib.error.HTTPError as e:
         headers = dict(e.headers) if e.headers else {}
         _record_quota_headers(headers)
-        return None, headers, e.code
+        # Capture error response body for debugging
+        error_body = None
+        try:
+            error_body = e.read().decode() if hasattr(e, 'read') else None
+        except:
+            pass
+        return error_body, headers, e.code
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         return None, {}, str(e)
 
@@ -154,7 +160,9 @@ def toggl_request(endpoint, token):
             msg += f" — resets in {wait}"
         msg += f" (Remaining: {remaining}/{limit})"
         raise TogglRateLimitError(msg, limit=limit, remaining=remaining, resets_in=resets_in)
-    raise TogglAPIError(f"API Error: {err} for endpoint {endpoint}", status_code=err)
+    # Include error body in message for debugging
+    error_detail = f" (body: {body})" if body else ""
+    raise TogglAPIError(f"API Error: {err} for endpoint {endpoint}{error_detail}", status_code=err)
 
 
 def check_quota(token):

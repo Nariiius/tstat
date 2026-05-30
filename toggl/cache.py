@@ -40,14 +40,19 @@ def get_sunday_of_week(d):
     return d - timedelta(days=days_since_sun)
 
 
+def _year_first_sunday(year):
+    """Sunday on or before Jan 1 of *year*."""
+    jan1 = date(year, 1, 1)
+    return jan1 - timedelta(days=(jan1.weekday() + 1) % 7)
+
+
 def get_week_str(d):
     """Return the week label for date *d*.
 
-    Weeks start on Jan 1 each year and are 7 days long.
+    Weeks are Sunday-Saturday.  W01 starts on the Sunday on or before Jan 1.
     ``get_week_str`` and ``get_week_dates`` are bijective.
     """
-    jan1 = date(d.year, 1, 1)
-    week_num = (d - jan1).days // 7 + 1
+    week_num = (get_sunday_of_week(d) - _year_first_sunday(d.year)).days // 7 + 1
     return f"{d.year}-W{week_num:02d}"
 
 
@@ -58,24 +63,21 @@ def get_current_week():
 def get_week_dates(week_str):
     year, week = week_str.split("-W")
     week_num = int(week)
-    jan1 = date(int(year), 1, 1)
-    start_date = jan1 + timedelta(weeks=week_num - 1)
+    start_date = _year_first_sunday(int(year)) + timedelta(weeks=week_num - 1)
     end_date = start_date + timedelta(days=6)
     return start_date, end_date
 
 
 def get_iso_format(d, is_end=False):
-    local_tz = datetime.now().astimezone().tzinfo
+    """Return UTC RFC3339 string for date *d* (Toggl API requires Z suffix)."""
+    from datetime import time, timezone
+
     if is_end:
-        dt = datetime.combine(d, datetime.max.time(), tzinfo=local_tz)
+        dt = datetime.combine(d, time(23, 59, 59), tzinfo=timezone.utc)
     else:
-        dt = datetime.combine(d, datetime.min.time(), tzinfo=local_tz)
-    return urllib_parse_quote(dt.isoformat())
-
-
-def urllib_parse_quote(s):
-    import urllib.parse
-    return urllib.parse.quote(s)
+        dt = datetime.combine(d, time(0, 0, 0), tzinfo=timezone.utc)
+    # RFC3339 with Z suffix — no timezone offset
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ──────────────────────────────────────────────
@@ -609,11 +611,17 @@ def _patch_weekly_csv(week_str, weekly_data):
 
 
 def fetch_week_data(week_str, token, projects_map):
+    import urllib.parse
+
     from toggl.api import toggl_request
     start_d, end_d = get_week_dates(week_str)
     start_iso = get_iso_format(start_d, is_end=False)
     end_iso = get_iso_format(end_d, is_end=True)
-    endpoint = f"me/time_entries?start_date={start_iso}&end_date={end_iso}"
+    params = urllib.parse.urlencode(
+        {"start_date": start_iso, "end_date": end_iso},
+        safe=":",
+    )
+    endpoint = f"me/time_entries?{params}"
     entries = toggl_request(endpoint, token)
     weekly_data: dict[str, float] = {}
     daily_data: dict[str, dict[str, float]] = {}

@@ -91,18 +91,27 @@ class TestFindEarliestWeek:
 
     def test_finds_earliest_week(self, tmp_data_dir):
         from toggl.backfill import find_earliest_week
+        from datetime import date, timedelta
+
+        # With 90-day limit, earliest week should be within last 90 days
+        cutoff_date = date.today() - timedelta(days=90)
+        cutoff_year = cutoff_date.year
 
         def fake_fetch(week_str, token, projects_map):
             from toggl.cache import get_week_dates
             start_d, _ = get_week_dates(week_str)
             year = int(week_str.split("-W")[0])
-            if year >= 2023:
+            # Return data for all weeks within the search range
+            if year >= cutoff_year:
                 return {"Learning to Code": 5.0}, {start_d.strftime("%Y-%m-%d"): {"Learning to Code": 5.0}}
             return {}, {}
 
         with patch("toggl.backfill.fetch_week_data", fake_fetch):
             result = find_earliest_week("fake_token", {})
-        assert result == "2023-W01"
+        # Should find a week within the last 90 days
+        assert result is not None
+        result_year = int(result.split("-W")[0])
+        assert result_year >= cutoff_year
 
     def test_finds_mid_range_week(self, tmp_data_dir, monkeypatch):
         from toggl.backfill import find_earliest_week
@@ -124,8 +133,11 @@ class TestFindEarliestWeek:
 
     def test_uses_correct_date_range(self, tmp_data_dir, monkeypatch):
         from toggl.backfill import find_earliest_week
+        from datetime import date, timedelta
 
-        monkeypatch.setattr("toggl.backfill.get_current_week", lambda: "2024-W24")
+        # With 90-day limit, all calls should be within last 90 days
+        cutoff_date = date.today() - timedelta(days=90)
+        cutoff_year = cutoff_date.year
 
         calls = []
 
@@ -134,7 +146,8 @@ class TestFindEarliestWeek:
             from toggl.cache import get_week_dates
             start_d, _ = get_week_dates(week_str)
             year = int(week_str.split("-W")[0])
-            if year >= 2023:
+            # Return data for all weeks within the search range
+            if year >= cutoff_year:
                 return {"Test": 1.0}, {start_d.strftime("%Y-%m-%d"): {"Test": 1.0}}
             return {}, {}
 
@@ -143,7 +156,9 @@ class TestFindEarliestWeek:
 
         assert len(calls) > 0
         for w in calls:
-            assert w.startswith("2023") or w.startswith("2024")
+            # All calls should be within the last 90 days (2026 for current date)
+            year = int(w.split("-W")[0])
+            assert year >= cutoff_year
 
 
 # ── Missing weeks detection tests ────────────────────────────────────────────
@@ -355,6 +370,8 @@ class TestRunBackfill:
         monkeypatch.setattr("toggl.backfill.get_current_week", lambda: "2023-W10")
         monkeypatch.setattr("toggl.backfill.find_earliest_week",
                             lambda token, pm: "2023-W01")
+        # Prevent time.sleep from hanging the test
+        monkeypatch.setattr("toggl.backfill.time.sleep", lambda s: None)
 
         init_backfill_db()
 
@@ -366,3 +383,118 @@ class TestRunBackfill:
 
         assert result["stopped_reason"] == "quota"
         assert result["weeks_backfilled"] == 0
+
+
+# ── Enhanced status & display tests ──────────────────────────────────────────
+
+class TestBackfillStatusEnhanced:
+    """Verify the new backfill status fields and CSV fallback."""
+
+    def test_includes_all_required_keys(self, tmp_data_dir):
+        from toggl.backfill import get_backfill_status
+
+        status = get_backfill_status()
+        for key in ("weeks_remaining", "requests_used", "requests_needed",
+                     "weeks_discovered", "weeks_backfilled", "total_weeks"):
+            assert key in status, f"Missing key: {key}"
+
+    def test_failed_with_zero_discovered_shows_csv_fallback(self, tmp_data_dir,
+                                                            sample_weekly_csv,
+                                                            monkeypatch):
+        """When DB has weeks_discovered=0, fall back to CSV week count."""
+        from toggl.backfill import (
+            init_backfill_db, get_backfill_db_path, get_backfill_status,
+        )
+
+        init_backfill_db()
+        conn = sqlite3.connect(get_backfill_db_path())
+        conn.execute(
+            "INSERT INTO runs (status, started_at, finished_at, "
+            "weeks_discovered, weeks_backfilled, api_requests_made, stopped_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("failed", "2024-01-01T00:00:00", "2024-01-01T01:00:00",
+             0, 0, 0, "quota"),
+        )
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr("toggl.backfill.get_current_week", lambda: "2023-W02")
+
+        status = get_backfill_status()
+        # Should have CSV fallback totals
+        assert status["total_weeks"] > 0, (
+            "total_weeks should fall back to CSV count")
+        assert status["status"] == "failed"
+        assert status["stopped_reason"] == "quota"
+
+    def test_successful_run_shows_progress(self, tmp_data_dir, monkeypatch):
+        """After a successful run, weeks_remaining should be 0."""
+        from toggl.backfill import (
+            init_backfill_db, get_backfill_db_path, get_backfill_status,
+        )
+
+        init_backfill_db()
+        conn = sqlite3.connect(get_backfill_db_path())
+        conn.execute(
+            "INSERT INTO runs (status, started_at, finished_at, "
+            "weeks_discovered, weeks_backfilled, api_requests_made, stopped_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("success", "2024-01-01T00:00:00", "2024-01-01T01:00:00",
+             52, 52, 60, "complete"),
+        )
+        # Add checkpoint with earliest_week so total_weeks is computed
+        conn.execute(
+            "INSERT INTO checkpoints (run_id, earliest_week) VALUES (?, ?)",
+            (1, "2023-W01"),
+        )
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setattr("toggl.backfill.get_current_week", lambda: "2023-W52")
+
+        status = get_backfill_status()
+        assert status["status"] == "success"
+        assert status["weeks_backfilled"] == 52
+        assert status["weeks_remaining"] == 0
+        assert status["requests_needed"] == 0
+
+
+class TestBackfillDisplayLogic:
+    """Verify the display-logic conditions used in refresh_sync_view()."""
+
+    def test_not_yet_run_shows_not_yet_run(self):
+        bf = {"status": None, "earliest_week": None,
+              "weeks_backfilled": 0, "total_weeks": 0,
+              "weeks_remaining": 0, "requests_used": 0, "requests_needed": 0}
+
+        bf_status = bf.get("status")
+        earliest = bf.get("earliest_week")
+        assert bf_status is None and not earliest  # shows "Not yet run"
+
+    def test_failed_empty_shows_with_progress_zero(self):
+        bf = {"status": "failed", "earliest_week": None,
+              "weeks_backfilled": 0, "weeks_discovered": 0, "total_weeks": 10,
+              "weeks_remaining": 10, "requests_used": 0, "requests_needed": 10,
+              "stopped_reason": "quota"}
+
+        bf_status = bf.get("status")
+        earliest = bf.get("earliest_week")
+        assert bf_status is not None  # goes into ELSE branch
+        weeks_total = bf.get("weeks_discovered", 0) or bf.get("total_weeks", 0)
+        assert weeks_total == 10  # CSV fallback gives 10
+        assert bf["weeks_remaining"] == 10
+
+    def test_complete_shows_full_progress(self):
+        bf = {"status": "success", "earliest_week": "2023-W01",
+              "weeks_backfilled": 100, "weeks_discovered": 100, "total_weeks": 100,
+              "weeks_remaining": 0, "requests_used": 110, "requests_needed": 0}
+
+        weeks_done = bf["weeks_backfilled"]
+        weeks_total = bf.get("weeks_discovered", 0) or bf.get("total_weeks", 0)
+        weeks_left = bf["weeks_remaining"]
+        requests_used = bf["requests_used"]
+
+        pct = min(100, int(weeks_done / weeks_total * 100))
+        assert pct == 100
+        assert weeks_left == 0
+        assert requests_used > 0
