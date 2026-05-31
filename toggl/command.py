@@ -24,12 +24,12 @@ from toggl.period import PeriodController, PeriodMode
 # ── Color helpers ────────────────────────────────────────────────────
 
 def _net_color(value: float) -> str:
-    """Return a Rich color tag for a net value."""
-    if value >= 30:
+    """Return a Rich color tag for a net value — bold thresholds."""
+    if value >= 10:
         return "#2ecc71"     # bright green (excellent)
     if value > 0:
         return "#37d994"     # green (positive)
-    if value <= -30:
+    if value <= -10:
         return "#ff4444"     # bright red (very negative)
     if value < 0:
         return "#ff5f5f"     # red (negative)
@@ -253,12 +253,13 @@ class CommandTab(Container):
 
     DEFAULT_CSS = """
     CommandTab {
+        layout: vertical;
         height: 1fr;
     }
 
     /* ── Top section: graph + calendar ────────────────── */
     #cmd-top-section {
-        height: 1fr;
+        height: 3fr;
     }
     #cmd-graph-panel {
         width: 1fr;
@@ -269,8 +270,8 @@ class CommandTab(Container):
         border: round #63f3ff;
     }
     #cmd-calendar-col {
-        width: 22;
-        min-width: 20;
+        width: 25;
+        min-width: 23;
         height: 1fr;
     }
 
@@ -314,12 +315,11 @@ class CommandTab(Container):
         color: #8d98a7;
     }
     .period-mode-btn:hover, .scale-btn:hover {
-        color: #d7dde8;
+        color: #63f3ff;
         background: #1e2a36;
     }
     .period-mode-btn.selected,     .scale-btn.selected {
         color: #63f3ff;
-        text-style: bold;
     }
     .scale-btn.hidden {
         display: none;
@@ -331,13 +331,16 @@ class CommandTab(Container):
 
     #cmd-stats-row {
         height: auto;
-        layout: horizontal;
-        align: center middle;
+        padding: 0 2;
         color: #8d98a7;
     }
-    #cmd-stats-label {
+    #cmd-stats-row > Label {
         width: 1fr;
         text-align: center;
+    }
+    #cmd-stats-net {
+        color: #d7dde8;
+        text-style: bold;
     }
 
     /* ── Graph area ───────────────────────────────────── */
@@ -358,23 +361,47 @@ class CommandTab(Container):
     .graph-mode-btn {
         background: transparent;
         border: none;
-        padding: 0 1;
+        padding: 0 2;
         color: #8d98a7;
         min-width: 8;
+        height: 1;
     }
     .graph-mode-btn:hover {
         color: #d7dde8;
         background: #1e2a36;
     }
     .graph-mode-btn.selected {
+        color: #0b1016;
+        background: #63f3ff;
+    }
+    .period-mode-btn, .scale-btn {
+        background: transparent;
+        border: none;
+        padding: 0 1;
+        min-width: 4;
+        height: 1;
+        color: #8d98a7;
+    }
+    .period-mode-btn:hover, .scale-btn:hover {
+        color: #d7dde8;
+        background: #1e2a36;
+    }
+    .period-mode-btn.selected,     .scale-btn.selected {
         color: #63f3ff;
+    }
+    .graph-mode-btn:hover {
+        color: #d7dde8;
+        background: #1e2a36;
+    }
+    .graph-mode-btn.selected {
+        color: #0b1016;
+        background: #63f3ff;
         text-style: bold;
     }
 
     /* ── Bottom section: two tables ────────────────────── */
     #cmd-bottom-section {
-        height: auto;
-        max-height: 16;
+        height: 1fr;
         min-height: 4;
     }
     #cmd-category-panel {
@@ -458,9 +485,12 @@ class CommandTab(Container):
                 # Pre-create ALL possible scale buttons (show/hide per mode)
                 for scale_val in [7, 30, 90, 365, 4, 13, 26, 52, 3, 6, 12]:
                     yield Button(str(scale_val), id=f"cmd-scale-{scale_val}", classes="scale-btn hidden")
-            # Row 3: statistics
-            with Horizontal(id="cmd-stats-row"):
-                yield Label("", id="cmd-stats-label")
+            # Row 3: statistics (stacked, NET prominent)
+            with Vertical(id="cmd-stats-row"):
+                yield Label("", id="cmd-stats-best")
+                yield Label("", id="cmd-stats-net")
+                yield Label("", id="cmd-stats-worst")
+                yield Label("", id="cmd-stats-avg")
 
     def _compose_graph_footer(self):
         """Yield graph panel footer (mode selector)."""
@@ -518,7 +548,9 @@ class CommandTab(Container):
             values = raw_values
 
         graph = self.query_one("#cmd-graph", GraphWidget)
-        graph.set_data(dates, values)
+        nonzero = [v for v in raw_values if v != 0]
+        avg = round(sum(nonzero) / len(nonzero), 1) if nonzero else None
+        graph.set_data(dates, values, avg=avg)
         graph.set_mode(self._current_graph_mode)
         graph.refresh()
 
@@ -634,22 +666,26 @@ class CommandTab(Container):
     def _update_stats(self, raw_values):
         nonzero = [v for v in raw_values if v != 0]
         if nonzero:
-            total = round(sum(raw_values), 1)
-            best = max(nonzero)
-            worst = min(nonzero)
-            avg = round(sum(nonzero) / len(nonzero), 1)
-
-            def _fs(v: float) -> str:
-                return f"+{int(v)}" if v > 0 else str(int(v))
-
-            self.query_one("#cmd-stats-label", Label).update(
-                f"[#8d98a7]Net:[/] [#37d994]{_fs(total)}[/]  "
-                f"[#8d98a7]Best:[/] [#37d994]+{int(best)}[/]  "
-                f"[#8d98a7]Worst:[/] [#ff5f5f]{int(worst)}[/]  "
-                f"[#8d98a7]Avg:[/] {_fs(avg)}"
-            )
+            t, b, w, a = round(sum(raw_values), 1), max(nonzero), min(nonzero), round(sum(nonzero) / len(nonzero), 1)
+            for lid, text in [("#cmd-stats-best", f"[#8d98a7]BEST[/] [#37d994]+{int(b)}[/]"),
+                               ("#cmd-stats-net",  f"[#d7dde8]NET  {t:+.0f}[/]"),
+                               ("#cmd-stats-worst", f"[#8d98a7]WORST[/] [#ff5f5f]{int(w)}[/]"),
+                               ("#cmd-stats-avg",  f"[#8d98a7]AVG[/] {a:+.0f}")]:
+                self.query_one(lid, Label).update(text)
         else:
-            self.query_one("#cmd-stats-label", Label).update("[dim]No data in range[/]")
+            for lid in ("#cmd-stats-best", "#cmd-stats-net", "#cmd-stats-worst", "#cmd-stats-avg"):
+                try: self.query_one(lid, Label).update("")
+                except Exception: pass
+
+        # Graph panel title shows date range
+        start, end = self.period.get_visible_range()
+        if start == end:
+            date_title = start.strftime("%d %b %Y")
+        elif end - start > timedelta(days=180):
+            date_title = f"{start.strftime('%b %Y')} → {end.strftime('%b %Y')}"
+        else:
+            date_title = f"{start.strftime('%d %b')} → {end.strftime('%d %b')}"
+        self.query_one("#cmd-graph-panel").border_title = f"[b][#63f3ff]{date_title}[/][/]"
 
     # ── Controls ─────────────────────────────────────────────────────
 
