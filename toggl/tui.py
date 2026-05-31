@@ -22,7 +22,8 @@ from textual._work_decorator import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.events import Click, MouseScrollDown, MouseScrollUp, Resize
+from textual.events import MouseScrollDown, MouseScrollUp, Resize
+from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Label, Static, Tab, Tabs
 from textual.worker import Worker, get_current_worker
 
@@ -177,13 +178,15 @@ class TogglTUI(App):
         "Sync/Quota",
     ]
 
+    # Reactive state: triggers watch_data_cache on every assignment
+    data_cache: reactive[DataCache | None] = reactive[DataCache | None](None)
+
     def __init__(self) -> None:
         super().__init__()
         self._initialized = False
         self.active_view_index = 0  # Overview view is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self._table_resize_timer = None
-        self._data_cache: DataCache | None = None
         self._active_week = get_current_week()
 
     def compose(self) -> ComposeResult:
@@ -221,11 +224,16 @@ class TogglTUI(App):
         self.call_later(self.load_data)
         self.query_one(ScrollableFooter).refresh_bindings()
 
+    def watch_data_cache(self, cache: DataCache | None) -> None:
+        """Reactively refresh all views when data_cache changes."""
+        if cache is not None:
+            self.refresh_all_views()
+
     @work(thread=False, exclusive=True)
     async def load_data(self) -> None:
         """Load cache data in background worker."""
-        self._data_cache = DataCache.load()
-        self.refresh_all_views()
+        self.data_cache = DataCache.load()
+        # watch_data_cache handles refresh_all_views automatically
 
     @work(thread=True)
     def _do_auto_refresh(self) -> None:
@@ -239,7 +247,6 @@ class TogglTUI(App):
 
     def _on_auto_refresh_done(self, ok: bool, message: str) -> None:
         load_runtime_settings()
-        self.refresh_all_views()
         if ok:
             self.notify("Auto-refreshed stale data")
         else:
@@ -250,7 +257,7 @@ class TogglTUI(App):
         pass
 
     def refresh_all_views(self) -> None:
-        if self._data_cache is None:
+        if self.data_cache is None:
             logger.debug("[SYNC] refresh_all_views: deferred — data not loaded yet")
             return
         logger.debug("[SYNC] refresh_all_views: start")
@@ -271,7 +278,7 @@ class TogglTUI(App):
     def _refresh_view_by_index(self, index: int) -> None:
         method_name = self._VIEW_REFRESH_MAP.get(index)
         if method_name:
-            logger.debug("[SYNC] _refresh_view_by_index(%d) → %s", index, method_name)
+            logger.debug("[SYNC] _refresh_view_by_index(%d) -> %s", index, method_name)
             try:
                 getattr(self, method_name)()
             except Exception as e:
@@ -321,14 +328,15 @@ class TogglTUI(App):
         """Refresh the Overview dashboard panel."""
         try:
             panel = self.query_one(OverviewPanel)
-            panel.refresh_data(self._data_cache, self._active_week)
+            panel.refresh_data(self.data_cache, self._active_week)
         except Exception:
             pass  # Panel may not be mounted yet
+
     def refresh_command_view(self) -> None:
         """Refresh the Command tab's graph and controls."""
         try:
             cmd_tab = self.query_one(CommandTab)
-            cmd_tab.data_cache = self._data_cache
+            cmd_tab.data_cache = self.data_cache
             cmd_tab.refresh_all()
         except Exception:
             pass  # Container may not be mounted yet
@@ -340,6 +348,7 @@ class TogglTUI(App):
             panel.refresh_data()
         except Exception:
             pass  # Panel may not be mounted yet
+
     @on(Tabs.TabActivated, "#view-tabs")
     def on_tab_activated(self, event: Tabs.TabActivated) -> None:
         if event.tab.id and event.tab.id.startswith("tab-"):
@@ -378,8 +387,7 @@ class TogglTUI(App):
 
     def action_refresh_data(self) -> None:
         load_runtime_settings()
-        self._data_cache = DataCache.load()
-        self.refresh_all_views()
+        self.data_cache = DataCache.load()
         self.notify("Reloaded local data")
 
     def action_show_help(self) -> None:
@@ -445,18 +453,13 @@ class TogglTUI(App):
         logger.debug("[SYNC] _on_sync_done: ok=%s, message=%s", ok, message)
         load_runtime_settings()
         reset_cache()
-        self._data_cache = get_cache()
-        try:
-            self.refresh_all_views()
-            logger.debug("[SYNC] refresh_all_views completed")
-        except Exception as e:
-            logger.exception("[SYNC] refresh_all_views FAILED")
-            self.notify(f"View refresh error: {e}", severity="error")
-            return
+        self.data_cache = get_cache()
+        # watch_data_cache handles refresh_all_views automatically
         if ok:
             self.notify(success_msg)
         else:
             self.notify(message or "Sync skipped", severity="warning")
+
     def action_add_negative(self) -> None:
         def after_input(value: str | None) -> None:
             if value:
