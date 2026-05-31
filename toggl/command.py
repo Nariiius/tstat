@@ -17,6 +17,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.events import Click
 from textual.widgets import Button, DataTable, Label, Static
 
+from toggl.cache import get_week_str
 from toggl.graph import GraphWidget
 from toggl.period import PeriodController, PeriodMode
 
@@ -91,8 +92,8 @@ def _label_for_day(
     return label
 
 def _get_anchor_week_dates(anchor: date) -> set[date]:
-    monday = anchor - timedelta(days=anchor.weekday())
-    return {monday + timedelta(days=i) for i in range(7)}
+    sunday = anchor - timedelta(days=(anchor.weekday() + 1) % 7)
+    return {sunday + timedelta(days=i) for i in range(7)}
 
 
 # ── CalendarWidget ───────────────────────────────────────────────────
@@ -148,7 +149,9 @@ class CalendarWidget(Static):
         text-align: center;
         padding: 0;
     }
-    .cal-dotw {
+    .cal-row > .cal-dotw {
+        width: 3;
+        text-align: center;
         color: #8d98a7;
         text-style: bold;
     }
@@ -175,7 +178,7 @@ class CalendarWidget(Static):
         self._day_nets = day_nets
 
     def compose(self) -> ComposeResult:
-        day_names = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+        day_names = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
         with Container(id="cal-nav"):
             yield Button("<<", id="cal-prev-month")
             yield Label("", id="cal-month-label")
@@ -199,7 +202,7 @@ class CalendarWidget(Static):
         self._display_month = anchor.month
 
         first_day = date(self._display_year, self._display_month, 1)
-        grid_start = first_day - timedelta(days=first_day.weekday())
+        grid_start = first_day - timedelta(days=(first_day.weekday() + 1) % 7)
 
         today = date.today()
         anchor_week = _get_anchor_week_dates(anchor) if pc.mode in (PeriodMode.WEEK,) else None
@@ -208,7 +211,7 @@ class CalendarWidget(Static):
 
         for row_idx in range(6):
             row_start_date = grid_start + timedelta(days=row_idx * 7)
-            week_num = row_start_date.isocalendar()[1]
+            week_num = int(get_week_str(row_start_date).split("W")[1])
             self.query_one(f"#cal-week-{row_idx}", Label).update(str(week_num))
 
         for i in range(42):
@@ -257,7 +260,7 @@ class CalendarWidget(Static):
             return
 
         first_day = date(self._display_year, self._display_month, 1)
-        grid_start = first_day - timedelta(days=first_day.weekday())
+        grid_start = first_day - timedelta(days=(first_day.weekday() + 1) % 7)
         clicked_date = grid_start + timedelta(days=cell_idx)
 
         if clicked_date > date.today():
@@ -318,8 +321,8 @@ class CommandTab(Container):
         border: round #63f3ff;
     }
     #cmd-calendar-col {
-        width: 25;
-        min-width: 23;
+        width: 27;
+        min-width: 27;
         height: 1fr;
     }
 
@@ -537,7 +540,48 @@ class CommandTab(Container):
         agg = cache.get_range_aggregate(start, end)
         table = self.query_one("#cmd-category-table", DataTable)
         table.clear(columns=False)
-        table.border_title = "[b][#63f3ff]Category Summary[/][/]"
+
+        mode = self.period.mode
+        if mode == "day":
+            suffix = start.strftime("%a %-d %b")
+        elif mode == "week":
+            wk = get_week_str(start)
+            suffix = f"W{int(wk.split('W')[1])} {start.year}"
+        else:
+            suffix = start.strftime("%b %Y")
+
+        table.border_title = f"[b][#63f3ff]{suffix}[/][/]"
+
+        def _fmt(val):
+            if val > 0: return f"[#37d994]+{val:.1f}[/]"
+            elif val < 0: return f"[#ff5f5f]{val:.1f}[/]"
+            else: return "[dim]0.0[/]"
+
+        def _compute_net(start_d, end_d):
+            total = 0.0
+            for d in cache.get_daily_data_for_range(start_d, end_d):
+                if d["has_data"]:
+                    total += d["net"]
+            return total
+
+        from datetime import timedelta, date
+        if mode == "day":
+            daily_net = _compute_net(start, start)
+            monday = start - timedelta(days=start.weekday())
+            sunday = monday + timedelta(days=6)
+            weekly_net = _compute_net(monday, sunday)
+            subtitle = f"Daily Net: {_fmt(daily_net)}   Weekly Net: {_fmt(weekly_net)}"
+        elif mode == "week":
+            weekly_net = _compute_net(start, end)
+            first_day = date(start.year, start.month, 1)
+            next_month = first_day.replace(day=28) + timedelta(days=4)
+            last_day = next_month - timedelta(days=next_month.day)
+            monthly_net = _compute_net(first_day, last_day)
+            subtitle = f"Weekly Net: {_fmt(weekly_net)}   Monthly Net: {_fmt(monthly_net)}"
+        else:
+            subtitle = "Insights coming soon"
+
+        table.border_subtitle = f"[#8d98a7]{subtitle}[/]"
 
         rows = []
         for section_name in ("positive", "negative", "unscored"):
@@ -594,11 +638,12 @@ class CommandTab(Container):
                     d = date.fromisoformat(day["date"])
                 except:
                     continue
-                monday = d - timedelta(days=d.weekday())
-                if current_group is None or current_group["start_date"] != monday:
+                sunday = d - timedelta(days=(d.weekday() + 1) % 7)
+                if current_group is None or current_group["start_date"] != sunday:
+                    wk_num = int(get_week_str(sunday).split("W")[1])
                     current_group = {
-                        "start_date": monday,
-                        "label": f"Wk {monday.isocalendar()[1]}",
+                        "start_date": sunday,
+                        "label": f"Wk {wk_num}",
                         "positive": 0.0,
                         "negative": 0.0,
                         "net": 0.0,
@@ -653,6 +698,8 @@ class CommandTab(Container):
                     "has_data": day["has_data"],
                     "contains_today": d == date.today(),
                 })
+
+        aggregated.reverse()
 
         for i, item in enumerate(aggregated):
             positive = item["positive"]

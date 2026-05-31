@@ -366,8 +366,6 @@ class DataCache:
             d_str = d.strftime("%Y-%m-%d")
             metrics = self.get_day_metrics(d_str)
             has_activity = bool(metrics["projects"] or metrics["negative_results"] or metrics["positive_results"])
-            if not has_activity and d > date.today():
-                continue
             if d <= cutoff:
                 cumulative_net += metrics["net"]
                 cumulative_days += 1
