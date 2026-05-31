@@ -1,6 +1,9 @@
 """DataCache — reads all CSVs once per refresh cycle, serves queries from memory."""
 
+import logging
 import os
+
+logger = logging.getLogger("TStat")
 import csv
 import io
 from datetime import datetime, date, timedelta
@@ -513,6 +516,108 @@ class DataCache:
         self._monthly_aggregates[last_n_months] = result
         return result
 
+    def get_daily_data_for_range(self, start_date: date, end_date: date) -> list[dict]:
+        """Return daily aggregates for every day in [start_date, end_date].
+
+        Each dict has these fields (all exist for every day in the range;
+        no-data and future days get all numeric fields = 0.0):
+
+            date (str):      "YYYY-MM-DD"
+            net (float):     earned - abs(tracked_neg) - logged_neg + logged_pos
+            positive (float): earned + logged_pos  (always >= 0)
+            negative (float): abs(tracked_neg) + logged_neg  (always >= 0)
+            logged_pos (float): sum of positive-log points (NOT count)
+            logged_neg (float): sum of negative-log points (NOT count)
+            has_data (bool): True if projects, negatives, or positives exist
+        """
+        results = []
+        d = start_date
+        while d <= end_date:
+            d_str = d.strftime("%Y-%m-%d")
+            projs = self.daily_data.get(d_str, {})
+            neg_entries = self.negatives_raw.get(d_str, [])
+            pos_entries = self.positives_raw.get(d_str, [])
+            has_data = bool(projs or neg_entries or pos_entries)
+
+            if projs:
+                res = calculate(projs)
+                earned = sum(r[3] for r in res if r[3] is not None and r[3] > 0)
+                tracked_neg = sum(abs(r[3]) for r in res if r[3] is not None and r[3] < 0)
+            else:
+                earned = 0.0
+                tracked_neg = 0.0
+
+            logged_neg = sum(e["points"] for e in neg_entries)
+            logged_pos = sum(e["points"] for e in pos_entries)
+
+            net = round(earned - tracked_neg - logged_neg + logged_pos, 1)
+            positive = round(earned + logged_pos, 1)
+            negative = round(tracked_neg + logged_neg, 1)
+
+            results.append({
+                "date": d_str,
+                "net": net if has_data else 0.0,
+                "positive": positive,
+                "negative": negative,
+                "earned": round(earned, 1),
+                "tracked_neg": round(tracked_neg, 1),
+                "logged_pos": round(logged_pos, 1),
+                "logged_neg": round(logged_neg, 1),
+                "total_hours": round(sum(projs.values()), 1) if projs else 0.0,
+                "has_data": has_data,
+            })
+            d += timedelta(days=1)
+
+        return results
+
+    def get_range_aggregate(self, start_date: date, end_date: date):
+        """Aggregate projects and logged activities across a date range.
+
+        Returns (project_results, negative_results, positive_results)
+        where each is structured identically to get_report_sections output.
+        """
+        # Aggregate project hours
+        projects: dict[str, float] = {}
+        d = start_date
+        while d <= end_date:
+            d_str = d.strftime("%Y-%m-%d")
+            for proj, hrs in self.daily_data.get(d_str, {}).items():
+                projects[proj] = projects.get(proj, 0.0) + hrs
+            d += timedelta(days=1)
+
+        results = calculate(projects)
+
+        # Aggregate logged negatives
+        neg_entries = []
+        for d_str, entries in self.negatives_raw.items():
+            try:
+                dd = date.fromisoformat(d_str)
+            except (ValueError, TypeError):
+                continue
+            if start_date <= dd <= end_date:
+                neg_entries.extend(entries)
+        negative_results = calculate_logged_activity_totals(neg_entries, NEGATIVES, sign=-1)
+
+        # Aggregate logged positives
+        pos_entries = []
+        for d_str, entries in self.positives_raw.items():
+            try:
+                dd = date.fromisoformat(d_str)
+            except (ValueError, TypeError):
+                continue
+            if start_date <= dd <= end_date:
+                pos_entries.extend(entries)
+        positive_results = calculate_logged_activity_totals(pos_entries, POSITIVES)
+
+        return {
+            "results": results,
+            "positive": [r for r in results if r[3] is not None and r[3] >= 0],
+            "negative": [r for r in results if r[3] is not None and r[3] < 0],
+            "unscored": [r for r in results if r[3] is None],
+            "positive_results": positive_results,
+            "negative_results": negative_results,
+        }
+
     def get_recovery_rows(self, label, context_type):
         import math
 
@@ -643,12 +748,14 @@ def fetch_week_data(week_str, token, projects_map):
     start_d, end_d = get_week_dates(week_str)
     start_iso = get_iso_format(start_d, is_end=False)
     end_iso = get_iso_format(end_d, is_end=True)
+    logger.debug("[SYNC] fetch_week_data: week=%s range=[%s → %s]", week_str, start_iso, end_iso)
     params = urllib.parse.urlencode(
         {"start_date": start_iso, "end_date": end_iso},
         safe=":",
     )
     endpoint = f"me/time_entries?{params}"
     entries = toggl_request(endpoint, token)
+    logger.debug("[SYNC] fetch_week_data: API returned %d entries", len(entries) if entries else 0)
     weekly_data: dict[str, float] = {}
     daily_data: dict[str, dict[str, float]] = {}
     for entry in entries:
@@ -675,6 +782,8 @@ def fetch_week_data(week_str, token, projects_map):
             if day_str not in daily_data:
                 daily_data[day_str] = {}
             daily_data[day_str][proj_name] = daily_data[day_str].get(proj_name, 0.0) + hrs
+    logger.debug("[SYNC] fetch_week_data: processed → %d projects (weekly), %d days (daily)",
+                 len(weekly_data), len(daily_data))
     return weekly_data, daily_data
 
 
@@ -713,7 +822,11 @@ def sync_current_week_light(auto_refresh=False, prompt_on_warning=True):
         return {"success": False, "message": "Sync cancelled (low quota)"}
     projects_map = get_projects_map(token, use_cache=not refresh_projects)
     week_str = get_current_week()
+    logger.debug("[SYNC] sync_current_week_light: fetching week=%s", week_str)
     weekly_data, daily_data = fetch_week_data(week_str, token, projects_map)
+    logger.debug("[SYNC] fetch_week_data returned: %d weekly entries, %d daily entries",
+                 len(weekly_data) if weekly_data else 0,
+                 len(daily_data) if daily_data else 0)
     _patch_weekly_csv(week_str, weekly_data)
     _patch_daily_csv(week_str, daily_data)
     
