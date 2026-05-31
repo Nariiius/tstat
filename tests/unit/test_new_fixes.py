@@ -13,7 +13,6 @@ from toggl.cache import (
     needs_auto_update,
     parse_iso,
 )
-from toggl.backfill import _week_has_daily_data
 
 
 def test_get_api_token_raises_error_on_missing(monkeypatch):
@@ -106,28 +105,3 @@ def test_patch_weekly_csv_replaces_synced_week(tmp_data_dir):
     # 3. W02 data preserved
     assert by_week_proj[("2023-W02", "Learning to Code")] == 8.0
 
-
-def test_week_has_daily_data_summation_comparison():
-    """_week_has_daily_data must return True when daily hours sum up close to weekly hours, even with empty days."""
-    # Week starts on 2023-01-01
-    weekly_hours = {"2023-W01": 10.0}
-    
-    # 1. Total daily hours = 10.0, but spread over only 4 days (3 days have 0 activity, i.e. zero entries)
-    daily_data = {
-        "2023-01-01": {"Learning to Code": 2.5},
-        "2023-01-02": {"Learning to Code": 2.5},
-        "2023-01-03": {"Learning to Code": 2.5},
-        "2023-01-04": {"Learning to Code": 2.5},
-        # days 5, 6, 7 are empty
-    }
-    
-    # Should return True because 10.0 - 10.0 == 0 < 0.05
-    assert _week_has_daily_data("2023-W01", daily_data, weekly_hours) is True
-    
-    # 2. Total daily hours = 5.0, weekly hours = 10.0 (incomplete daily data)
-    daily_data_partial = {
-        "2023-01-01": {"Learning to Code": 5.0}
-    }
-    
-    # Should return False because 10.0 - 5.0 = 5.0 >= 0.05
-    assert _week_has_daily_data("2023-W01", daily_data_partial, weekly_hours) is False

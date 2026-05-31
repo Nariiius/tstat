@@ -1,0 +1,214 @@
+$accent: #63f3ff;
+
+* {
+    scrollbar-size: 0 0;
+}
+
+Screen {
+    background: #0b1016;
+    color: #d7dde8;
+}
+
+#root {
+    height: 1fr;
+}
+
+#chrome {
+    layout: horizontal;
+    height: auto;
+    padding: 0 1;
+}
+
+.app-title {
+    color: #63f3ff;
+    text-style: bold;
+    padding: 0 1;
+    width: auto;
+}
+
+#view-tabs {
+    width: 1fr;
+    margin: 0 1;
+}
+
+#view-tabs > .-active {
+    color: #63f3ff;
+    text-style: bold;
+}
+
+#view-tabs > .-hidden {
+    display: none;
+}
+
+#sync-status {
+    color: #8d98a7;
+    width: auto;
+    padding: 0 1;
+}
+
+#main {
+    height: 1fr;
+}
+
+#content {
+    width: 1fr;
+    height: 1fr;
+    padding: 0;
+}
+
+.view {
+    display: none;
+    height: 1fr;
+}
+
+.view.-active {
+    display: block;
+}
+
+DataTable {
+    height: 1fr;
+    border: round #3d4f63;
+    background: #0b1016;
+    color: #d7dde8;
+}
+
+DataTable:focus,
+DataTable:focus-within {
+    border: round $accent;
+    background: #0b1016;
+    background-tint: transparent 0%;
+}
+
+DataTable:focus > .datatable--cursor,
+DataTable:focus-within > .datatable--cursor {
+    background: #1e2a36;
+    color: $accent;
+    text-style: bold;
+}
+
+DataTable:focus > .datatable--fixed-cursor,
+DataTable:focus-within > .datatable--fixed-cursor {
+    background: #1e2a36;
+    color: $accent;
+}
+
+DataTable > .datatable--cursor {
+    background: #1e2a36;
+    color: #d7dde8;
+}
+
+DataTable > .datatable--fixed-cursor {
+    background: #1e2a36;
+}
+
+DataTable > .datatable--header {
+    background: #0b1016;
+    color: #63f3ff;
+    text-style: bold;
+}
+
+#spark-rail {
+    width: 34;
+    min-width: 34;
+    max-width: 34;
+    border: none;
+    padding: 0;
+    display: none;
+}
+
+#spark-weeks-table {
+    height: 1fr;
+    min-height: 0;
+    border: round #3d4f63;
+    background: #0b1016;
+    color: #d7dde8;
+}
+
+#spark-weeks-table:focus,
+#spark-weeks-table:focus-within {
+    border: round $accent;
+    background: #0b1016;
+    background-tint: transparent 0%;
+}
+
+#spark-weeks-table > .datatable--header {
+    background: #0b1016;
+    color: #63f3ff;
+    text-style: bold;
+}
+
+#spark-days-table {
+    height: auto;
+    border: round #3d4f63;
+    background: #0b1016;
+    color: #d7dde8;
+}
+
+#spark-days-table:focus,
+#spark-days-table:focus-within {
+    border: round $accent;
+    background: #0b1016;
+    background-tint: transparent 0%;
+}
+
+#spark-catchup {
+    height: auto;
+    border: round #3d4f63;
+    padding: 0 1;
+    background: #0b1016;
+}
+
+#spark-catchup:focus,
+#spark-catchup:focus-within {
+    border: round #fab387;
+    background: #0b1016;
+    background-tint: transparent 0%;
+}
+
+Footer {
+    background: #0b1016;
+    color: #8d98a7;
+}
+
+Footer > FooterKey .footer-key--key {
+    color: #e2b714;
+}
+
+Footer > FooterKey .footer-key--description {
+    color: #8d98a7;
+}
+
+OptionList {
+    background: #0b1016;
+    color: #d7dde8;
+    border: none;
+    height: auto;
+    max-height: 10;
+}
+
+OptionList > .option-list--option {
+    padding: 0 1;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #27323d;
+    color: #63f3ff;
+}
+
+Toast {
+    background: #0b1016;
+    color: #d7dde8;
+    border: round #3d4f63;
+    padding: 0 1;
+    margin: 1 1 0 0;
+    height: auto;
+}
+Toast.-information {
+    border: round #37d994;
+}
+Toast.-warning {
+    border: round #e2b714;
+}
+Toast.-error {
+    border: round #ff5f5f;
+}

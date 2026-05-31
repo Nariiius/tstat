@@ -7,6 +7,7 @@ from datetime import date
 from rich.text import Text
 from textual.app import RenderResult
 from textual.widget import Widget
+from typing import Any
 
 _GREEN = (55, 217, 148)
 _RED = (255, 95, 95)
@@ -110,7 +111,7 @@ class GraphWidget(Widget):
 
     _MAX_XTICKS = 8
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._dates: list[str] = []
         self._values: list[float] = []
@@ -222,6 +223,6 @@ class GraphWidget(Widget):
             ansi_str = ansi_str[:-1]
         return Text.from_ansi(ansi_str, no_wrap=True)
 
-    def on_click(self, event) -> None:
+    def on_click(self, event: Any) -> None:
         """Focus the graph when clicked."""
         self.focus()

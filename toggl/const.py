@@ -39,16 +39,16 @@ RESET = "\033[0m"
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
-def strip_ansi(s):
+def strip_ansi(s: str) -> str:
     return _ANSI_RE.sub("", s)
 
 
-def vlen(s):
+def vlen(s: str) -> int:
     """Visual length of a string (ignores ANSI escape codes)."""
     return len(strip_ansi(s))
 
 
-def pad_ansi(s, width):
+def pad_ansi(s: str, width: int) -> str:
     """Right-pad an ANSI string so its visual length equals `width`."""
     vis = vlen(s)
     if vis >= width:
@@ -88,7 +88,6 @@ POSITIVES_CSV_FILE = os.path.join(DATA_DIR, "toggl_positives.csv")
 HISTORY_FILE = os.path.join(DATA_DIR, "toggl_sync_history.json")
 CONFIG_FILE = os.path.join(DIR_PATH, "toggl_config.json")
 PROJECTS_FILE = os.path.join(DATA_DIR, "toggl_projects.json")
-BACKFILL_DB = os.path.join(DATA_DIR, "toggl_backfill.db")
 
 DEFAULT_DAILY_TARGET = 13.0
 LOW_QUOTA_WARNING = 5

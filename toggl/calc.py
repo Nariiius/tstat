@@ -3,7 +3,11 @@
 from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target
 
 
-def calculate_logged_activity_totals(entries, config_points, sign=1):
+def calculate_logged_activity_totals(
+    entries: list[dict[str, str | float]],
+    config_points: dict[str, int | float],
+    sign: int = 1,
+) -> list[tuple[str, int, float, float]]:
     """Aggregate logged activity entries into (name, count, points_per_event, total_points).
 
     Args:
@@ -41,7 +45,7 @@ def calculate_logged_activity_totals(entries, config_points, sign=1):
     return results
 
 
-def calculate(projects):
+def calculate(projects: dict[str, float]) -> list[tuple[str, float, float | None, float | None]]:
     results = []
     for name, hours in projects.items():
         rate = POINTS.get(name)
@@ -57,15 +61,15 @@ def calculate(projects):
     return results
 
 
-def get_negative_catalog_rows():
+def get_negative_catalog_rows() -> list[tuple[str, float]]:
     return [(name, NEGATIVES[name]) for name in NEGATIVES]
 
 
-def get_positive_catalog_rows():
+def get_positive_catalog_rows() -> list[tuple[str, float]]:
     return [(name, POSITIVES[name]) for name in POSITIVES]
 
 
-def format_signed(value):
+def format_signed(value: float) -> str:
     if abs(value) < 0.05:
         value = 0.0
     return f"+{value:.1f}" if value > 0 else (f"{value:.1f}" if value < 0 else "0.0")

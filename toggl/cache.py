@@ -2,6 +2,7 @@
 
 import logging
 import os
+from typing import Any
 
 logger = logging.getLogger("TStat")
 import csv
@@ -16,7 +17,7 @@ from toggl.config import POINTS, NEGATIVES, POSITIVES, RECOVERY_IGNORE, get_dail
 from toggl.calc import calculate, calculate_logged_activity_totals
 
 
-def parse_iso(s):
+def parse_iso(s: str) -> datetime | None:
     """Parse ISO-8601 datetime string robustly, handling Z suffix and missing timezone."""
     if not s:
         return None
@@ -38,18 +39,18 @@ def parse_iso(s):
 # ──────────────────────────────────────────────
 # DATE & WEEK HELPERS
 # ──────────────────────────────────────────────
-def get_sunday_of_week(d):
+def get_sunday_of_week(d: date) -> date:
     days_since_sun = (d.weekday() + 1) % 7
     return d - timedelta(days=days_since_sun)
 
 
-def _year_first_sunday(year):
+def _year_first_sunday(year: int) -> date:
     """Sunday on or before Jan 1 of *year*."""
     jan1 = date(year, 1, 1)
     return jan1 - timedelta(days=(jan1.weekday() + 1) % 7)
 
 
-def get_week_str(d):
+def get_week_str(d: date) -> str:
     """Return the week label for date *d*.
 
     Weeks are Sunday-Saturday.  W01 starts on the Sunday on or before Jan 1.
@@ -59,11 +60,11 @@ def get_week_str(d):
     return f"{d.year}-W{week_num:02d}"
 
 
-def get_current_week():
+def get_current_week() -> str:
     return get_week_str(date.today())
 
 
-def get_week_dates(week_str):
+def get_week_dates(week_str: str) -> tuple[date, date]:
     year, week = week_str.split("-W")
     week_num = int(week)
     start_date = _year_first_sunday(int(year)) + timedelta(weeks=week_num - 1)
@@ -71,7 +72,7 @@ def get_week_dates(week_str):
     return start_date, end_date
 
 
-def get_iso_format(d, is_end=False):
+def get_iso_format(d: date, is_end: bool = False) -> str:
     """Return UTC RFC3339 string for date *d* (Toggl API requires Z suffix)."""
     from datetime import time, timezone
 
@@ -89,25 +90,18 @@ def get_iso_format(d, is_end=False):
 import json
 
 
-def _load_history():
-    if not os.path.exists(HISTORY_FILE):
-        return {}
-    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _atomic_write(path, content_str):
+def _atomic_write(path: str, content_str: str) -> None:
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(content_str)
     os.replace(tmp, path)
 
 
-def _save_history(history):
-    _atomic_write(HISTORY_FILE, json.dumps(history, indent=4))
+# Imported from services.sync for backward compatibility
+from toggl.services.sync import _load_history, _save_history  # noqa: E402, F401
 
 
-def get_last_updated_str():
+def get_last_updated_str() -> str:
     history = _load_history()
     ts = history.get("last_updated")
     if not ts:
@@ -128,7 +122,7 @@ def get_last_updated_str():
     return f"{hrs}h {rem}m ago" if rem else f"{hrs}h ago"
 
 
-def needs_auto_update():
+def needs_auto_update() -> bool:
     history = _load_history()
     ts = history.get("last_updated")
     if not ts:
@@ -147,11 +141,11 @@ def needs_auto_update():
 class DataCache:
     """Parses all 4 CSV files into memory once, then serves queries from dicts."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.weekly_data: dict[str, dict[str, float]] = {}
         self.daily_data: dict[str, dict[str, float]] = {}
-        self.negatives_raw: dict[str, list[dict]] = {}
-        self.positives_raw: dict[str, list[dict]] = {}
+        self.negatives_raw: dict[str, list[dict[str, Any]]] = {}
+        self.positives_raw: dict[str, list[dict[str, Any]]] = {}
 
     @classmethod
     def load(cls) -> "DataCache":
@@ -162,29 +156,35 @@ class DataCache:
         cache._load_positives()
         return cache
 
-    def _load_weekly(self):
+    def _load_weekly(self) -> None:
         if not os.path.exists(CSV_FILE):
             return
         with open(CSV_FILE, "r", encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                wk = row["Week"]
-                proj = row["Project"]
-                hrs = float(row["Hours"])
-                self.weekly_data.setdefault(wk, {})
-                self.weekly_data[wk][proj] = self.weekly_data[wk].get(proj, 0.0) + hrs
+                try:
+                    wk = row["Week"]
+                    proj = row["Project"]
+                    hrs = float(row["Hours"])
+                    self.weekly_data.setdefault(wk, {})
+                    self.weekly_data[wk][proj] = self.weekly_data[wk].get(proj, 0.0) + hrs
+                except (KeyError, ValueError):
+                    continue
 
-    def _load_daily(self):
+    def _load_daily(self) -> None:
         if not os.path.exists(DAILY_CSV_FILE):
             return
         with open(DAILY_CSV_FILE, "r", encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                d = row["Date"]
-                proj = row["Project"]
-                hrs = float(row["Hours"])
-                self.daily_data.setdefault(d, {})
-                self.daily_data[d][proj] = self.daily_data[d].get(proj, 0.0) + hrs
+                try:
+                    d = row["Date"]
+                    proj = row["Project"]
+                    hrs = float(row["Hours"])
+                    self.daily_data.setdefault(d, {})
+                    self.daily_data[d][proj] = self.daily_data[d].get(proj, 0.0) + hrs
+                except (KeyError, ValueError):
+                    continue
 
-    def _load_negatives(self):
+    def _load_negatives(self) -> None:
         if not os.path.exists(NEGATIVES_CSV_FILE):
             return
         with open(NEGATIVES_CSV_FILE, "r", encoding="utf-8") as f:
@@ -197,7 +197,7 @@ class DataCache:
                 except (KeyError, ValueError):
                     continue
 
-    def _load_positives(self):
+    def _load_positives(self) -> None:
         if not os.path.exists(POSITIVES_CSV_FILE):
             return
         with open(POSITIVES_CSV_FILE, "r", encoding="utf-8") as f:
@@ -212,13 +212,13 @@ class DataCache:
 
     # ── Query methods ──
 
-    def get_week_projects(self, week_str):
+    def get_week_projects(self, week_str: str) -> dict[str, float] | None:
         return dict(self.weekly_data.get(week_str, {})) or None
 
-    def get_day_projects(self, day_str):
+    def get_day_projects(self, day_str: str) -> dict[str, float] | None:
         return dict(self.daily_data.get(day_str, {})) or None
 
-    def get_all_time_projects(self):
+    def get_all_time_projects(self) -> dict[str, float] | None:
         if not self.weekly_data:
             return None
         projects: dict[str, float] = {}
@@ -227,7 +227,7 @@ class DataCache:
                 projects[proj] = projects.get(proj, 0.0) + hrs
         return projects
 
-    def get_negatives_for_context(self, label, context_type):
+    def get_negatives_for_context(self, label: str, context_type: str) -> list[tuple[str, int, float, float]]:
         """Return logged negatives as (name, count, points_per_event, total_points).
 
         Filters entries by context (DAY / WEEK / ALL), then delegates aggregation
@@ -254,7 +254,7 @@ class DataCache:
                 filtered_entries.extend(entries)
         return calculate_logged_activity_totals(filtered_entries, NEGATIVES, sign=-1)
 
-    def get_positives_for_context(self, label, context_type):
+    def get_positives_for_context(self, label: str, context_type: str) -> list[tuple[str, int, float, float]]:
         """Return logged positives as (name, count, points_per_event, total_points).
 
         Filters entries by context (DAY / WEEK / ALL), then delegates aggregation
@@ -281,7 +281,7 @@ class DataCache:
                 filtered_entries.extend(entries)
         return calculate_logged_activity_totals(filtered_entries, POSITIVES)
 
-    def get_negative_log_rows(self, limit=30):
+    def get_negative_log_rows(self, limit: int = 30) -> list[dict[str, str | float]]:
         rows = []
         for d_str, entries in self.negatives_raw.items():
             for e in entries:
@@ -289,7 +289,7 @@ class DataCache:
         rows.sort(key=lambda item: item["date"], reverse=True)
         return rows[:limit]
 
-    def get_positive_log_rows(self, limit=30):
+    def get_positive_log_rows(self, limit: int = 30) -> list[dict[str, str | float]]:
         rows = []
         for d_str, entries in self.positives_raw.items():
             for e in entries:
@@ -297,7 +297,7 @@ class DataCache:
         rows.sort(key=lambda item: item["date"], reverse=True)
         return rows[:limit]
 
-    def get_week_neg_breakdown(self, week_str):
+    def get_week_neg_breakdown(self, week_str: str) -> tuple[float, float]:
         tracked = 0.0
         wk_projs = self.weekly_data.get(week_str, {})
         for proj, hrs in wk_projs.items():
@@ -316,7 +316,7 @@ class DataCache:
                 pass
         return round(tracked, 1), round(logged, 1)
 
-    def get_week_pos_breakdown(self, week_str):
+    def get_week_pos_breakdown(self, week_str: str) -> float:
         logged = 0.0
         start_d, end_d = get_week_dates(week_str)
         for d_str, entries in self.positives_raw.items():
@@ -329,98 +329,17 @@ class DataCache:
                 pass
         return round(logged, 1)
 
-    def get_day_metrics(self, day_str):
-        projects = self.get_day_projects(day_str) or {}
-        results = calculate(projects)
-        negatives = self.get_negatives_for_context(day_str, "DAY")
-        positives = self.get_positives_for_context(day_str, "DAY")
-        earned = round(sum(r[3] for r in results if r[3] is not None and r[3] > 0), 1)
-        tracked = round(sum(abs(r[3]) for r in results if r[3] is not None and r[3] < 0), 1)
-        logged = round(sum(abs(r[3]) for r in negatives), 1)
-        logged_pos = round(sum(r[3] for r in positives), 1)
-        total_hours = round(sum(projects.values()), 1)
-        net = round(earned - tracked - logged + logged_pos, 1)
-        return {
-            "label": day_str,
-            "projects": projects,
-            "results": results,
-            "negative_results": negatives,
-            "positive_results": positives,
-            "earned": earned,
-            "tracked_negative": tracked,
-            "logged_negative": logged,
-            "logged_positive": logged_pos,
-            "total_hours": total_hours,
-            "net": net,
-            "delta": round(net - get_daily_target(), 1),
-        }
+    def get_day_metrics(self, day_str: str) -> dict[str, Any]:
+        from toggl.services.metrics import MetricsService
+        return MetricsService(self).get_day_metrics(day_str)
 
-    def get_week_dashboard_rows(self, label):
-        start_d, end_d = get_week_dates(label)
-        rows = []
-        cutoff = min(end_d, date.today()) if label == get_current_week() else end_d
-        cumulative_net = 0.0
-        cumulative_days = 0
-        for i in range(7):
-            d = start_d + timedelta(days=i)
-            d_str = d.strftime("%Y-%m-%d")
-            metrics = self.get_day_metrics(d_str)
-            has_activity = bool(metrics["projects"] or metrics["negative_results"] or metrics["positive_results"])
-            if d <= cutoff:
-                cumulative_net += metrics["net"]
-                cumulative_days += 1
-            rows.append({
-                "day": d.strftime("%a"),
-                "date": d_str,
-                "date_short": d.strftime("%d %b"),
-                "hours": metrics["total_hours"],
-                "earned": metrics["earned"],
-                "tracked_negative": metrics["tracked_negative"],
-                "logged_positive": metrics["logged_positive"],
-                "positive_total": round(metrics["earned"] + metrics["logged_positive"], 1),
-                "logged_negative": metrics["logged_negative"],
-                "negative_total": round(metrics["tracked_negative"] + metrics["logged_negative"], 1),
-                "goal": get_daily_target(),
-                "delta": metrics["delta"],
-                "net": metrics["net"],
-                "has_activity": has_activity,
-                "is_today": d == date.today(),
-            })
-        expected = round(get_daily_target() * cumulative_days, 1)
-        return {
-            "rows": rows,
-            "summary": {
-                "days_counted": cumulative_days,
-                "expected": expected,
-                "actual": round(cumulative_net, 1),
-                "delta": round(cumulative_net - expected, 1),
-            },
-        }
+    def get_week_dashboard_rows(self, label: str) -> dict[str, Any]:
+        from toggl.services.metrics import MetricsService
+        return MetricsService(self).get_week_dashboard_rows(label)
 
-    def get_report_sections(self, label, context_type):
-        if context_type == "DAY":
-            projects = self.get_day_projects(label) or {}
-        elif context_type == "WEEK":
-            projects = self.get_week_projects(label) or {}
-        else:
-            projects = self.get_all_time_projects() or {}
-        results = calculate(projects)
-        negative_results = self.get_negatives_for_context(label, context_type)
-        positive_results = self.get_positives_for_context(label, context_type)
-        total_pts = round(
-            sum(r[3] for r in results if r[3] is not None) + sum(r[3] for r in negative_results) + sum(r[3] for r in positive_results),
-            2,
-        )
-        return {
-            "results": results,
-            "negative_results": negative_results,
-            "positive_results": positive_results,
-            "positive": [r for r in results if r[3] is not None and r[3] >= 0],
-            "negative": [r for r in results if r[3] is not None and r[3] < 0],
-            "unscored": [r for r in results if r[3] is None],
-            "total_points": total_pts,
-            "total_hours": round(sum(r[1] for r in results if r[1] is not None), 2),
-        }
+    def get_report_sections(self, label: str, context_type: str) -> dict[str, Any]:
+        from toggl.services.metrics import MetricsService
+        return MetricsService(self).get_report_sections(label, context_type)
 
     def get_yearly_day_net_map(self, year: int) -> dict[str, float]:
         if not hasattr(self, "_yearly_day_net"):
@@ -457,7 +376,7 @@ class DataCache:
         self._yearly_day_net[year] = result
         return result
 
-    def get_monthly_aggregates(self, last_n_months: int = 12) -> list[dict]:
+    def get_monthly_aggregates(self, last_n_months: int = 12) -> list[dict[str, Any]]:
         if not hasattr(self, "_monthly_aggregates"):
             self._monthly_aggregates: dict[int, list[dict]] = {}
 
@@ -514,7 +433,7 @@ class DataCache:
         self._monthly_aggregates[last_n_months] = result
         return result
 
-    def get_daily_data_for_range(self, start_date: date, end_date: date) -> list[dict]:
+    def get_daily_data_for_range(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         """Return daily aggregates for every day in [start_date, end_date].
 
         Each dict has these fields (all exist for every day in the range;
@@ -568,7 +487,7 @@ class DataCache:
 
         return results
 
-    def get_range_aggregate(self, start_date: date, end_date: date):
+    def get_range_aggregate(self, start_date: date, end_date: date) -> dict[str, Any]:
         """Aggregate projects and logged activities across a date range.
 
         Returns (project_results, negative_results, positive_results)
@@ -616,7 +535,7 @@ class DataCache:
             "negative_results": negative_results,
         }
 
-    def get_recovery_rows(self, label, context_type):
+    def get_recovery_rows(self, label: str, context_type: str) -> dict[str, Any]:
         import math
 
         report = self.get_report_sections(label, context_type)
@@ -658,10 +577,10 @@ class DataCache:
 # ──────────────────────────────────────────────
 # CACHE SINGLETON
 # ──────────────────────────────────────────────
-_cache = None
+_cache: DataCache | None = None
 
 
-def get_cache():
+def get_cache() -> DataCache:
     """Lazy-initialised DataCache singleton for CLI paths."""
     global _cache
     if _cache is None:
@@ -669,7 +588,7 @@ def get_cache():
     return _cache
 
 
-def reset_cache():
+def reset_cache() -> None:
     """Force cache reload after sync."""
     global _cache
     _cache = DataCache.load()
@@ -678,7 +597,7 @@ def reset_cache():
 # ──────────────────────────────────────────────
 # SYNC LOGIC
 # ──────────────────────────────────────────────
-def _patch_daily_csv(week_str, daily_data):
+def _patch_daily_csv(week_str: str, daily_data: dict[str, dict[str, float]]) -> None:
     start_d, end_d = get_week_dates(week_str)
     week_dates = set((start_d + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7))
 
@@ -716,7 +635,7 @@ def _patch_daily_csv(week_str, daily_data):
     _atomic_write(DAILY_CSV_FILE, buf.getvalue())
 
 
-def _patch_weekly_csv(week_str, weekly_data):
+def _patch_weekly_csv(week_str: str, weekly_data: dict[str, float]) -> None:
     existing_rows = []
     if os.path.exists(CSV_FILE):
         with open(CSV_FILE, "r", encoding="utf-8") as f:
@@ -749,7 +668,7 @@ def _patch_weekly_csv(week_str, weekly_data):
     _atomic_write(CSV_FILE, buf.getvalue())
 
 
-def fetch_week_data(week_str, token, projects_map):
+def fetch_week_data(week_str: str, token: str, projects_map: dict[int, str]) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
     import urllib.parse
 
     from toggl.api import toggl_request
@@ -795,7 +714,7 @@ def fetch_week_data(week_str, token, projects_map):
     return weekly_data, daily_data
 
 
-def sync_api_to_csv(weeks_back=4, prompt_on_warning=True):
+def sync_api_to_csv(weeks_back: int = 4, prompt_on_warning: bool = True) -> dict[str, bool | str]:
     from toggl.api import get_api_token, get_projects_map, _reset_api_stats, _confirm_sync_quota
     weeks_back = int(weeks_back)
     if weeks_back < 1:
@@ -819,7 +738,7 @@ def sync_api_to_csv(weeks_back=4, prompt_on_warning=True):
     return {"success": True, "message": f"Successfully synced {weeks_back} week(s)"}
 
 
-def sync_current_week_light(auto_refresh=False, prompt_on_warning=True):
+def sync_current_week_light(auto_refresh: bool = False, prompt_on_warning: bool = True) -> dict[str, bool | str]:
     from toggl.api import get_api_token, get_projects_map, is_projects_cache_stale, _reset_api_stats, _confirm_sync_quota
     token = get_api_token()
     refresh_projects = is_projects_cache_stale()

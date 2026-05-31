@@ -9,6 +9,8 @@ import urllib.parse
 import urllib.error
 import base64
 
+from typing import Any
+
 from toggl.const import CONFIG_FILE, RED, RESET, GREEN, YELLOW, CYAN, BOLD, DIM
 from toggl.const import PROJECTS_FILE, PROJECTS_CACHE_MAX_AGE_DAYS, LOW_QUOTA_WARNING
 from toggl.config import load_config
@@ -19,7 +21,7 @@ from toggl.config import load_config
 # ──────────────────────────────────────────────
 class TogglRateLimitError(Exception):
     """Raised when Toggl API returns 402/429 rate limit."""
-    def __init__(self, message="", limit=None, remaining=None, resets_in=None):
+    def __init__(self, message: str = "", limit: int | None = None, remaining: int | None = None, resets_in: int | None = None) -> None:
         super().__init__(message)
         self.limit = limit
         self.remaining = remaining
@@ -28,7 +30,7 @@ class TogglRateLimitError(Exception):
 
 class TogglAPIError(Exception):
     """Raised on non-rate-limit API errors from Toggl."""
-    def __init__(self, message="", status_code=None):
+    def __init__(self, message: str = "", status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
 
@@ -45,7 +47,7 @@ API_RUN_STATS = {
 _api_stats_lock = threading.Lock()
 
 
-def _reset_api_stats():
+def _reset_api_stats() -> None:
     with _api_stats_lock:
         API_RUN_STATS["requests_made"] = 0
         API_RUN_STATS["remaining"] = None
@@ -53,11 +55,11 @@ def _reset_api_stats():
         API_RUN_STATS["resets_in"] = None
 
 
-def _normalize_headers(headers):
+def _normalize_headers(headers: dict) -> dict:
     return {k.lower(): v for k, v in headers.items()}
 
 
-def _header_value(headers, *names):
+def _header_value(headers: dict, *names: str) -> str | None:
     normalized = _normalize_headers(headers)
     for name in names:
         if name.lower() in normalized:
@@ -65,14 +67,14 @@ def _header_value(headers, *names):
     return None
 
 
-def _parse_int(value):
+def _parse_int(value: Any) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError):
         return None
 
 
-def _record_quota_headers(headers):
+def _record_quota_headers(headers: dict) -> None:
     remaining = _parse_int(_header_value(headers, "X-Toggl-Quota-Remaining"))
     limit = _parse_int(_header_value(headers, "X-Toggl-Quota-Limit"))
     resets_in = _parse_int(_header_value(headers, "X-Toggl-Quota-Resets-In"))
@@ -85,29 +87,14 @@ def _record_quota_headers(headers):
             API_RUN_STATS["resets_in"] = resets_in
 
 
-def _format_reset_window(secs):
+def _format_reset_window(secs: int | None) -> str:
     if secs is None:
         return "Unknown"
     mins, s = divmod(secs, 60)
     return f"{mins}m {s:02d}s" if mins else f"{s}s"
 
 
-def _print_api_usage_summary():
-    print(f"\n  {BOLD}{CYAN}SYNC API USAGE{RESET}")
-    print("  " + "─" * 35)
-    print(f"  Requests used       {CYAN}{BOLD}{API_RUN_STATS['requests_made']}{RESET}")
-    if API_RUN_STATS["remaining"] is not None:
-        limit = API_RUN_STATS["limit"] if API_RUN_STATS["limit"] is not None else "?"
-        print(
-            f"  Quota remaining     {YELLOW}{BOLD}{API_RUN_STATS['remaining']}/{limit}{RESET}"
-        )
-    if API_RUN_STATS["resets_in"] is not None:
-        wait = _format_reset_window(API_RUN_STATS["resets_in"])
-        print(f"  Window resets in    {DIM}{wait}{RESET}")
-    print()
-
-
-def _make_auth_request(url, token, method="GET"):
+def _make_auth_request(url: str, token: str, method: str = "GET") -> tuple[Any, Any, Any]:
     auth_string = f"{token}:api_token"
     b64_auth = base64.b64encode(auth_string.encode()).decode()
     req = urllib.request.Request(url, method=method)
@@ -135,7 +122,7 @@ def _make_auth_request(url, token, method="GET"):
         return None, {}, str(e)
 
 
-def toggl_request(endpoint, token):
+def toggl_request(endpoint: str, token: str) -> Any:
     url = "https://api.track.toggl.com/api/v9/" + endpoint
     body, headers, err = _make_auth_request(url, token)
     if err is None:
@@ -165,40 +152,7 @@ def toggl_request(endpoint, token):
     raise TogglAPIError(f"API Error: {err} for endpoint {endpoint}{error_detail}", status_code=err)
 
 
-def check_quota(token):
-    url = "https://api.track.toggl.com/api/v9/me"
-    print(f"\n  {BOLD}{CYAN}API QUOTA STATUS{RESET}")
-    print("  " + "─" * 35)
-    body, headers, err = _make_auth_request(url, token)
-    if err is None:
-        remaining = headers.get("X-Toggl-Quota-Remaining") or headers.get("x-toggl-quota-remaining", "Unknown")
-        resets_in = headers.get("X-Toggl-Quota-Resets-In") or headers.get("x-toggl-quota-resets-in", "Unknown")
-        print(f"  {GREEN}✓ Request successful{RESET}")
-        print(f"  Requests remaining  {CYAN}{BOLD}{remaining}{RESET}")
-        secs = _parse_int(resets_in)
-        if secs is not None:
-            mins, s = divmod(secs, 60)
-            wait = f"{mins}m {s:02d}s" if mins else f"{s}s"
-            print(f"  Window resets in    {YELLOW}{BOLD}{wait}{RESET}")
-        else:
-            print(f"  Window resets in    {DIM}Unknown{RESET}")
-    elif err == 429:
-        print(f"  {RED}✗ HTTP 429 — Rate limit exceeded.{RESET}")
-        print(f"  {DIM}Making requests too fast. Safe limit is ~1 req/sec.{RESET}")
-    elif err == 402:
-        resets_in = headers.get("X-Toggl-Quota-Resets-In") or headers.get("x-toggl-quota-resets-in")
-        print(f"  {RED}✗ HTTP 402 — Hourly quota exhausted.{RESET}")
-        secs = _parse_int(resets_in)
-        if secs is not None:
-            mins, s = divmod(secs, 60)
-            wait = f"{mins}m {s:02d}s" if mins else f"{s}s"
-            print(f"  Window resets in    {YELLOW}{BOLD}{wait}{RESET}")
-    else:
-        print(f"  {RED}✗ HTTP {err}{RESET}")
-    print()
-
-
-def get_api_token():
+def get_api_token() -> str:
     if os.environ.get("TOGGL_API_TOKEN"):
         return os.environ.get("TOGGL_API_TOKEN")
     data = load_config()
@@ -211,17 +165,7 @@ def get_api_token():
 
 
 
-def _prompt_yes_no(prompt):
-    while True:
-        ans = input(prompt).strip().lower()
-        if ans in ("y", "yes"):
-            return True
-        if ans in ("n", "no"):
-            return False
-        print(f"{YELLOW}Please enter 'y' or 'n'.{RESET}")
-
-
-def get_projects_cache_age_days():
+def get_projects_cache_age_days() -> float | None:
     if not os.path.exists(PROJECTS_FILE):
         return None
     from datetime import datetime
@@ -229,12 +173,12 @@ def get_projects_cache_age_days():
     return age_secs / 86400.0
 
 
-def is_projects_cache_stale(max_age_days=PROJECTS_CACHE_MAX_AGE_DAYS):
+def is_projects_cache_stale(max_age_days: float = PROJECTS_CACHE_MAX_AGE_DAYS) -> bool:
     age_days = get_projects_cache_age_days()
     return age_days is None or age_days > max_age_days
 
 
-def _confirm_sync_quota(token, estimated_requests, sync_label, prompt_on_warning=True):
+def _confirm_sync_quota(token: str, estimated_requests: int, sync_label: str, prompt_on_warning: bool = True) -> bool:
     url = "https://api.track.toggl.com/api/v9/me"
     _, _, err = _make_auth_request(url, token)
 
@@ -270,10 +214,16 @@ def _confirm_sync_quota(token, estimated_requests, sync_label, prompt_on_warning
     print(f"  Window resets in    {DIM}{wait}{RESET}")
     print(f"  {DIM}Continuing could stop mid-sync if the quota runs out.{RESET}")
     print()
-    return _prompt_yes_no(f"{YELLOW}Continue sync anyway? (y/n): {RESET}")
+    while True:
+        ans = input(f"{YELLOW}Continue sync anyway? (y/n): {RESET}").strip().lower()
+        if ans in ("y", "yes"):
+            return True
+        if ans in ("n", "no"):
+            return False
+        print(f"{YELLOW}Please enter 'y' or 'n'.{RESET}")
 
 
-def get_projects_map(token, use_cache=False):
+def get_projects_map(token: str, use_cache: bool = False) -> dict:
     if use_cache and os.path.exists(PROJECTS_FILE):
         with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)

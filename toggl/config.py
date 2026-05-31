@@ -3,6 +3,7 @@
 import sys
 import os
 import json
+from typing import Any
 
 from toggl.const import CONFIG_FILE, DEFAULT_DAILY_TARGET, RED, RESET
 from toggl.const import GREEN, YELLOW, CYAN, DIM
@@ -20,8 +21,16 @@ class Config:
         "rate_colors", "category_registry", "recovery_ignore",
     )
 
-    def __init__(self, points, negatives, positives, daily_target,
-                 rate_colors, category_registry, recovery_ignore):
+    def __init__(
+        self,
+        points: dict[str, int | float],
+        negatives: dict[str, int | float],
+        positives: dict[str, int | float],
+        daily_target: int | float,
+        rate_colors: RateColors,
+        category_registry: CategoryRegistry,
+        recovery_ignore: list[str],
+    ) -> None:
         self.points = points
         self.negatives = negatives
         self.positives = positives
@@ -63,7 +72,7 @@ class Config:
                    rate_colors, category_registry, recovery_ignore)
 
 
-def _config_setup_hint():
+def _config_setup_hint() -> str:
     if os.path.exists(CONFIG_EXAMPLE_FILE):
         return (
             f"  Copy the template and edit your values:\n"
@@ -75,7 +84,7 @@ def _config_setup_hint():
     )
 
 
-def _exit_config_error(message):
+def _exit_config_error(message: str) -> None:
     print(f"{RED}{message}{RESET}")
     hint = _config_setup_hint()
     if hint:
@@ -83,7 +92,7 @@ def _exit_config_error(message):
     sys.exit(1)
 
 
-def load_config():
+def load_config() -> dict[str, Any]:
     if not os.path.exists(CONFIG_FILE):
         _exit_config_error(f"Error: Config file not found: {CONFIG_FILE}")
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -99,7 +108,7 @@ def load_config():
     return data
 
 
-def _coerce_number(value, label):
+def _coerce_number(value: Any, label: str) -> int | float:
     try:
         num = float(value)
     except (TypeError, ValueError):
@@ -108,7 +117,7 @@ def _coerce_number(value, label):
     return int(num) if num.is_integer() else num
 
 
-def _load_rate_map(config, key):
+def _load_rate_map(config: dict[str, Any], key: str) -> dict[str, int | float]:
     raw = config.get(key)
     if not isinstance(raw, dict):
         _exit_config_error(
@@ -121,16 +130,16 @@ def _load_rate_map(config, key):
 
 
 # ── Mutable runtime globals ──
-POINTS = {}
-NEGATIVES = {}
-POSITIVES = {}
+POINTS: dict[str, int | float] = {}
+NEGATIVES: dict[str, int | float] = {}
+POSITIVES: dict[str, int | float] = {}
 RECOVERY_IGNORE: list[str] = []
-DAILY_TARGET = DEFAULT_DAILY_TARGET
-RATE_COLORS = RateColors()
-CATEGORY_REGISTRY = CategoryRegistry()
+DAILY_TARGET: int | float = DEFAULT_DAILY_TARGET
+RATE_COLORS: RateColors = RateColors()
+CATEGORY_REGISTRY: CategoryRegistry = CategoryRegistry()
 
 
-def load_runtime_settings():
+def load_runtime_settings() -> None:
     global POINTS, NEGATIVES, POSITIVES, RECOVERY_IGNORE, DAILY_TARGET, RATE_COLORS, CATEGORY_REGISTRY
     cfg = Config.load()
     POINTS.clear()
@@ -145,5 +154,5 @@ def load_runtime_settings():
     RATE_COLORS.update(cfg.rate_colors)
     CATEGORY_REGISTRY.update(cfg.category_registry)
 
-def get_daily_target():
+def get_daily_target() -> int | float:
     return DAILY_TARGET

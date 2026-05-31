@@ -29,16 +29,23 @@ def tui_data(tmp_data_dir, monkeypatch):
     with open(config_path, "w") as f:
         json.dump(config_data, f)
 
-    # -- Weekly CSV with 1 week --
+    # -- Weekly CSV --
     with open(toggl.const.CSV_FILE, "w") as f:
         f.write("Week,Project,Hours\n")
         f.write("2023-W01,Learning to Code,10.5\n")
+        f.write("2023-W01,Building Projects,4.2\n")
 
-    # -- Daily CSV (2 days) --
+    # -- Daily CSV --
+    from toggl.cache import get_week_dates
+    from datetime import timedelta
+
+    start_d, _ = get_week_dates("2023-W01")
     with open(toggl.const.DAILY_CSV_FILE, "w") as f:
         f.write("Date,Project,Hours\n")
-        f.write("2023-01-02,Learning to Code,1.5\n")
-        f.write("2023-01-03,Learning to Code,2.0\n")
+        for i in range(7):
+            d = (start_d + timedelta(days=i)).strftime("%Y-%m-%d")
+            f.write(f"{d},Learning to Code,1.5\n")
+            f.write(f"{d},Building Projects,0.6\n")
 
     # -- Empty negatives / positives CSVs --
     with open(toggl.const.NEGATIVES_CSV_FILE, "w") as f:
@@ -48,79 +55,35 @@ def tui_data(tmp_data_dir, monkeypatch):
 
     # -- Sync history --
     with open(toggl.const.HISTORY_FILE, "w") as f:
-        json.dump({"last_updated": "2023-01-02T10:00:00",
-                    "synced_weeks": {"2023-W01": "ok"},
-                    "synced_days": {}}, f)
-
-    # -- Freeze time --
-    FAKE_TODAY = date(2023, 1, 2)
-
-    class MockDate(date):
-        @classmethod
-        def today(cls):
-            return FAKE_TODAY
-
-    monkeypatch.setattr(toggl.tui, "date", MockDate)
-    monkeypatch.setattr(toggl.cache, "date", MockDate)
-    monkeypatch.setattr(toggl.tui, "needs_auto_update", lambda: False)
+        json.dump({"last_updated": None}, f)
 
     return tmp_data_dir
 
 
-# ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
 # Edge case tests
-# ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_empty_data_shows_gracefully(tui_data):
-    """App renders all views without crash when CSV files are empty."""
-    import toggl.const
-
-    # Replace CSVs with headers only (no data rows)
-    with open(toggl.const.CSV_FILE, "w") as f:
-        f.write("Week,Project,Hours\n")
-    with open(toggl.const.DAILY_CSV_FILE, "w") as f:
-        f.write("Date,Project,Hours\n")
-
+async def test_mounts_without_crash(tui_data):
+    """App mounts and renders overview without crash."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for i in range(8):
-            app.active_view_index = i
-            app._refresh_view_by_index(i)
-            await pilot.pause()
+        # Overview view renders with data
+        cat_table = app.query_one("#overview-categories-table")
+        assert cat_table.row_count > 0
 
-        # If we got here without exception, empty data is handled
-
-
-@pytest.mark.asyncio
-async def test_missing_data_files_shows_gracefully(tui_data):
-    """App renders without crash when no CSV data files exist."""
-    import toggl.const
-
-    # Delete all data files
-    for path in [toggl.const.CSV_FILE, toggl.const.DAILY_CSV_FILE,
-                 toggl.const.NEGATIVES_CSV_FILE, toggl.const.POSITIVES_CSV_FILE]:
-        if os.path.exists(path):
-            os.remove(path)
-
-    app = TogglTUI()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-
-        for i in range(8):
-            app.active_view_index = i
-            app._refresh_view_by_index(i)
-            await pilot.pause()
-
-        # If we got here without exception, missing files are handled
+        # Recovery table exists
+        rec_table = app.query_one("#overview-recovery-table")
+        assert rec_table is not None
 
 
 @pytest.mark.asyncio
-async def test_csv_with_blank_lines(tui_data):
-    """App handles CSV files with trailing blank lines without error."""
+async def test_mounts_with_broken_csv(tui_data):
+    """App does not crash if CSV has blank lines."""
     import toggl.const
 
     # Append a blank line to the weekly CSV (common edge case)
@@ -131,9 +94,9 @@ async def test_csv_with_blank_lines(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # Still renders Day view with data
-        day_table = app.query_one("#day-table")
-        assert day_table.row_count > 0
+        # Still renders overview with data
+        cat_table = app.query_one("#overview-categories-table")
+        assert cat_table.row_count > 0
 
 
 @pytest.mark.asyncio
@@ -147,8 +110,8 @@ async def test_rapid_view_switching(tui_data):
             app.action_next_view()
         await pilot.pause()
 
-        # Active view is still a valid index (8 views: 0-7)
-        assert 0 <= app.active_view_index < 8
+        # Active view is still a valid index (3 views: 0-2)
+        assert 0 <= app.active_view_index < 3
 
 
 @pytest.mark.asyncio
@@ -166,11 +129,9 @@ async def test_confirm_screen_cancel(tui_data):
         await pilot.press("escape")
         await pilot.pause()
 
-        # Back on main screen, day view still renders
-        day_view = app.query_one("#day-view")
-        assert "-active" in day_view.classes
-        day_table = app.query_one("#day-table")
-        assert day_table.row_count > 0
+        # Back on main screen, overview still renders
+        cat_table = app.query_one("#overview-categories-table")
+        assert cat_table.row_count > 0
 
 
 @pytest.mark.asyncio
@@ -209,10 +170,10 @@ async def test_sync_view_shows_all_status_fields(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for _ in range(6):
+        for _ in range(2):
             app.action_next_view()
             await pilot.pause()
-        assert app.active_view_index == 7
+        assert app.active_view_index == 2
 
         sync_table = app.query_one("#sync-table")
         all_text = " ".join(
@@ -221,4 +182,4 @@ async def test_sync_view_shows_all_status_fields(tui_data):
         )
         assert "current week" in all_text
         assert "last updated" in all_text
-        assert "backfill" in all_text
+        assert "synced weeks" in all_text

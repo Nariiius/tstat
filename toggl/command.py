@@ -9,87 +9,25 @@ CommandTab: unified analytics layout.
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
 
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import Click
+from textual.message import Message
 from textual.widgets import Button, DataTable, Label, Static
 
-from toggl.cache import get_week_str
+from toggl.cache import DataCache, get_week_str
 from toggl.graph import GraphWidget
 from toggl.period import PeriodController, PeriodMode
+from toggl.services.metrics import MetricsService
 
 
 # ── Color helpers ────────────────────────────────────────────────────
 
-def _net_color(value: float) -> str:
-    """Return a Rich color tag for a net value — bold thresholds."""
-    if value >= 10:
-        return "#2ecc71"     # bright green (excellent)
-    if value > 0:
-        return "#37d994"     # green (positive)
-    if value <= -10:
-        return "#ff4444"     # bright red (very negative)
-    if value < 0:
-        return "#ff5f5f"     # red (negative)
-    return ""
-
-
-def _label_for_day(
-    d: date,
-    today: date,
-    anchor: date,
-    anchor_week_set: set[date] | None,
-    mode: str,
-    display_month: int,
-    display_year: int,
-    net: float,
-) -> str:
-    """Return Rich markup for a calendar day cell with heatmap coloring."""
-    bg = _net_color(net)
-    label = f"{d.day:>2}"
-    if bg:
-        label = f"[{bg}]{label}[/]"
-
-    # Determine if 'd' is in the "current real-world period"
-    is_current_period = False
-    if mode == "day":
-        is_current_period = (d == today)
-    elif mode == "week":
-        is_current_period = (d.isocalendar()[:2] == today.isocalendar()[:2])
-    elif mode == "month":
-        is_current_period = (d.month == today.month and d.year == today.year)
-
-    # 1. Base style for selected anchors (reverted to original behavior)
-    style = ""
-    if d == anchor and d == today:
-        style = "bold #e2b714"
-    elif d == today:
-        style = "bold #e2b714"
-    elif d == anchor:
-        style = "bold #63f3ff"
-    elif anchor_week_set and d in anchor_week_set:
-        style = "#63f3ff"
-    elif d.month != display_month or d.year != display_year:
-        style = "dim #4a5568"
-
-    # 2. Add the background highlight if it's the real-world current period
-    if is_current_period:
-        if style:
-            style += " on #1e2a36"
-        else:
-            style = "on #1e2a36"
-
-    # 3. Apply the fallback background for today-anchor if not handled
-    if d == anchor and d == today and not is_current_period:
-        style += " on #1e2a36"
-
-    if style:
-        label = f"[{style}]{label}[/]"
-        
-    return label
+from toggl.formatters import _net_color, _label_for_day, format_signed_rich
 
 def _get_anchor_week_dates(anchor: date) -> set[date]:
     sunday = anchor - timedelta(days=(anchor.weekday() + 1) % 7)
@@ -100,9 +38,28 @@ def _get_anchor_week_dates(anchor: date) -> set[date]:
 
 
 class CalendarWidget(Static):
-    """Month-grid calendar sidebar with net-based heatmap coloring."""
+    """Month-grid calendar sidebar with net-based heatmap coloring.
+
+    Emits ``CalendarNav`` and ``CalendarDayClicked`` messages instead of
+    calling parent widgets directly, making it independently instantiable
+    and testable.
+    """
 
     can_focus = True
+
+    class CalendarNav(Message):
+        """Posted when the user navigates to a different month."""
+
+        def __init__(self, target: date) -> None:
+            super().__init__()
+            self.target = target
+
+    class CalendarDayClicked(Message):
+        """Posted when the user clicks a day cell in the grid."""
+
+        def __init__(self, clicked_date: date) -> None:
+            super().__init__()
+            self.clicked_date = clicked_date
 
     DEFAULT_CSS = """
     CalendarWidget {
@@ -167,15 +124,21 @@ class CalendarWidget(Static):
     }
     """
 
-    def __init__(self, command_tab: "CommandTab"):
+    def __init__(self) -> None:
         super().__init__(id="command-calendar")
-        self._command = command_tab
         self._display_year = date.today().year
         self._display_month = date.today().month
         self._day_nets: dict[str, float] = {}
+        self._anchor_date: date = date.today()
+        self._period_mode: str = "week"
 
-    def set_day_net_values(self, day_nets: dict[str, float]):
+    def set_day_net_values(self, day_nets: dict[str, float]) -> None:
         self._day_nets = day_nets
+
+    def set_period_context(self, anchor: date, mode: str) -> None:
+        """Set the anchor date and period mode used for highlighting."""
+        self._anchor_date = anchor
+        self._period_mode = mode
 
     def compose(self) -> ComposeResult:
         day_names = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
@@ -195,9 +158,8 @@ class CalendarWidget(Static):
                         cell_idx = row_idx * 7 + col_idx
                         yield Label("", id=f"cal-day-{cell_idx}", classes="cal-day")
 
-    def rebuild(self):
-        pc = self._command.period
-        anchor = pc.get_anchor_date()
+    def rebuild(self) -> None:
+        anchor = self._anchor_date
         self._display_year = anchor.year
         self._display_month = anchor.month
 
@@ -205,7 +167,7 @@ class CalendarWidget(Static):
         grid_start = first_day - timedelta(days=(first_day.weekday() + 1) % 7)
 
         today = date.today()
-        anchor_week = _get_anchor_week_dates(anchor) if pc.mode in (PeriodMode.WEEK,) else None
+        anchor_week = _get_anchor_week_dates(anchor) if self._period_mode in (PeriodMode.WEEK,) else None
 
         self.query_one("#cal-month-label", Label).update(first_day.strftime("%B %Y"))
 
@@ -220,24 +182,23 @@ class CalendarWidget(Static):
             d_str = day_date.strftime("%Y-%m-%d")
             net = self._day_nets.get(d_str, 0.0)
             markup = _label_for_day(
-                day_date, today, anchor, anchor_week, pc.mode,
+                day_date, today, anchor, anchor_week, self._period_mode,
                 self._display_month, self._display_year, net,
             )
             label.update(markup)
 
     @on(Button.Pressed, "#cal-prev-month")
-    def _on_prev_month(self):
+    def _on_prev_month(self) -> None:
         if self._display_month == 1:
             self._display_month = 12
             self._display_year -= 1
         else:
             self._display_month -= 1
         target = date(self._display_year, self._display_month, 1)
-        self._command.period.set_from_day(target)
-        self._command.refresh_all()
+        self.post_message(self.CalendarNav(target))
 
     @on(Button.Pressed, "#cal-next-month")
-    def _on_next_month(self):
+    def _on_next_month(self) -> None:
         if self._display_month == 12:
             self._display_month = 1
             self._display_year += 1
@@ -246,11 +207,10 @@ class CalendarWidget(Static):
         target = date(self._display_year, self._display_month, 1)
         if target > date.today():
             return
-        self._command.period.set_from_day(target)
-        self._command.refresh_all()
+        self.post_message(self.CalendarNav(target))
 
     @on(Click, "#cal-grid Label.cal-day")
-    def _on_day_clicked(self, event: Click):
+    def _on_day_clicked(self, event: Click) -> None:
         label = event.control
         if label is None or label.id is None or not label.id.startswith("cal-day-"):
             return
@@ -266,16 +226,9 @@ class CalendarWidget(Static):
         if clicked_date > date.today():
             return
 
-        pc = self._command.period
-        if pc.mode == PeriodMode.DAY:
-            pc.set_from_day(clicked_date)
-        elif pc.mode == PeriodMode.WEEK:
-            pc.set_from_week(clicked_date)
-        else:
-            pc.set_from_month(clicked_date)
-        self._command.refresh_all()
+        self.post_message(self.CalendarDayClicked(clicked_date))
 
-    def on_click(self, event) -> None:
+    def on_click(self, event: Click) -> None:
         """Focus the calendar when clicked anywhere."""
         self.focus()
 
@@ -417,10 +370,11 @@ class CommandTab(Container):
 
     PERIOD_MODES = [PeriodMode.DAY, PeriodMode.WEEK, PeriodMode.MONTH]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(id="command-container", *args, **kwargs)
         self.period = PeriodController()
         self._current_graph_mode = "net"
+        self.data_cache = None
 
     # ── Compose ──────────────────────────────────────────────────────
 
@@ -431,7 +385,7 @@ class CommandTab(Container):
                 yield from self._compose_graph_header()
                 yield GraphWidget(id="cmd-graph")
             with Container(id="cmd-calendar-col"):
-                yield CalendarWidget(self)
+                yield CalendarWidget()
 
         # ── Bottom section: category + daily tables ──
         with Horizontal(id="cmd-bottom-section"):
@@ -446,7 +400,7 @@ class CommandTab(Container):
                     id="cmd-daily-table",
                 )
 
-    def _compose_graph_header(self):
+    def _compose_graph_header(self) -> ComposeResult:
         """Yield graph panel header (L1.controls)."""
         with Container(id="cmd-graph-header"):
             # Row 1: L1.controls
@@ -463,7 +417,7 @@ class CommandTab(Container):
 
     # ── Mount ────────────────────────────────────────────────────────
 
-    def on_mount(self):
+    def on_mount(self) -> None:
         cat = self.query_one("#cmd-category-table", DataTable)
         cat.add_columns("Category", "Hours", "Rate", "Points")
         cat.styles.min_height = 1
@@ -474,50 +428,24 @@ class CommandTab(Container):
         daily.styles.min_height = 1
         daily.show_cursor = True
 
-        self.refresh_all()
-
     # ── Refresh ──────────────────────────────────────────────────────
 
-    def refresh_all(self):
+    def refresh_all(self) -> None:
         """Single refresh entry point — graph, calendar, tables, stats, controls."""
         start, end = self.period.get_visible_range()
         base_start, base_end = self.period.get_base_range()
 
-        from toggl.cache import DataCache
-        cache = DataCache.load()
+        cache = self.data_cache
         daily_data = cache.get_daily_data_for_range(start, end)
         base_daily_data = cache.get_daily_data_for_range(base_start, base_end)
 
+        svc = MetricsService(cache)
+
         # ── Graph data ──────────────────────────────────────────────
-        mode_field_map = {
-            "net": "net",
-            "positive": "positive",
-            "negative": "negative",
-        }
-        field = mode_field_map[self._current_graph_mode]
-        dates = [d["date"] for d in daily_data]
-        raw_values = [d[field] for d in daily_data]
-
-        if self._current_graph_mode == "net":
-            values = []
-            cum = 0.0
-            for v in raw_values:
-                cum += v
-                values.append(round(cum, 1))
-        elif self._current_graph_mode == "negative":
-            values = [-v for v in raw_values]
-        else:
-            values = raw_values
-
+        dates, raw_values, values, avg = svc.get_graph_data(
+            daily_data, self._current_graph_mode
+        )
         graph = self.query_one("#cmd-graph", GraphWidget)
-        if self._current_graph_mode == "net":
-            avg = round(sum(values) / len(values), 1) if values else None
-        elif self._current_graph_mode == "negative":
-            nonzero = [v for v in raw_values if v != 0]
-            avg = round(-sum(nonzero) / len(nonzero), 1) if nonzero else None
-        else:
-            nonzero = [v for v in raw_values if v != 0]
-            avg = round(sum(nonzero) / len(nonzero), 1) if nonzero else None
         graph.set_data(dates, values, avg=avg)
         graph.set_mode(self._current_graph_mode)
         graph.refresh()
@@ -526,6 +454,7 @@ class CommandTab(Container):
         net_map = {d["date"]: d["net"] for d in daily_data}
         cal = self.query_one(CalendarWidget)
         cal.set_day_net_values(net_map)
+        cal.set_period_context(self.period.get_anchor_date(), self.period.mode)
         cal.rebuild()
 
         # ── Category table (aggregated over base range) ──────────
@@ -542,8 +471,13 @@ class CommandTab(Container):
 
     # ── Category table ───────────────────────────────────────────────
 
-    def _refresh_category_table(self, cache, start, end):
-        import toggl.tui as _tui
+    def _refresh_category_table(self, cache: DataCache, start: date, end: date) -> None:
+        from toggl.formatters import (
+            _fmt_section_header, _render_category_section,
+            _fmt_project_tree, _fmt_tree_cells,
+            _render_logged_results,
+            SECTION_COLORS,
+        )
 
         agg = cache.get_range_aggregate(start, end)
         table = self.query_one("#cmd-category-table", DataTable)
@@ -560,76 +494,35 @@ class CommandTab(Container):
 
         table.border_title = f"[b][#63f3ff]{suffix}[/][/]"
 
-        def _fmt(val):
-            if val > 0: return f"[#37d994]+{val:.1f}[/]"
-            elif val < 0: return f"[#ff5f5f]{val:.1f}[/]"
-            else: return "[dim]0.0[/]"
-
-        def _compute_net(start_d, end_d):
-            total = 0.0
-            for d in cache.get_daily_data_for_range(start_d, end_d):
-                if d["has_data"]:
-                    total += d["net"]
-            return total
-
-        from datetime import timedelta, date
-        if mode == "day":
-            daily_net = _compute_net(start, start)
-            monday = start - timedelta(days=start.weekday())
-            sunday = monday + timedelta(days=6)
-            weekly_net = _compute_net(monday, sunday)
-            subtitle = f"Daily Net: {_fmt(daily_net)}   Weekly Net: {_fmt(weekly_net)}"
-        elif mode == "week":
-            weekly_net = _compute_net(start, end)
-            first_day = date(start.year, start.month, 1)
-            next_month = first_day.replace(day=28) + timedelta(days=4)
-            last_day = next_month - timedelta(days=next_month.day)
-            monthly_net = _compute_net(first_day, last_day)
-            subtitle = f"Weekly Net: {_fmt(weekly_net)}   Monthly Net: {_fmt(monthly_net)}"
-        else:
-            subtitle = "Insights coming soon"
-
+        svc = MetricsService(cache)
+        period_nets = svc.compute_period_nets(cache, start, end, mode)
+        subtitle = period_nets.get("subtitle", "Insights coming soon")
         table.border_subtitle = f"[#8d98a7]{subtitle}[/]"
 
         rows = []
         for section_name in ("positive", "negative", "unscored"):
             section_rows = agg[section_name]
             if section_rows:
-                rows.append((_tui._fmt_section_header(f"• {section_name.upper()}"),
+                rows.append((_fmt_section_header(f"• {section_name.upper()}"),
                              Text(""), Text(""), Text("")))
             rows.extend(
-                _tui._render_category_section(
-                    section_rows, _tui._fmt_project_tree, _tui._fmt_tree_cells,
-                    section_color=_tui.SECTION_COLORS.get(section_name.upper(), ""),
+                _render_category_section(
+                    section_rows, _fmt_project_tree, _fmt_tree_cells,
+                    section_color=SECTION_COLORS.get(section_name.upper(), ""),
                 )
             )
 
         if agg["positive_results"]:
-            rows.append((_tui._fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(agg["positive_results"]):
-                prefix = "└ " if i == len(agg["positive_results"]) - 1 else "├ "
-                rows.append((
-                    Text.assemble((prefix, _tui.SECTION_COLORS["LOGGED POSITIVE"]), (name, "")),
-                    Text(f"×{count}"), _tui.fmt_pts_rich(per_event), _tui.fmt_pts_rich(total),
-                ))
-
+            _render_logged_results(rows, agg["positive_results"], "• LOGGED POSITIVE", SECTION_COLORS["LOGGED POSITIVE"])
         if agg["negative_results"]:
-            rows.append((_tui._fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(agg["negative_results"]):
-                prefix = "└ " if i == len(agg["negative_results"]) - 1 else "├ "
-                rows.append((
-                    Text.assemble((prefix, _tui.SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")),
-                    Text(f"×{count}"), _tui.fmt_pts_rich(per_event), _tui.fmt_pts_rich(total),
-                ))
+            _render_logged_results(rows, agg["negative_results"], "• LOGGED NEGATIVE", SECTION_COLORS["LOGGED NEGATIVE"])
 
         table.add_rows(rows)
 
     # ── Daily breakdown table ────────────────────────────────────────
 
-    def _refresh_daily_table(self, daily_data):
-        import toggl.tui as _tui
+    def _refresh_daily_table(self, daily_data: list[dict[str, Any]]) -> None:
         from rich.text import Text as RichText
-        from datetime import date, timedelta
 
         table = self.query_one("#cmd-daily-table", DataTable)
         table.clear(columns=False)
@@ -638,76 +531,8 @@ class CommandTab(Container):
         title_word = title_map.get(self.period.mode, "Daily")
         table.border_title = f"[b][#63f3ff]{title_word} Breakdown[/][/]"
 
-        aggregated = []
-        if self.period.mode == "week":
-            current_group = None
-            for day in daily_data:
-                try:
-                    d = date.fromisoformat(day["date"])
-                except:
-                    continue
-                sunday = d - timedelta(days=(d.weekday() + 1) % 7)
-                if current_group is None or current_group["start_date"] != sunday:
-                    wk_num = int(get_week_str(sunday).split("W")[1])
-                    current_group = {
-                        "start_date": sunday,
-                        "label": f"Wk {wk_num}",
-                        "positive": 0.0,
-                        "negative": 0.0,
-                        "net": 0.0,
-                        "has_data": False,
-                        "contains_today": False,
-                    }
-                    aggregated.append(current_group)
-                
-                current_group["positive"] += day["positive"]
-                current_group["negative"] += day["negative"]
-                current_group["net"] += day["net"]
-                if day["has_data"]: current_group["has_data"] = True
-                if d == date.today(): current_group["contains_today"] = True
-
-        elif self.period.mode == "month":
-            current_group = None
-            for day in daily_data:
-                try:
-                    d = date.fromisoformat(day["date"])
-                except:
-                    continue
-                month_key = (d.year, d.month)
-                if current_group is None or current_group["month_key"] != month_key:
-                    current_group = {
-                        "month_key": month_key,
-                        "label": d.strftime('%b %Y'),
-                        "positive": 0.0,
-                        "negative": 0.0,
-                        "net": 0.0,
-                        "has_data": False,
-                        "contains_today": False,
-                    }
-                    aggregated.append(current_group)
-                
-                current_group["positive"] += day["positive"]
-                current_group["negative"] += day["negative"]
-                current_group["net"] += day["net"]
-                if day["has_data"]: current_group["has_data"] = True
-                if d == date.today(): current_group["contains_today"] = True
-
-        else:
-            for day in daily_data:
-                try:
-                    d = date.fromisoformat(day["date"])
-                except:
-                    continue
-                aggregated.append({
-                    "label": f"{d.strftime('%a')} {d.strftime('%d %b')}",
-                    "positive": day["positive"],
-                    "negative": day["negative"],
-                    "net": day["net"],
-                    "has_data": day["has_data"],
-                    "contains_today": d == date.today(),
-                })
-
-        aggregated.reverse()
+        svc = MetricsService(self.data_cache)
+        aggregated = svc.get_daily_breakdown(daily_data, self.period.mode)
 
         for i, item in enumerate(aggregated):
             positive = item["positive"]
@@ -731,13 +556,13 @@ class CommandTab(Container):
                 RichText.from_markup(date_cell),
                 RichText.from_markup(pos_text),
                 RichText.from_markup(neg_text),
-                _tui.format_signed_rich(net),
+                format_signed_rich(net),
                 key=str(i),
             )
 
     # ── Statistics ────────────────────────────────────────────────────
 
-    def _update_stats(self, raw_values, values, avg):
+    def _update_stats(self, raw_values: list[float], values: list[float], avg: float | None) -> None:
         panel = self.query_one("#cmd-graph-panel")
         if not values:
             panel.border_subtitle = ""
@@ -811,13 +636,13 @@ class CommandTab(Container):
 
     # ── Controls ─────────────────────────────────────────────────────
 
-    def _update_controls(self):
+    def _update_controls(self) -> None:
         """Update the L1 labels, controls, and cycle buttons."""
         lbl = self.query_one("#cmd-period-label", Label)
         lbl.update(self.period.get_period_label())
         self._update_cycle_labels()
 
-    def _update_cycle_labels(self):
+    def _update_cycle_labels(self) -> None:
         """Update cycle button labels based on the current state."""
         from toggl.period import PeriodMode
         period_btn = self.query_one("#cmd-cycle-period", Button)
@@ -834,17 +659,17 @@ class CommandTab(Container):
     # ── Event handlers ───────────────────────────────────────────────
 
     @on(Button.Pressed, "#cmd-prev")
-    def _on_prev(self):
+    def _on_prev(self) -> None:
         self.period.previous()
         self.refresh_all()
 
     @on(Button.Pressed, "#cmd-next")
-    def _on_next(self):
+    def _on_next(self) -> None:
         self.period.next()
         self.refresh_all()
 
     @on(Button.Pressed, "#cmd-cycle-period")
-    def _on_cycle_period(self, event: Button.Pressed):
+    def _on_cycle_period(self, event: Button.Pressed) -> None:
         modes = self.PERIOD_MODES
         current_idx = modes.index(self.period.mode)
         next_mode = modes[(current_idx + 1) % len(modes)]
@@ -852,7 +677,7 @@ class CommandTab(Container):
         self.refresh_all()
 
     @on(Button.Pressed, "#cmd-cycle-metric")
-    def _on_cycle_metric(self, event: Button.Pressed):
+    def _on_cycle_metric(self, event: Button.Pressed) -> None:
         modes = self.GRAPH_MODES
         current_idx = modes.index(self._current_graph_mode)
         next_mode = modes[(current_idx + 1) % len(modes)]
@@ -860,12 +685,30 @@ class CommandTab(Container):
         self.refresh_all()
 
     @on(Button.Pressed, "#cmd-cycle-scale")
-    def _on_cycle_scale(self, event: Button.Pressed):
+    def _on_cycle_scale(self, event: Button.Pressed) -> None:
         current_idx = self.period.scale_index
         max_idx = self.period.scale_count - 1
         if current_idx >= max_idx:
             self.period.scale_index = 0
         else:
             self.period.scale_index = current_idx + 1
+        self.refresh_all()
+
+    # ── Calendar message handlers ──────────────────────────────────────
+
+    @on(CalendarWidget.CalendarNav)
+    def _on_calendar_nav(self, event: CalendarWidget.CalendarNav) -> None:
+        self.period.set_from_day(event.target)
+        self.refresh_all()
+
+    @on(CalendarWidget.CalendarDayClicked)
+    def _on_calendar_day_clicked(self, event: CalendarWidget.CalendarDayClicked) -> None:
+        cd = event.clicked_date
+        if self.period.mode == PeriodMode.DAY:
+            self.period.set_from_day(cd)
+        elif self.period.mode == PeriodMode.WEEK:
+            self.period.set_from_week(cd)
+        else:
+            self.period.set_from_month(cd)
         self.refresh_all()
 

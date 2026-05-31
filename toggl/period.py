@@ -16,7 +16,7 @@ class PeriodMode:
     _LABELS = {DAY: "Day", WEEK: "Week", MONTH: "Month"}
 
     @staticmethod
-    def values():
+    def values() -> list[str]:
         return [PeriodMode.DAY, PeriodMode.WEEK, PeriodMode.MONTH]
 
     @staticmethod
@@ -52,7 +52,7 @@ class PeriodController:
         "month": {3: "3m",  6: "6m",   12: "12m"},
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._mode = PeriodMode.DAY
         self._scale_index = 0
         self._offset = 0
@@ -106,22 +106,22 @@ class PeriodController:
 
     # ── Navigation ──────────────────────────────────────────────────
 
-    def previous(self):
+    def previous(self) -> None:
         self._offset -= 1
 
-    def next(self):
+    def next(self) -> None:
         if self._offset < 0:
             self._offset += 1
 
-    def zoom_in(self):
+    def zoom_in(self) -> None:
         if self._scale_index > 0:
             self._scale_index -= 1
 
-    def zoom_out(self):
+    def zoom_out(self) -> None:
         if self._scale_index < self.scale_count - 1:
             self._scale_index += 1
 
-    def set_scale(self, scale_value: int):
+    def set_scale(self, scale_value: int) -> None:
         """Set scale directly by value (e.g., 7, 30, 4, 13)."""
         scales = self._scales()
         try:
@@ -234,13 +234,13 @@ class PeriodController:
 
     # ── Calendar-set methods ────────────────────────────────────────
 
-    def set_from_day(self, target_date: date):
+    def set_from_day(self, target_date: date) -> None:
         today = date.today()
         self._mode = PeriodMode.DAY
         self._scale_index = 0
         self._offset = (target_date - today).days
 
-    def set_from_week(self, target_date: date):
+    def set_from_week(self, target_date: date) -> None:
         today = date.today()
         current_sunday = _get_sunday(today)
         target_sunday = _get_sunday(target_date)
@@ -249,7 +249,7 @@ class PeriodController:
         self._scale_index = 0
         self._offset = delta_days // 7
 
-    def set_from_month(self, target_date: date):
+    def set_from_month(self, target_date: date) -> None:
         today = date.today()
         self._mode = PeriodMode.MONTH
         self._scale_index = 0

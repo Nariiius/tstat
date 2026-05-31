@@ -59,23 +59,7 @@ def tui_data(tmp_data_dir, monkeypatch):
 
     # -- Sync history --
     with open(toggl.const.HISTORY_FILE, "w") as f:
-        json.dump({
-            "last_updated": "2023-01-02T10:00:00",
-            "synced_weeks": {"2023-W01": "ok"},
-            "synced_days": {},
-        }, f)
-
-    # -- Freeze time to Monday 2023-01-02 (2023-W01) --
-    FAKE_TODAY = date(2023, 1, 2)
-
-    class MockDate(date):
-        @classmethod
-        def today(cls):
-            return FAKE_TODAY
-
-    monkeypatch.setattr(toggl.tui, "date", MockDate)
-    monkeypatch.setattr(toggl.cache, "date", MockDate)
-    monkeypatch.setattr(toggl.tui, "needs_auto_update", lambda: False)
+        json.dump({"last_updated": None}, f)
 
     return tmp_data_dir
 
@@ -86,45 +70,45 @@ def tui_data(tmp_data_dir, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mount_shows_day_view_with_data(tui_data):
-    """[REWRITTEN] Day view is active after mount and shows project data rows."""
+async def test_mount_shows_overview_with_data(tui_data):
+    """Overview view is active after mount and shows category data rows."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # Day view container is active
-        day_view = app.query_one("#day-view")
-        assert "-active" in day_view.classes
+        # Overview view is the default (index 0)
+        assert app.active_view_index == 0
 
-        # Tab indicator matches Day
+        # Tab indicator matches
         tabs = app.query_one("#view-tabs")
-        assert tabs.active == "tab-1"
+        assert tabs.active == "tab-0"
 
-        # Day table has project data (header + at least one project row)
-        day_table = app.query_one("#day-table")
-        assert day_table.row_count >= 2
+        # Overview categories table has data
+        cat_table = app.query_one("#overview-categories-table")
+        assert cat_table.row_count >= 2
 
-        # A test project name appears in the data rows (sorted by rate desc)
-        row1 = day_table.get_row_at(1)
-        assert "Learning to Code" in str(row1[0]) or "Building Projects" in str(row1[0])
+        # Recovery table exists
+        rec_table = app.query_one("#overview-recovery-table")
+        assert rec_table is not None
 
 
 @pytest.mark.asyncio
 async def test_app_launches_and_shows_default_view(tui_data):
-    """[REWRITTEN] App starts without crash; the default Day view renders data."""
+    """App starts without crash; the default Overview view renders data."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        day_view = app.query_one("#day-view")
-        assert "-active" in day_view.classes
+        # Default active view is Overview (index 0)
+        assert app.active_view_index == 0
 
-        table = app.query_one("#day-table")
+        # Overview categories table renders data
+        table = app.query_one("#overview-categories-table")
         assert table.row_count > 0
 
-        # Spark rail also renders (right-side weeks/days/catchup)
-        spark_weeks = app.query_one("#spark-weeks-table")
-        assert spark_weeks.row_count > 0
+        # Ensure no exceptions in the overview
+        overview_view = app.query_one("#overview-view")
+        assert "-active" in overview_view.classes
 
 
 @pytest.mark.asyncio
@@ -134,91 +118,35 @@ async def test_view_switching(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        assert app.active_view_index == 1
+        assert app.active_view_index == 0
 
         app.action_next_view()
         await pilot.pause()
-        assert app.active_view_index == 2
+        assert app.active_view_index == 1
         tabs = app.query_one("#view-tabs")
-        assert tabs.active == "tab-2"
+        assert tabs.active == "tab-1"
 
         app.action_prev_view()
         await pilot.pause()
-        assert app.active_view_index == 1
-        assert tabs.active == "tab-1"
+        assert app.active_view_index == 0
+        assert tabs.active == "tab-0"
 
 
 @pytest.mark.asyncio
 async def test_view_navigation_wraps_around(tui_data):
-    """Pressing right through all 8 views wraps back to Day (view 1)."""
+    """Pressing right through all 3 views wraps back to Overview."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for _ in range(8):
+        for _ in range(3):
             app.action_next_view()
             await pilot.pause()
 
-        # Back at Day view after wrap-around
-        assert app.active_view_index == 1
-        day_view = app.query_one("#day-view")
-        assert "-active" in day_view.classes
-
-
-@pytest.mark.asyncio
-async def test_day_week_sync(tui_data):
-    """[REWRITTEN] Highlighting a week-table row updates the Day view data."""
-    app = TogglTUI()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-
-        initial_day = app.selected_day
-
-        # Navigate to Week view (index 2)
-        app.action_next_view()
-        await pilot.pause()
-
-        week_table = app.query_one("#week-table")
-        assert week_table.row_count > 0
-
-        # Highlight a different row
-        await pilot.press("down")
-        await pilot.pause()
-
-        # The selected day should change (different date highlighted)
-        assert app.selected_day != initial_day
-
-        # Navigate back to Day view — still shows data for the new day
-        app.action_prev_view()
-        await pilot.pause()
-
-        day_table = app.query_one("#day-table")
-        assert day_table.row_count > 0
-
-
-@pytest.mark.asyncio
-async def test_week_navigation(tui_data):
-    """Up / Down arrows move the cursor inside the week table."""
-    app = TogglTUI()
-    async with app.run_test(size=(120, 40)) as pilot:
-        await pilot.pause()
-
-        app.action_next_view()
-        await pilot.pause()
-        assert app.active_view_index == 2
-
-        week_table = app.query_one("#week-table")
-        assert week_table.row_count >= 2
-
-        cursor_before = week_table.cursor_row
-
-        await pilot.press("down")
-        await pilot.pause()
-        assert week_table.cursor_row != cursor_before
-
-        await pilot.press("up")
-        await pilot.pause()
-        assert week_table.cursor_row == cursor_before
+        # Back at Overview after wrap-around
+        assert app.active_view_index == 0
+        overview_view = app.query_one("#overview-view")
+        assert "-active" in overview_view.classes
 
 
 @pytest.mark.asyncio
@@ -231,9 +159,9 @@ async def test_refresh_reloads_data(tui_data):
         app.action_refresh_data()
         await pilot.pause()
 
-        # Day table still renders with data after refresh
-        day_table = app.query_one("#day-table")
-        assert day_table.row_count > 0
+        # Overview table still renders with data after refresh
+        cat_table = app.query_one("#overview-categories-table")
+        assert cat_table.row_count > 0
 
 
 @pytest.mark.asyncio
@@ -264,12 +192,12 @@ async def test_footer_shows_keybindings(tui_data):
 
 @pytest.mark.asyncio
 async def test_all_views_render_without_error(tui_data):
-    """All 9 views can be switched to without throwing exceptions."""
+    """All 3 views can be switched to without throwing exceptions."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for i in range(9):
+        for i in range(3):
             app.active_view_index = i
             app._refresh_view_by_index(i)
             app.update_view_visibility()
@@ -279,26 +207,20 @@ async def test_all_views_render_without_error(tui_data):
 
 
 @pytest.mark.asyncio
-async def test_sync_view_shows_backfill_status(tui_data):
-    """Sync / Quota view renders a Backfill status row."""
+async def test_sync_view_shows_status(tui_data):
+    """Sync / Quota view renders status rows."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # 6 right-presses from Day(1) → Sync/Quota(7)
-        for _ in range(6):
+        # Navigate to Sync/Quota view (index 2)
+        for _ in range(2):
             app.action_next_view()
             await pilot.pause()
-        assert app.active_view_index == 7
+        assert app.active_view_index == 2
 
         sync_table = app.query_one("#sync-table")
         assert sync_table.row_count > 0
-
-        found = any(
-            "backfill" in sync_table.get_row_at(i)[0].lower()
-            for i in range(sync_table.row_count)
-        )
-        assert found
 
 
 @pytest.mark.asyncio
@@ -375,7 +297,3 @@ async def test_log_positive_via_tui(tui_data, monkeypatch):
         rows = list(csv.DictReader(f))
     assert len(rows) == 1
     assert rows[0]["Positive"] == "Exercise"
-
-
-
-

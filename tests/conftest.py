@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for backfill tests."""
+"""Shared pytest fixtures."""
 
 import os
 import pytest
@@ -9,26 +9,23 @@ def tmp_data_dir(tmp_path, monkeypatch):
     """Create a temp data dir, monkeypatch all path constants."""
     import toggl.const
     import toggl.cache
-    import toggl.backfill
     import toggl.neg
 
     d = tmp_path / "data"
     d.mkdir()
     monkeypatch.setattr(toggl.const, "DATA_DIR", str(d))
-    monkeypatch.setattr(toggl.const, "BACKFILL_DB", str(d / "toggl_backfill.db"))
     monkeypatch.setattr(toggl.const, "CSV_FILE", str(d / "toggl_data.csv"))
     monkeypatch.setattr(toggl.const, "DAILY_CSV_FILE", str(d / "toggl_daily.csv"))
     monkeypatch.setattr(toggl.const, "NEGATIVES_CSV_FILE", str(d / "toggl_negatives.csv"))
     monkeypatch.setattr(toggl.const, "POSITIVES_CSV_FILE", str(d / "toggl_positives.csv"))
     monkeypatch.setattr(toggl.const, "HISTORY_FILE", str(d / "toggl_sync_history.json"))
     monkeypatch.setattr(toggl.const, "PROJECTS_FILE", str(d / "toggl_projects.json"))
-    # Also patch cache, backfill, and neg module-level references
+    # Also patch cache and neg module-level references
     monkeypatch.setattr(toggl.cache, "CSV_FILE", toggl.const.CSV_FILE)
     monkeypatch.setattr(toggl.cache, "DAILY_CSV_FILE", toggl.const.DAILY_CSV_FILE)
     monkeypatch.setattr(toggl.cache, "NEGATIVES_CSV_FILE", toggl.const.NEGATIVES_CSV_FILE)
     monkeypatch.setattr(toggl.cache, "POSITIVES_CSV_FILE", toggl.const.POSITIVES_CSV_FILE)
     monkeypatch.setattr(toggl.cache, "HISTORY_FILE", toggl.const.HISTORY_FILE)
-    monkeypatch.setattr(toggl.backfill, "BACKFILL_DB", toggl.const.BACKFILL_DB)
     monkeypatch.setattr(toggl.neg, "NEGATIVES_CSV_FILE", toggl.const.NEGATIVES_CSV_FILE)
     monkeypatch.setattr(toggl.neg, "POSITIVES_CSV_FILE", toggl.const.POSITIVES_CSV_FILE)
     return str(d)
@@ -93,9 +90,7 @@ def stub_api(monkeypatch):
         return weekly, daily
 
     import toggl.cache
-    import toggl.backfill
     monkeypatch.setattr(toggl.cache, "fetch_week_data", _fake_fetch)
-    monkeypatch.setattr(toggl.backfill, "fetch_week_data", _fake_fetch)
     return _fake_fetch
 
 

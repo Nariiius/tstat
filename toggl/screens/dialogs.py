@@ -1,0 +1,194 @@
+"""Modal dialog screens for TogglTrack TUI.
+
+Extracted from ``tui.py`` to enable independent testing and reduce file size.
+"""
+
+from __future__ import annotations
+
+from textual import on
+from textual.app import ComposeResult
+from textual.containers import Container, Horizontal
+from textual.events import Click
+from textual.screen import ModalScreen
+from textual.widgets import Button, OptionList, Static
+
+from toggl.config import NEGATIVES, POSITIVES
+
+
+class BaseDialog(ModalScreen):
+    """Base modal dialog with consistent centered floating appearance.
+
+    Provides a standard #dialog → #dialog-box structure with:
+    - Centered layout (100% screen overlay → auto-sized box)
+    - Consistent round #3d4f63 border, $accent on focus
+    - Shared escape/cancel binding
+    - border_title from the title argument
+
+    Subclasses override ``body()`` to yield dialog content inside #dialog-box.
+    Default action_cancel dismisses with None.
+    """
+
+    DEFAULT_CSS = """
+    $accent: #63f3ff;
+
+    BaseDialog {
+        background: $background 60%;
+    }
+
+    #dialog {
+        width: 100%;
+        height: 100%;
+        align: center middle;
+    }
+
+    #dialog-box {
+        width: auto;
+        height: auto;
+        min-width: 60;
+        max-width: 80;
+        border: round #3d4f63;
+        padding: 1 2;
+        background: #0b1016;
+    }
+
+    #dialog-box:focus,
+    #dialog-box:focus-within {
+        border: round $accent;
+        background: #0b1016;
+        background-tint: transparent 0%;
+    }
+
+    .dialog-body {
+        margin-bottom: 1;
+    }
+
+    .dialog-help {
+        color: #8d98a7;
+        margin-top: 1;
+    }
+
+    #dialog-buttons {
+        margin-top: 1;
+        height: auto;
+    }
+
+    #btn-confirm:hover, #btn-cancel:hover {
+        color: #d7dde8;
+        text-style: bold;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        self._dialog_title = title
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog"):
+            with Container(id="dialog-box"):
+                yield from self.body()
+
+    def body(self) -> ComposeResult:
+        """Override to yield dialog content inside #dialog-box."""
+        return
+
+    def on_mount(self) -> None:
+        self.query_one("#dialog-box").border_title = (
+            f"[b][#63f3ff]{self._dialog_title}[/][/]"
+        )
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ConfirmScreen(BaseDialog):
+    """Confirmation dialog (Yes / No)."""
+
+    BINDINGS = [
+        ("y", "confirm", "Confirm"),
+        ("Y", "confirm", "Confirm"),
+        ("enter", "confirm", "Confirm"),
+        ("n", "cancel", "Cancel"),
+        ("N", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, title: str, body: str) -> None:
+        self._body_text = body
+        super().__init__(title)
+
+    def body(self) -> ComposeResult:
+        yield Static(self._body_text, classes="dialog-body")
+        with Horizontal(id="dialog-buttons"):
+            yield Static("[Y/Enter] confirm", id="btn-confirm", classes="dialog-help")
+            yield Static("  " "[N/Esc] cancel", id="btn-cancel", classes="dialog-help")
+
+    @on(Click, "#btn-confirm")
+    def on_confirm_click(self) -> None:
+        self.dismiss(True)
+
+    @on(Click, "#btn-cancel")
+    def on_cancel_click(self) -> None:
+        self.dismiss(False)
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class NegativeInputScreen(BaseDialog):
+    """Pick a negative action to log."""
+
+    def __init__(self) -> None:
+        super().__init__("Log Negative")
+
+    def body(self) -> ComposeResult:
+        yield Static("Select a negative action to log.", classes="dialog-body")
+        yield OptionList(id="negative-list")
+        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        option_list = self.query_one("#negative-list", OptionList)
+        for name in NEGATIVES:
+            option_list.add_option(name)
+        option_list.focus()
+
+    @on(OptionList.OptionSelected, "#negative-list")
+    def submit_negative(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.prompt))
+
+    @on(Click, "#btn-cancel")
+    def on_cancel_click(self) -> None:
+        self.dismiss(None)
+
+
+class PositiveInputScreen(BaseDialog):
+    """Pick a positive action to log."""
+
+    def __init__(self) -> None:
+        super().__init__("Log Positive")
+
+    def body(self) -> ComposeResult:
+        yield Static("Select a positive action to log.", classes="dialog-body")
+        yield OptionList(id="positive-list")
+        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        option_list = self.query_one("#positive-list", OptionList)
+        for name in POSITIVES:
+            option_list.add_option(name)
+        option_list.focus()
+
+    @on(OptionList.OptionSelected, "#positive-list")
+    def submit_positive(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.prompt))
+
+    @on(Click, "#btn-cancel")
+    def on_cancel_click(self) -> None:
+        self.dismiss(None)

@@ -1,8 +1,11 @@
 """TogglTUI — Textual terminal UI for TStat."""
 
+from __future__ import annotations
+
 import logging
 import os
 from datetime import date, datetime, timedelta
+from typing import Any
 
 logger = logging.getLogger("TStat")
 logger.setLevel(logging.DEBUG)
@@ -19,96 +22,44 @@ from textual._work_decorator import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.events import Click, MouseScrollDown, MouseScrollUp
-from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Label, OptionList, Static, Tab, Tabs
+from textual.events import Click, MouseScrollDown, MouseScrollUp, Resize
+from textual.widgets import DataTable, Footer, Label, Static, Tab, Tabs
 from textual.worker import Worker, get_current_worker
 
 from toggl.api import (
-    API_RUN_STATS,
     TogglAPIError,
     TogglRateLimitError,
-    _format_reset_window,
-    _print_api_usage_summary,
     _reset_api_stats,
-    check_quota,
     get_api_token,
 )
 from toggl.cache import (
     DataCache,
-    _load_history,
     get_cache,
     get_current_week,
     get_last_updated_str,
-    get_sunday_of_week,
-    get_week_dates,
-    get_week_str,
     needs_auto_update,
     reset_cache,
     sync_api_to_csv,
     sync_current_week_light,
 )
-from toggl.calc import (
-    calculate,
-    format_signed,
-    get_negative_catalog_rows,
-    get_positive_catalog_rows,
-)
 from toggl.config import (
-    CATEGORY_REGISTRY,
-    NEGATIVES,
-    POINTS,
-    POSITIVES,
-    RATE_COLORS,
-    get_daily_target,
     load_runtime_settings,
 )
-from toggl.const import BLAME_W, SPARK_W, TASK_SHORT_NAMES, strip_ansi
 from toggl.command import CommandTab
+from toggl.panels import LogNegRequested, LogPosRequested, OverviewPanel, SyncPanel
 from toggl.neg import (
     log_negative_direct,
     log_positive_direct,
 )
 
-
-def get_sync_status_data():
-    import csv, os
-    from toggl.const import CSV_FILE, DAILY_CSV_FILE
-
-    history = _load_history()
-    from toggl.api import API_RUN_STATS, get_projects_cache_age_days
-
-    # Count actual weeks/days from CSV files (not from unwritten history keys)
-    synced_weeks = 0
-    synced_days = 0
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE) as f:
-            synced_weeks = len({row["Week"] for row in csv.DictReader(f)})
-    if os.path.exists(DAILY_CSV_FILE):
-        with open(DAILY_CSV_FILE) as f:
-            synced_days = len({row["Date"] for row in csv.DictReader(f)})
-
-    backfill = {}
-    try:
-        from toggl.backfill import get_backfill_status
-        backfill = get_backfill_status()
-    except Exception:
-        backfill = {"status": "error"}
-
-    return {
-        "last_updated": get_last_updated_str(),
-        "projects_cache_age_days": get_projects_cache_age_days(),
-        "current_week": get_current_week(),
-        "synced_weeks": synced_weeks,
-        "synced_days": synced_days,
-        "quota_remaining": API_RUN_STATS["remaining"],
-        "quota_limit": API_RUN_STATS["limit"],
-        "quota_resets_in": API_RUN_STATS["resets_in"],
-        "backfill_status": backfill,
-    }
+from toggl.screens.dialogs import (
+    ConfirmScreen,
+    NegativeInputScreen,
+    PositiveInputScreen,
+)
 
 
-def time_left_in_week():
+def time_left_in_week() -> str:
     from datetime import datetime, timedelta
 
     now = datetime.now()
@@ -131,396 +82,6 @@ def time_left_in_week():
 
 
 # ──────────────────────────────────────────────
-# SPARK TABLE CELL RENDERER
-# ──────────────────────────────────────────────
-
-
-def _spark_net_rich(
-    net, max_abs, bar_w=4, dim_zero=False, blame_tracked=0, blame_logged=0, blame_w=3
-):
-    """
-    Return Rich markup for a net-points cell in the interactive spark tables.
-    Positive → green bar on left of value.  Negative → red value + bar on right.
-    When net < 0 and blame data is provided, a blame bar (red tracked + magenta
-    logged) is appended after the net bar.
-    """
-    if net is None or (abs(net) < 0.05 and dim_zero):
-        return "[dim]—[/]"
-    if abs(net) < 0.05:
-        return "[dim]0.0[/]"
-    bar_len = max(1, round(abs(net) / max_abs * bar_w)) if max_abs > 0 else 1
-    if net > 0:
-        bar = "█" * bar_len
-        return f"[#37d994]{bar} +{net}[/]"
-    else:
-        blame_total = blame_tracked + blame_logged
-        if blame_total > 0 and blame_w > 0:
-            net_bar_len = max(1, bar_len - blame_w)
-            red_count = round(blame_tracked / blame_total * blame_w)
-            mag_count = blame_w - red_count
-            bar = "█" * net_bar_len
-            blame = f"[#ff5f5f]{'█' * red_count}[/][#ff5fff]{'█' * mag_count}[/]"
-            return f"[#ff5f5f]{net} {bar}[/]{blame}"
-        bar = "█" * bar_len
-        return f"[#ff5f5f]{net} {bar}[/]"
-
-
-def fmt_rate(rate):
-    if rate is None:
-        return "—"
-    r = int(rate) if rate == int(rate) else rate
-    return f"×{r}"
-
-
-
-def fmt_pts(pts):
-    if pts is None:
-        return "—"
-    if pts == 0:
-        return "0.0"
-    return f"+{pts}" if pts > 0 else str(pts)
-
-
-def format_signed_rich(value):
-    if abs(value) < 0.05:
-        value = 0.0
-    if value > 0:
-        return f"[#37d994]+{value:.1f}[/]"
-    elif value < 0:
-        return f"[#ff5f5f]{value:.1f}[/]"
-    return "0.0"
-
-
-def fmt_pts_rich(pts):
-    if pts is None:
-        return "—"
-    if pts == 0:
-        return "0.0"
-    if pts > 0:
-        return f"[#37d994]+{pts:.1f}[/]"
-    return f"[#ff5f5f]{pts:.1f}[/]"
-
-
-# ──────────────────────────────────────────────
-# SECTION HEADER COLORS
-# ──────────────────────────────────────────────
-SECTION_COLORS = {
-    "POSITIVE": "#4ADE80",
-    "NEGATIVE": "#FF6B6B",
-    "UNSCORED": "#8d98a7",
-    "LOGGED POSITIVE": "#2DD4BF",
-    "LOGGED NEGATIVE": "#C084FC",
-}
-
-
-def _fmt_section_header(label: str) -> Text:
-    """Return a Rich Text section-divider row label with its fixed semantic color."""
-    # Compute the canonical section key (strip • or [ ] wrapper)
-    key = label
-    if key.startswith("• "):
-        key = key[2:]
-    elif key.startswith("["):
-        key = key[1:-1] if key.endswith("]") else key[1:]
-    color = SECTION_COLORS.get(key, "")
-    if color:
-        return Text(label, style=f"bold {color}")
-    return Text(label, style="bold")
-
-
-def _fmt_project_name(name: str) -> Text:
-    """Return a Rich Text project name colored by category or rate group.
-
-    Priority: category color > rate_colors > plain.
-    """
-    cat_color = CATEGORY_REGISTRY.get_color(name)
-    if cat_color:
-        return Text(name, style=cat_color)
-    # Fall back to rate_colors — we need the rate; caller should use
-    # _fmt_project_name_by_rate if they have rate info.
-    return Text(name)
-
-
-def _fmt_project_name_by_rate(name: str, rate: float | None) -> Text:
-    """Return a Rich Text project name colored by category or rate group.
-
-    Priority: category color > rate_colors > plain.
-    """
-    cat_color = CATEGORY_REGISTRY.get_color(name)
-    if cat_color:
-        return Text(name, style=cat_color)
-    if rate is not None:
-        rate_color = RATE_COLORS.get_color(rate)
-        if rate_color:
-            return Text(name, style=rate_color)
-    return Text(name)
-
-
-# ──────────────────────────────────────────────
-# TREE-RENDERED CATEGORY GROUPS
-# ──────────────────────────────────────────────
-
-def _render_category_section(rows, fmt_name_fn, fmt_cells_fn, section_color=""):
-    """Render scored rows as a flat list with tree characters.
-
-    No parent rows, no grouping by category. Items stay in their incoming
-    sort order (rate desc → hours desc).
-
-    - Only the ``├`` / ``└`` prefix is colored with *section_color*; names stay plain.
-    - The Rate column receives the *category group* color.
-    - Zero-rate / zero-point items are dimmed entirely (``#8d98a7``).
-
-    Returns a flat list of cell-tuples ready for ``DataTable.add_rows()``.
-    """
-    if not rows:
-        return []
-
-    dim_color = "#8d98a7"
-    result = []
-    total = len(rows)
-    for i, crow in enumerate(rows):
-        is_last = (i == total - 1)
-        prefix = "└ " if is_last else "├ "
-        name, hours, rate, pts = crow
-        name_text = fmt_name_fn(name, rate)
-        rate_color = CATEGORY_REGISTRY.get_color(name) or ""
-
-        # Grey out zero-rate / zero-point items
-        is_zero = (rate is not None and rate == 0) or (pts is not None and pts == 0)
-        if is_zero:
-            tree_name = Text.assemble((prefix, dim_color), (name_text.plain, dim_color))
-            result.append(fmt_cells_fn(tree_name, hours, rate, pts, rate_color="", dim=dim_color))
-        else:
-            # Prefix color: section color if set, otherwise group color (Recovery view)
-            prefix_color = section_color or rate_color
-            tree_name = Text.assemble((prefix, prefix_color), (name_text.plain, ""))
-            result.append(fmt_cells_fn(tree_name, hours, rate, pts, rate_color=rate_color))
-
-    return result
-
-
-def _fmt_tree_cells(name_text, hours, rate, pts, rate_color="", dim=""):
-    """Build a 4-tuple for a category-tree row.
-
-    The Rate column inherits *rate_color* (the category group color).
-    When *dim* is set the entire row uses that color.
-    """
-    if dim:
-        return (
-            name_text,
-            Text(f"{hours:.2f}h", style=dim) if hours is not None else Text(""),
-            Text(fmt_rate(rate), style=dim) if rate is not None else Text(""),
-            Text(f"{pts:.1f}", style=dim) if pts is not None else Text(""),
-        )
-    rate_cell = Text(fmt_rate(rate), style=rate_color) if rate is not None else Text("")
-    return (
-        name_text,
-        f"{hours:.2f}h" if hours is not None else "",
-        rate_cell,
-        fmt_pts_rich(pts) if pts is not None else Text(""),
-    )
-
-
-def _fmt_project_tree(name: str, rate: float | None) -> Text:
-    """Name formatter for category-tree rows (category color only, no rate fallback)."""
-    cat_color = CATEGORY_REGISTRY.get_color(name)
-    if cat_color:
-        return Text(name, style=cat_color)
-    return Text(name)
-
-
-def _fmt_recovery_cells(name_text, _hours, rate, hours_needed, rate_color="", dim=""):
-    rate_text = Text(fmt_rate(rate), style=rate_color) if rate is not None else Text("")
-    return (
-        name_text,
-        rate_text,
-        Text(str(hours_needed)) if hours_needed is not None else Text(""),
-    )
-
-
-# ──────────────────────────────────────────────
-# MODAL SCREENS
-# ──────────────────────────────────────────────
-
-
-class BaseDialog(ModalScreen):
-    """Base modal dialog with consistent centered floating appearance.
-
-    Provides a standard #dialog → #dialog-box structure with:
-    - Centered layout (100% screen overlay → auto-sized box)
-    - Consistent round #3d4f63 border, $accent on focus
-    - Shared escape/cancel binding
-    - border_title from the title argument
-
-    Subclasses override ``body()`` to yield dialog content inside #dialog-box.
-    Default action_cancel dismisses with None.
-    """
-
-    DEFAULT_CSS = """
-    $accent: #63f3ff;
-
-    BaseDialog {
-        background: $background 60%;
-    }
-
-    #dialog {
-        width: 100%;
-        height: 100%;
-        align: center middle;
-    }
-
-    #dialog-box {
-        width: auto;
-        height: auto;
-        min-width: 60;
-        max-width: 80;
-        border: round #3d4f63;
-        padding: 1 2;
-        background: #0b1016;
-    }
-
-    #dialog-box:focus,
-    #dialog-box:focus-within {
-        border: round $accent;
-        background: #0b1016;
-        background-tint: transparent 0%;
-    }
-
-    .dialog-body {
-        margin-bottom: 1;
-    }
-
-    .dialog-help {
-        color: #8d98a7;
-        margin-top: 1;
-    }
-
-    #dialog-buttons {
-        margin-top: 1;
-        height: auto;
-    }
-
-    #btn-confirm:hover, #btn-cancel:hover {
-        color: #d7dde8;
-        text-style: bold;
-    }
-    """
-
-    BINDINGS = [
-        ("escape", "cancel", "Cancel"),
-    ]
-
-    def __init__(self, title: str):
-        super().__init__()
-        self._dialog_title = title
-
-    def compose(self) -> ComposeResult:
-        with Container(id="dialog"):
-            with Container(id="dialog-box"):
-                yield from self.body()
-
-    def body(self) -> ComposeResult:
-        """Override to yield dialog content inside #dialog-box."""
-        return
-
-    def on_mount(self):
-        self.query_one("#dialog-box").border_title = (
-            f"[b][#63f3ff]{self._dialog_title}[/][/]"
-        )
-
-    def action_cancel(self):
-        self.dismiss(None)
-
-
-class ConfirmScreen(BaseDialog):
-    """Confirmation dialog (Yes / No)."""
-
-    BINDINGS = [
-        ("y", "confirm", "Confirm"),
-        ("Y", "confirm", "Confirm"),
-        ("enter", "confirm", "Confirm"),
-        ("n", "cancel", "Cancel"),
-        ("N", "cancel", "Cancel"),
-    ]
-
-    def __init__(self, title, body):
-        self._body_text = body
-        super().__init__(title)
-
-    def body(self) -> ComposeResult:
-        yield Static(self._body_text, classes="dialog-body")
-        with Horizontal(id="dialog-buttons"):
-            yield Static("[Y/Enter] confirm", id="btn-confirm", classes="dialog-help")
-            yield Static("  " "[N/Esc] cancel", id="btn-cancel", classes="dialog-help")
-
-    @on(Click, "#btn-confirm")
-    def on_confirm_click(self):
-        self.dismiss(True)
-
-    @on(Click, "#btn-cancel")
-    def on_cancel_click(self):
-        self.dismiss(False)
-
-    def action_confirm(self):
-        self.dismiss(True)
-
-    def action_cancel(self):
-        self.dismiss(False)
-
-
-class NegativeInputScreen(BaseDialog):
-    """Pick a negative action to log."""
-
-    def __init__(self):
-        super().__init__("Log Negative")
-
-    def body(self) -> ComposeResult:
-        yield Static("Select a negative action to log.", classes="dialog-body")
-        yield OptionList(id="negative-list")
-        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
-
-    def on_mount(self):
-        super().on_mount()
-        option_list = self.query_one("#negative-list", OptionList)
-        for name in NEGATIVES:
-            option_list.add_option(name)
-        option_list.focus()
-
-    @on(OptionList.OptionSelected, "#negative-list")
-    def submit_negative(self, event: OptionList.OptionSelected):
-        self.dismiss(str(event.option.prompt))
-
-    @on(Click, "#btn-cancel")
-    def on_cancel_click(self):
-        self.dismiss(None)
-
-
-class PositiveInputScreen(BaseDialog):
-    """Pick a positive action to log."""
-
-    def __init__(self):
-        super().__init__("Log Positive")
-
-    def body(self) -> ComposeResult:
-        yield Static("Select a positive action to log.", classes="dialog-body")
-        yield OptionList(id="positive-list")
-        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
-
-    def on_mount(self):
-        super().on_mount()
-        option_list = self.query_one("#positive-list", OptionList)
-        for name in POSITIVES:
-            option_list.add_option(name)
-        option_list.focus()
-
-    @on(OptionList.OptionSelected, "#positive-list")
-    def submit_positive(self, event: OptionList.OptionSelected):
-        self.dismiss(str(event.option.prompt))
-
-    @on(Click, "#btn-cancel")
-    def on_cancel_click(self):
-        self.dismiss(None)
-
-
 # ──────────────────────────────────────────────
 # MAIN TUI APP
 # ──────────────────────────────────────────────
@@ -595,308 +156,7 @@ class ScrollableFooter(Footer):
 
 
 class TogglTUI(App):
-    CSS = """
-    $accent: #63f3ff;
-
-    * {
-        scrollbar-size: 0 0;
-    }
-
-    Screen {
-        background: #0b1016;
-        color: #d7dde8;
-    }
-
-    #root {
-        height: 1fr;
-    }
-
-    #chrome {
-        layout: horizontal;
-        height: auto;
-        padding: 0 1;
-    }
-
-    .app-title {
-        color: #63f3ff;
-        text-style: bold;
-        padding: 0 1;
-        width: auto;
-    }
-
-    #view-tabs {
-        width: 1fr;
-        margin: 0 1;
-    }
-
-    #view-tabs > .-active {
-        color: #63f3ff;
-        text-style: bold;
-    }
-
-    #view-tabs > .-hidden {
-        display: none;
-    }
-
-    #sync-status {
-        color: #8d98a7;
-        width: auto;
-        padding: 0 1;
-    }
-
-    #main {
-        height: 1fr;
-    }
-
-    #content {
-        width: 1fr;
-        height: 1fr;
-        padding: 0;
-    }
-
-    .view {
-        display: none;
-        height: 1fr;
-    }
-
-    .view.-active {
-        display: block;
-    }
-
-    DataTable {
-        height: 1fr;
-        border: round #3d4f63;
-        background: #0b1016;
-        color: #d7dde8;
-    }
-
-    DataTable:focus,
-    DataTable:focus-within {
-        border: round $accent;
-        background: #0b1016;
-        background-tint: transparent 0%;
-    }
-
-    DataTable:focus > .datatable--cursor,
-    DataTable:focus-within > .datatable--cursor {
-        background: #1e2a36;
-        color: $accent;
-        text-style: bold;
-    }
-
-    DataTable:focus > .datatable--fixed-cursor,
-    DataTable:focus-within > .datatable--fixed-cursor {
-        background: #1e2a36;
-        color: $accent;
-    }
-
-    DataTable > .datatable--cursor {
-        background: #1e2a36;
-        color: #d7dde8;
-    }
-
-    DataTable > .datatable--fixed-cursor {
-        background: #1e2a36;
-    }
-
-    DataTable > .datatable--header {
-        background: #0b1016;
-        color: #63f3ff;
-        text-style: bold;
-    }
-
-    #spark-rail {
-        width: 34;
-        min-width: 34;
-        max-width: 34;
-        border: none;
-        padding: 0;
-        display: none;
-    }
-
-    #spark-weeks-table {
-        height: 1fr;
-        min-height: 0;
-        border: round #3d4f63;
-        background: #0b1016;
-        color: #d7dde8;
-    }
-
-    #spark-weeks-table:focus,
-    #spark-weeks-table:focus-within {
-        border: round $accent;
-        background: #0b1016;
-        background-tint: transparent 0%;
-    }
-
-    #spark-weeks-table > .datatable--header {
-        background: #0b1016;
-        color: #63f3ff;
-        text-style: bold;
-    }
-
-    #spark-days-table {
-        height: auto;
-        border: round #3d4f63;
-        background: #0b1016;
-        color: #d7dde8;
-    }
-
-    #spark-days-table:focus,
-    #spark-days-table:focus-within {
-        border: round $accent;
-        background: #0b1016;
-        background-tint: transparent 0%;
-    }
-
-    #spark-catchup {
-        height: auto;
-        border: round #3d4f63;
-        padding: 0 1;
-        background: #0b1016;
-    }
-
-    #spark-catchup:focus,
-    #spark-catchup:focus-within {
-        border: round #fab387;
-        background: #0b1016;
-        background-tint: transparent 0%;
-    }
-
-    Footer {
-        background: #0b1016;
-        color: #8d98a7;
-    }
-
-    Footer > FooterKey .footer-key--key {
-        color: #e2b714;
-    }
-
-    Footer > FooterKey .footer-key--description {
-        color: #8d98a7;
-    }
-
-    OptionList {
-        background: #0b1016;
-        color: #d7dde8;
-        border: none;
-        height: auto;
-        max-height: 10;
-    }
-
-    OptionList > .option-list--option {
-        padding: 0 1;
-    }
-
-    OptionList > .option-list--option-highlighted {
-        background: #27323d;
-        color: #63f3ff;
-    }
-
-    Toast {
-        background: #0b1016;
-        color: #d7dde8;
-        border: round #3d4f63;
-        padding: 0 1;
-        margin: 1 1 0 0;
-        height: auto;
-    }
-    Toast.-information {
-        border: round #37d994;
-    }
-    Toast.-warning {
-        border: round #e2b714;
-    }
-    Toast.-error {
-        border: round #ff5f5f;
-    }
-
-    #overview-dashboard {
-        height: 1fr;
-    }
-
-    #overview-left {
-        width: 60%;
-        height: 1fr;
-    }
-
-    #overview-right {
-        width: 40%;
-        height: 1fr;
-    }
-
-    #overview-recovery-container {
-        height: 45%;
-        border: round #3d4f63;
-        background: #0b1016;
-    }
-    #overview-recovery-container:focus-within {
-        border: round #63f3ff;
-    }
-    #overview-recovery-table {
-        height: 1fr;
-        border: none;
-    }
-    #recovery-button-bar {
-        height: auto;
-        align: center middle;
-        padding: 0 1;
-        margin: 0;
-    }
-    .recovery-btn {
-        background: transparent;
-        border: none;
-        padding: 0 1;
-        margin: 0;
-        min-width: 0;
-        height: 1;
-        text-style: bold;
-    }
-    #btn-neg-log {
-        color: #ff5f5f;
-    }
-    #btn-neg-log:hover {
-        color: #ff8080;
-        background: #1e2a36;
-    }
-    #btn-pos-log {
-        color: #37d994;
-    }
-    #btn-pos-log:hover {
-        color: #5be8ae;
-        background: #1e2a36;
-    }
-
-    #overview-insights {
-        height: 1fr;
-        min-height: 5;
-        border: round #3d4f63;
-        padding: 0 1;
-        background: #0b1016;
-        text-align: center;
-        content-align: center middle;
-    }
-    #overview-insights:focus {
-        border: round #63f3ff;
-    }
-
-    #overview-categories-table {
-        height: 1fr;
-    }
-
-    #overview-recent-log-wrapper {
-        height: 1fr;
-        min-height: 4;
-        border: round #3d4f63;
-    }
-    #overview-recent-log-wrapper:focus-within {
-        border: round #63f3ff;
-    }
-    #overview-recent-log-table {
-        height: 1fr;
-        border: none;
-    }
-    """
+    CSS_PATH = "styles/theme.tcss"
 
     BINDINGS = [
         Binding("ctrl+left", "prev_view", "Prev"),
@@ -905,7 +165,6 @@ class TogglTUI(App):
         Binding("r", "refresh_data", "Refresh"),
         Binding("u", "sync_current_week", "Sync"),
         Binding("U", "sync_full", "Full Sync"),
-        Binding("b", "backfill", "Backfill"),
         Binding("n", "add_negative", "Neg"),
         Binding("p", "add_positive", "Pos"),
         Binding("z", "cmd_zoom_in", "Zoom+", show=False),
@@ -918,7 +177,7 @@ class TogglTUI(App):
         "Sync/Quota",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._initialized = False
         self.active_view_index = 0  # Overview view is the default landing view
@@ -940,36 +199,15 @@ class TogglTUI(App):
                 yield Static(id="sync-status", classes="sync-status")
             with Horizontal(id="main"):
                 with Container(id="content"):
-                    with Container(id="overview-view", classes="view"):
-                        with Horizontal(id="overview-dashboard"):
-                            with Vertical(id="overview-left"):
-                                yield DataTable(
-                                    zebra_stripes=False, cursor_type="row", id="overview-categories-table"
-                                )
-                                yield Static(id="overview-insights")
-                            with Vertical(id="overview-right"):
-                                with Vertical(id="overview-recovery-container"):
-                                    yield DataTable(
-                                        zebra_stripes=False, cursor_type="row", id="overview-recovery-table"
-                                    )
-                                with Vertical(id="overview-recent-log-wrapper"):
-                                    yield DataTable(
-                                        zebra_stripes=False, cursor_type="row", id="overview-recent-log-table"
-                                    )
-                                    with Horizontal(id="recovery-button-bar"):
-                                        yield Button("Log Neg", id="btn-neg-log", classes="recovery-btn")
-                                        yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
+                    yield OverviewPanel(id="overview-view", classes="view")
                     with Container(id="command-view", classes="view"):
                         yield CommandTab()
-                    with Container(id="sync-view", classes="view"):
-                        yield DataTable(
-                            zebra_stripes=False, cursor_type="row", id="sync-table"
-                        )
+                    yield SyncPanel(id="sync-view", classes="view")
                 with Vertical(id="spark-rail"):
                     pass
         yield ScrollableFooter(show_command_palette=False)
 
-    def on_mount(self):
+    def on_mount(self) -> None:
         self._setup_tables()
         load_runtime_settings()
         # Set initial tab silently (prevent auto-activation of tab-0)
@@ -978,11 +216,19 @@ class TogglTUI(App):
             tabs.active = f"tab-{self.active_view_index}"
         if needs_auto_update():
             self._do_auto_refresh()
-        self.refresh_all_views()
+        # Defer data loading to ensure child widget on_mount() has run
+        # so their DataTables have columns set up before refresh.
+        self.call_later(self.load_data)
         self.query_one(ScrollableFooter).refresh_bindings()
 
+    @work(thread=False, exclusive=True)
+    async def load_data(self) -> None:
+        """Load cache data in background worker."""
+        self._data_cache = DataCache.load()
+        self.refresh_all_views()
+
     @work(thread=True)
-    def _do_auto_refresh(self):
+    def _do_auto_refresh(self) -> None:
         try:
             result = sync_current_week_light(auto_refresh=True, prompt_on_warning=False)
         except (TogglRateLimitError, TogglAPIError):
@@ -991,7 +237,7 @@ class TogglTUI(App):
         message = result.get("message", "")
         self.call_from_thread(self._on_auto_refresh_done, ok, message)
 
-    def _on_auto_refresh_done(self, ok, message):
+    def _on_auto_refresh_done(self, ok: bool, message: str) -> None:
         load_runtime_settings()
         self.refresh_all_views()
         if ok:
@@ -999,47 +245,17 @@ class TogglTUI(App):
         else:
             self.notify(message or "Auto-refresh failed", severity="warning")
 
-    def _setup_tables(self):
-        overview_recovery = self.query_one("#overview-recovery-table", DataTable)
-        overview_recovery.add_columns("Category", "Rate", "Amount")
-        for col in overview_recovery.columns.values():
-            col.text_align = "center"
+    def _setup_tables(self) -> None:
+        # All view tables are now managed by their respective widget panels.
+        pass
 
-        overview_cat = self.query_one("#overview-categories-table", DataTable)
-        overview_cat.add_columns("Category", "Hours", "Rate", "Points")
-        for col in overview_cat.columns.values():
-            col.text_align = "center"
-
-        overview_log = self.query_one("#overview-recent-log-table", DataTable)
-        overview_log.add_columns("Date", "Name", "Points")
-        overview_log.can_focus = True
-        overview_log.cursor_type = "row"
-        for col in overview_log.columns.values():
-            col.text_align = "center"
-
-        self.query_one("#overview-insights", Static).can_focus = True
-
-        sync_table = self.query_one("#sync-table", DataTable)
-        sync_table.add_columns("Metric", "Value")
-
-        for table_id in [
-            "#sync-table",
-            "#overview-recovery-table", "#overview-categories-table",
-            "#overview-recent-log-table",
-        ]:
-            try:
-                t = self.query_one(table_id, DataTable)
-                t.styles.min_height = 1
-                t.show_cursor = True
-            except Exception:
-                pass
-
-    def refresh_all_views(self):
+    def refresh_all_views(self) -> None:
+        if self._data_cache is None:
+            logger.debug("[SYNC] refresh_all_views: deferred — data not loaded yet")
+            return
         logger.debug("[SYNC] refresh_all_views: start")
-        self._data_cache = DataCache.load()
         self.update_tabs()
         self.update_status_line()
-        self.refresh_spark_tables()
         for idx in self._VIEW_REFRESH_MAP:
             self._refresh_view_by_index(idx)
         self.update_view_visibility()
@@ -1052,7 +268,7 @@ class TogglTUI(App):
         2: "refresh_sync_view",
     }
 
-    def _refresh_view_by_index(self, index):
+    def _refresh_view_by_index(self, index: int) -> None:
         method_name = self._VIEW_REFRESH_MAP.get(index)
         if method_name:
             logger.debug("[SYNC] _refresh_view_by_index(%d) → %s", index, method_name)
@@ -1061,24 +277,24 @@ class TogglTUI(App):
             except Exception as e:
                 logger.exception("[SYNC] %s FAILED", method_name)
 
-    def _schedule_resize(self):
+    def _schedule_resize(self) -> None:
         if self._table_resize_timer is not None:
             self._table_resize_timer.stop()
         self._table_resize_timer = self.set_timer(0.1, self._resize_tables)
 
-    def update_tabs(self):
+    def update_tabs(self) -> None:
         tabs = self.query_one("#view-tabs", Tabs)
         with tabs.prevent(Tabs.TabActivated):
             tabs.active = f"tab-{self.active_view_index}"
 
-    def update_status_line(self):
+    def update_status_line(self) -> None:
         current_week = get_current_week()
         synced = get_last_updated_str()
 
         sync_widget = self.query_one("#sync-status", Static)
         sync_widget.update(f"\u27f3\u2002{synced}")
 
-    def update_view_visibility(self):
+    def update_view_visibility(self) -> None:
         view_ids = [
             "#overview-view",
             "#command-view",
@@ -1088,7 +304,7 @@ class TogglTUI(App):
             widget = self.query_one(view_id, Container)
             widget.set_class(index == self.active_view_index, "-active")
 
-    def focus_active_view(self):
+    def focus_active_view(self) -> None:
         focus_targets = {
             0: "#overview-categories-table",
             1: "#command-container",
@@ -1101,651 +317,31 @@ class TogglTUI(App):
 
     # ── Helpers ──
 
-    def _add_rows_mark_sections(self, table: DataTable, rows: list) -> None:
-        """Add rows, marking section headers with keys so cursor skips them."""
-        for row in rows:
-            first = row[0]
-            if isinstance(first, Text) and str(first).startswith("•"):
-                table.add_row(*row, key=f"_section_{len(table.rows)}")
-            else:
-                table.add_row(*row)
-
-    @on(DataTable.RowHighlighted, "#week-category-table")
-    @on(DataTable.RowHighlighted, "#overview-categories-table")
-    @on(DataTable.RowHighlighted, "#day-table")
-    def _skip_section_rows(self, event: DataTable.RowHighlighted) -> None:
-        """Skip past section-header rows so they can't be selected."""
-        if event.row_key is None:
-            return
-        key = str(event.row_key.value)
-        if not key.startswith("_section_"):
-            return
-        table = event.control
-        table_keys = list(table.rows.keys())
-        total = len(table_keys)
-        idx = next(i for i, k in enumerate(table_keys) if str(k.value) == key)
-        target = idx + 1 if idx < total - 1 else idx - 1
-        if target >= 0:
-            table.move_cursor(row=target)
-
-    # ── Spark tables ──
-
-    def refresh_spark_tables(self):
-        pass
-
-    def _refresh_spark_weeks(self):
-        cache = self._data_cache
-        table = self.query_one("#spark-weeks-table", DataTable)
-        table.clear(columns=False)
-
-        # Show ALL weeks that have data, from earliest to latest
-        all_weeks = sorted(cache.weekly_data.keys())
-        if not all_weeks:
-            table.border_title = "[b][#63f3ff]Past Weeks[/][/]"
-            return
-
-        weeks_data = []
-
-        for wk in all_weeks:
-            wk_num = wk.split("W")[1]
-            wk_label = f"W{int(wk_num)}"
-
-            wk_projs = cache.get_week_projects(wk)
-            if wk_projs:
-                wk_results = calculate(wk_projs)
-                wk_earned = sum(
-                    r[3] for r in wk_results if r[3] is not None and r[3] > 0
-                )
-                wk_tracked_neg = sum(
-                    abs(r[3]) for r in wk_results if r[3] is not None and r[3] < 0
-                )
-            else:
-                wk_earned = 0.0
-                wk_tracked_neg = 0.0
-
-            wk_tracked, wk_logged = cache.get_week_neg_breakdown(wk)
-            wk_logged_pos = cache.get_week_pos_breakdown(wk)
-            wk_net = round(wk_earned - wk_tracked_neg - wk_logged + wk_logged_pos, 1)
-            weeks_data.append((wk_label, wk, wk_net, wk_tracked, wk_logged))
-
-        max_abs = max((abs(w[2]) for w in weeks_data), default=1) or 1
-
-        for label, wk, net, tracked, logged in weeks_data:
-            net_cell = _spark_net_rich(
-                net, max_abs, blame_tracked=tracked, blame_logged=logged
-            )
-            table.add_row(label, net_cell, key=wk)
-
-        n_weeks = len(weeks_data)
-        table.border_title = f"[b][#63f3ff]Past Weeks ({n_weeks})[/][/]"
-
-    def _refresh_spark_days(self):
-        cache = self._data_cache
-        table = self.query_one("#spark-days-table", DataTable)
-
-        with table.prevent(DataTable.RowHighlighted):
-            table.clear(columns=False)
-
-            week_str = get_current_week()
-            start_d, _ = get_week_dates(week_str)
-
-            day_entries = []
-            for i in range(7):
-                d = start_d + timedelta(days=i)
-                d_str = d.strftime("%Y-%m-%d")
-                projs = cache.daily_data.get(d_str, {})
-                neg_entries = cache.negatives_raw.get(d_str, [])
-                pos_entries = cache.positives_raw.get(d_str, [])
-                neg_cost = sum(e["points"] for e in neg_entries)
-                pos_bonus = sum(e["points"] for e in pos_entries)
-                results = calculate(projs)
-                earned = sum(r[3] for r in results if r[3] is not None and r[3] > 0)
-                tracked_neg = sum(
-                    abs(r[3]) for r in results if r[3] is not None and r[3] < 0
-                )
-                net = round(earned - tracked_neg - neg_cost + pos_bonus, 1)
-                has_data = bool(projs or neg_entries or pos_entries)
-                logged_neg = round(neg_cost, 1)
-                day_entries.append(
-                    (
-                        d,
-                        d_str,
-                        net,
-                        has_data,
-                        tracked_neg,
-                        logged_neg,
-                        earned,
-                        pos_bonus,
-                    )
-                )
-
-            max_abs = (
-                max(
-                    (
-                        abs(net)
-                        for _, _, net, has, _, _, _, _ in day_entries
-                        if has and abs(net) >= 0.05
-                    ),
-                    default=1,
-                )
-                or 1
-            )
-
-            cursor_row = None
-            for i, (
-                d,
-                d_str,
-                net,
-                has_data,
-                tracked_neg,
-                logged_neg,
-                earned,
-                pos_bonus,
-            ) in enumerate(day_entries):
-                day_name = d.strftime("%a")
-                is_today = d == date.today()
-
-                if is_today:
-                    label_cell = f"[bold #e2b714]{day_name} ◀[/]"
-                elif not has_data:
-                    label_cell = f"[dim]{day_name}[/]"
-                else:
-                    label_cell = day_name
-
-                net_cell = _spark_net_rich(
-                    net if has_data else None,
-                    max_abs,
-                    dim_zero=(not has_data),
-                    blame_tracked=tracked_neg if has_data and net < 0 else 0,
-                    blame_logged=logged_neg if has_data and net < 0 else 0,
-                )
-
-                table.add_row(label_cell, net_cell, key=d_str)
-
-                if d_str == self.selected_day:
-                    cursor_row = table.row_count - 1
-
-            if cursor_row is not None:
-                table.move_cursor(row=cursor_row)
-
-        tw_num = week_str.split("W")[1]
-        tw_label = f"W{int(tw_num)}"
-
-        tw_total_neg = round(sum(dd[4] + dd[5] for dd in day_entries if dd[3]), 1)
-        tw_total_pos = round(sum(dd[6] + dd[7] for dd in day_entries if dd[3]), 1)
-        neg_val = (
-            int(tw_total_neg) if tw_total_neg == int(tw_total_neg) else tw_total_neg
-        )
-        pos_val = (
-            int(tw_total_pos) if tw_total_pos == int(tw_total_pos) else tw_total_pos
-        )
-
-        neg_s = f"[#ff5f5f]-{neg_val}[/]" if tw_total_neg > 0 else "[dim]-0[/]"
-        pos_s = f"[#37d994]+{pos_val}[/]" if tw_total_pos > 0 else "[dim]+0[/]"
-
-        table.border_title = f"[b][#63f3ff]This Week ({tw_label})[/][/]"
-        table.border_subtitle = f"{pos_s} {neg_s}"
-
-    def _refresh_spark_catchup(self):
-        cache = self._data_cache
-        all_time_data = cache.get_all_time_projects()
-        if all_time_data:
-            all_results = calculate(all_time_data)
-            all_earned = sum(r[3] for r in all_results if r[3] is not None)
-        else:
-            all_earned = 0.0
-        all_negatives = cache.get_negatives_for_context("ALL_TIME", "ALL")
-        all_positives = cache.get_positives_for_context("ALL_TIME", "ALL")
-        all_neg_pts = sum(r[3] for r in all_negatives)
-        all_pos_pts = sum(r[3] for r in all_positives)
-        lifetime_pts = round(all_earned + all_neg_pts + all_pos_pts, 1)
-
-        catchup = self.query_one("#spark-catchup", Static)
-
-        if lifetime_pts >= 0:
-            pts_val = (
-                int(lifetime_pts) if lifetime_pts == int(lifetime_pts) else lifetime_pts
-            )
-            text = Text()
-            text.append(f"+{pts_val} pts", style="bold #37d994")
-            catchup.update(text)
-            catchup.border_title = "[b][#37d994]On Track[/][/]"
-        else:
-            deficit = abs(lifetime_pts)
-            tl_raw = time_left_in_week()
-            deficit_val = int(deficit) if deficit == int(deficit) else deficit
-
-            group_colors_rich = ["#63f3ff", "#ff5fff", "#37d994", "#5fafff", "#e2b714"]
-            rate_groups: dict[float, list[str]] = {}
-            for task_name, rate in POINTS.items():
-                if rate >= 1:
-                    rate_groups.setdefault(rate, []).append(task_name)
-            rates_sorted = sorted(rate_groups.keys(), reverse=True)
-
-            text = Text()
-            for i, rate in enumerate(rates_sorted):
-                tasks = rate_groups[rate]
-                hours_needed = deficit / rate
-                h = int(hours_needed)
-                m = int((hours_needed - h) * 60)
-                if h >= 1:
-                    h_str = f"{round(hours_needed)}h"
-                else:
-                    h_str = f"{m}m"
-                rate_str = f"×{int(rate) if rate == int(rate) else rate}"
-                short: list[str] = [TASK_SHORT_NAMES.get(t) or t for t in tasks]
-                task_str = " ".join(short)
-                color = group_colors_rich[i % len(group_colors_rich)]
-
-                if i > 0:
-                    text.append("\n")
-                text.append(f" {rate_str:<3}", style="dim")
-                text.append(f"{h_str}", style="#e2b714")
-                text.append(f" {task_str}", style=color)
-
-            catchup.update(text)
-            catchup.border_title = (
-                f"[b][#ff5f5f]Catch Up :[/][/] [#ff5f5f]{deficit_val} pts[/]"
-            )
-            catchup.border_subtitle = f"[#63f3ff]in {tl_raw}[/]"
-
-    # ── View refresh methods ──
-
-    def refresh_week_view(self):
-        cache = self._data_cache
-        week = self._active_week
-        dashboard = cache.get_week_dashboard_rows(week)
-        report = cache.get_report_sections(week, "WEEK")
-        table = self.query_one("#week-table", DataTable)
-
-        with table.prevent(DataTable.RowHighlighted):
-            table.clear(columns=False)
-            week_rows = []
-            for row in dashboard["rows"]:
-                neg_text = (
-                    "—"
-                    if row["negative_total"] == 0
-                    else f"[#ff5f5f]-{row['negative_total']:.1f}[/]"
-                )
-                pos_text = (
-                    "—"
-                    if row["positive_total"] == 0
-                    else f"[#37d994]+{row['positive_total']:.1f}[/]"
-                )
-                hour_text = "—" if row["hours"] == 0 else f"{row['hours']:.1f}h"
-                earned_text = (
-                    "—"
-                    if row["hours"] == 0 and row["earned"] == 0
-                    else format_signed_rich(row["earned"])
-                )
-                week_rows.append(
-                    (
-                        row["day"],
-                        row["date_short"],
-                        hour_text,
-                        earned_text,
-                        pos_text,
-                        neg_text,
-                        format_signed_rich(row["net"]),
-                        row["date"],
-                    )
-                )
-            for cells in week_rows:
-                key = cells[7]
-                table.add_row(*cells[:7], key=key)
-
-            if dashboard["rows"]:
-                today_str = date.today().strftime("%Y-%m-%d")
-                row_dates = [r["date"] for r in dashboard["rows"]]
-                if self.selected_day in row_dates:
-                    default_date = self.selected_day
-                elif today_str in row_dates:
-                    default_date = today_str
-                else:
-                    default_date = dashboard["rows"][0]["date"]
-                self.selected_day = default_date
-                row_index = next(
-                    i
-                    for i, row in enumerate(dashboard["rows"])
-                    if row["date"] == default_date
-                )
-                table.move_cursor(row=row_index, column=0)
-        category_table = self.query_one("#week-category-table", DataTable)
-        category_table.clear(columns=False)
-        cat_rows = []
-        for section_name in ("positive", "negative", "unscored"):
-            section_rows = report[section_name]
-            section_key = section_name.upper()
-            section_color = SECTION_COLORS.get(section_key, "")
-            if section_rows:
-                cat_rows.append(
-                    (_fmt_section_header(f"• {section_key}"),
-                     Text(""), Text(""), Text(""))
-                )
-            cat_rows.extend(
-                _render_category_section(section_rows, _fmt_project_tree, _fmt_tree_cells,
-                    section_color=section_color)
-            )
-        if report["positive_results"]:
-            cat_rows.append((_fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(report["positive_results"]):
-                is_last = (i == len(report["positive_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
-                cat_rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED POSITIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
-        if report["negative_results"]:
-            cat_rows.append((_fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(report["negative_results"]):
-                is_last = (i == len(report["negative_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
-                cat_rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
-        summary = dashboard["summary"]
-        week_hours = sum(r["hours"] for r in dashboard["rows"])
-        wh_h = int(week_hours)
-        wh_m = int((week_hours - wh_h) * 60)
-        table.border_title = f"[b][#63f3ff]Week ({week})[/][/]   [#8d98a7]Tracked: {wh_h}hrs {wh_m:02d}min[/]"
-        table.border_subtitle = (
-            f"[#8d98a7]Week net: {format_signed_rich(summary['actual'])} pts[/]"
-        )
-        category_table.border_title = "[b][#63f3ff]Category Totals[/][/]"
-
-    def refresh_overview_view(self):
-        logger.debug("[SYNC] refresh_overview_view: start")
-        cache = self._data_cache
-
-        # ── Categories Panel (right column) ──
-        report = cache.get_report_sections("ALL_TIME", "ALL")
-        cat_table = self.query_one("#overview-categories-table", DataTable)
-        cat_table.clear(columns=False)
-        rows = []
-        for section_name in ("positive", "negative", "unscored"):
-            section_rows = report[section_name]
-            if section_rows:
-                rows.append(
-                    (_fmt_section_header(f"• {section_name.upper()}"),
-                     Text(""), Text(""), Text(""))
-                )
-            rows.extend(
-                _render_category_section(
-                    section_rows, _fmt_project_tree, _fmt_tree_cells,
-                    section_color=SECTION_COLORS.get(section_name.upper(), ""),
-                )
-            )
-        if report["positive_results"]:
-            rows.append((_fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(report["positive_results"]):
-                is_last = (i == len(report["positive_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
-                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED POSITIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
-        if report["negative_results"]:
-            rows.append((_fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(report["negative_results"]):
-                is_last = (i == len(report["negative_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
-                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
-        self._add_rows_mark_sections(cat_table, rows)
-        total_hours = report["total_hours"]
-        th_h = int(total_hours)
-        th_m = int((total_hours - th_h) * 60)
-        cat_table.border_title = f"[b][#63f3ff]Lifetime[/][/]   [#8d98a7]{th_h}hrs {th_m:02d}min[/]"
-        cat_table.border_subtitle = f"[#8d98a7]Total {format_signed_rich(report['total_points'])} pts[/]"
-
-        # ── Recovery Panel (left column, top) ──
-        recovery_data = cache.get_recovery_rows("ALL_TIME", "ALL")
-        rec_table = self.query_one("#overview-recovery-table", DataTable)
-        rec_table.clear(columns=False)
-        if recovery_data["rows"]:
-            recovery_tuples = [
-                (r["category"], 0, r["rate"], r["hours_needed"])
-                for r in recovery_data["rows"]
-            ]
-            rec_rows = _render_category_section(
-                recovery_tuples, _fmt_project_tree, _fmt_recovery_cells
-            )
-            rec_table.add_rows(rec_rows)
-        rec_container = self.query_one("#overview-recovery-container")
-        rec_container.border_title = "[b][#63f3ff]Recovery[/][/]"
-
-        # ── Recent Log Panel (right column, bottom) ──
-        log_table = self.query_one("#overview-recent-log-table", DataTable)
-        log_table.clear(columns=False)
-        neg_rows = cache.get_negative_log_rows(limit=30)
-        pos_rows = cache.get_positive_log_rows(limit=30)
-        combined = []
-        for r in neg_rows:
-            combined.append({"date": r["date"], "name": r["name"], "points": -r["points"]})
-        for r in pos_rows:
-            combined.append({"date": r["date"], "name": r["name"], "points": r["points"]})
-        combined.sort(key=lambda r: r["date"], reverse=True)
-        for entry in combined[:15]:
-            pts = entry["points"]
-            name_style = "[#37d994]" if pts >= 0 else "[#ff5f5f]"
-            log_table.add_row(
-                entry["date"],
-                Text.from_markup(f"{name_style}{entry['name']}[/]"),
-                fmt_pts_rich(pts),
-            )
-        log_table.move_cursor(row=0)
-        self.query_one("#overview-recent-log-wrapper").border_title = "[b][#63f3ff]Recent Activity[/][/]"
-
-        # ── Insights Panel (left column, bottom) ──
-        insights = self.query_one("#overview-insights", Static)
-        week_report = cache.get_report_sections(self._active_week, "WEEK")
-        net = week_report["total_points"]
-        insights.update(
-            "[#8d98a7]Coming soon™[/]\n\n"
-            "[dim]Dynamic insights, trend analysis,\n"
-            "and other fancy pants features\n"
-            "will appear here. Eventually.\n\n"
-            "We heard you like data so we\n"
-            "put data in your data.[/]"
-        )
-        insights.border_title = "[b][#63f3ff]Insights[/][/]"
-        insights.border_subtitle = f"[#8d98a7]Week net {format_signed_rich(net)} pts[/]"
-        logger.debug("[SYNC] refresh_overview_view: done")
-
-    def refresh_day_view(self):
-        cache = self._data_cache
-        metrics = cache.get_day_metrics(self.selected_day)
-        logger.debug("[SYNC] refresh_day_view: day=%s projects=%d negs=%d poss=%d hours=%.1f net=%.1f",
-                     self.selected_day,
-                     len(metrics.get("projects", {})),
-                     len(metrics.get("negative_results", [])),
-                     len(metrics.get("positive_results", [])),
-                     metrics.get("total_hours", 0),
-                     metrics.get("net", 0))
-        table = self.query_one("#day-table", DataTable)
-        table.clear(columns=False)
-        pos_rows = [r for r in metrics["results"] if r[3] is not None and r[3] >= 0]
-        neg_rows = [r for r in metrics["results"] if r[3] is not None and r[3] < 0]
-        unscored_rows = [r for r in metrics["results"] if r[3] is None]
-
-        rows = []
-        if pos_rows:
-            rows.append((_fmt_section_header("• POSITIVE"), Text(""), Text(""), Text("")))
-            rows.extend(_render_category_section(pos_rows, _fmt_project_tree, _fmt_tree_cells,
-                section_color=SECTION_COLORS["POSITIVE"]))
-        if neg_rows:
-            rows.append((_fmt_section_header("• NEGATIVE"), Text(""), Text(""), Text("")))
-            rows.extend(_render_category_section(neg_rows, _fmt_project_tree, _fmt_tree_cells,
-                section_color=SECTION_COLORS["NEGATIVE"]))
-        if metrics["positive_results"]:
-            rows.append((_fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(metrics["positive_results"]):
-                is_last = (i == len(metrics["positive_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
-                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED POSITIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
-        if metrics["negative_results"]:
-            rows.append((_fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
-            for i, (name, count, per_event, total) in enumerate(metrics["negative_results"]):
-                is_last = (i == len(metrics["negative_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
-                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
-        if unscored_rows:
-            rows.append((_fmt_section_header("• UNSCORED"), Text(""), Text(""), Text("")))
-            rows.extend(_render_category_section(unscored_rows, _fmt_project_tree, _fmt_tree_cells,
-                section_color=SECTION_COLORS["UNSCORED"]))
-        self._add_rows_mark_sections(table, rows)
-        dh = int(metrics["total_hours"])
-        dm = int((metrics["total_hours"] - dh) * 60)
-        table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]   [#8d98a7]Tracked: {dh}hrs {dm:02d}min[/]"
-        total_pos = round(metrics["earned"] + metrics["logged_positive"], 1)
-        total_neg = round(metrics["tracked_negative"] + metrics["logged_negative"], 1)
-        table.border_subtitle = (
-            f"[#8d98a7]Pos [#37d994]+{total_pos:.1f}[/]   "
-            f"Negs [#ff5f5f]-{total_neg:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
-        )
-
-    def refresh_command_view(self):
+    def refresh_overview_view(self) -> None:
+        """Refresh the Overview dashboard panel."""
+        try:
+            panel = self.query_one(OverviewPanel)
+            panel.refresh_data(self._data_cache, self._active_week)
+        except Exception:
+            pass  # Panel may not be mounted yet
+    def refresh_command_view(self) -> None:
         """Refresh the Command tab's graph and controls."""
         try:
             cmd_tab = self.query_one(CommandTab)
+            cmd_tab.data_cache = self._data_cache
             cmd_tab.refresh_all()
         except Exception:
             pass  # Container may not be mounted yet
 
-    def refresh_sync_view(self):
-        status = get_sync_status_data()
-        table = self.query_one("#sync-table", DataTable)
-        table.clear(columns=False)
-        cache_age = status["projects_cache_age_days"]
-        remaining = (
-            status["quota_remaining"]
-            if status["quota_remaining"] is not None
-            else "Unknown"
-        )
-        limit = (
-            status["quota_limit"] if status["quota_limit"] is not None else "Unknown"
-        )
-        rows = [
-            (
-                "Projects cache",
-                "missing" if cache_age is None else f"{cache_age:.1f} days old",
-            ),
-            ("Synced weeks", str(status["synced_weeks"])),
-            ("Synced days", str(status["synced_days"])),
-            ("Requests made", str(API_RUN_STATS["requests_made"])),
-            ("Quota remaining", f"{remaining}/{limit}"),
-            ("Quota resets in",
-             _format_reset_window(status["quota_resets_in"])
-             if status["quota_resets_in"] is not None
-             else "—"),
-        ]
-        # ── Backfill section ──────────────────────────────────────────
-        bf = status.get("backfill_status", {})
-        bf_status = bf.get("status")
-        weeks_done = bf.get("weeks_backfilled", 0)
-        weeks_total = bf.get("weeks_discovered", 0) or bf.get("total_weeks", 0)
-        weeks_left = bf.get("weeks_remaining", 0)
-        requests_used = bf.get("requests_used", 0)
-        requests_needed = bf.get("requests_needed", 0)
-
-        if bf_status is None and not bf.get("earliest_week"):
-            rows.append(("[b]Backfill[/b]", "[#8d98a7]Not yet run[/]"))
-        else:
-            # Status line
-            status_labels = {
-                "started": ("Running...", "#63f3ff"),
-                "success": ("Complete", "#37d994"),
-            }
-            if bf_status == "failed":
-                reason = bf.get("stopped_reason", "?")
-                status_str = f"[#ffd700]Failed ({reason})[/]"
-            elif bf_status in status_labels:
-                label, color = status_labels[bf_status]
-                status_str = f"[{color}]{label}[/]"
-            else:
-                status_str = bf_status or "[#8d98a7]—[/]"
-            rows.append(("[b]Backfill[/b]", status_str))
-
-            if weeks_total > 0:
-                pct = min(100, int(weeks_done / weeks_total * 100))
-                rows.append((" Progress",
-                             f"[#d7dde8]{weeks_done}[/]/"
-                             f"[#d7dde8]{weeks_total}[/] "
-                             f"[#63f3ff]{pct}%[/]"))
-                if weeks_left > 0:
-                    rows.append((" Remaining",
-                                 f"[#ffd700]{weeks_left}[/] "
-                                 f"([#8d98a7]~{requests_needed} req[/])"))
-            elif bf_status == "failed":
-                rows.append((" Note",
-                              "[#8d98a7]Press b to re-run[/]"))
-
-            if requests_used > 0:
-                rows.append((" Requests",
-                             f"[#d7dde8]{requests_used} used[/], "
-                             f"[#8d98a7]~{requests_needed} needed[/]"))
-
-            # Live quota estimate for backfill
-            q_rem = status.get("quota_remaining")
-            q_limit = status.get("quota_limit")
-            if q_rem is not None and weeks_left > 0:
-                try:
-                    q_rem_int = int(q_rem)
-                    possible = min(q_rem_int, weeks_left)
-                    limit_str = str(q_limit) if q_limit is not None else "?"
-                    rows.append((" Quota",
-                                 f"[#63f3ff]{q_rem_int}[/]/"
-                                 f"{limit_str} "
-                                 f"[#8d98a7]~{possible}w possible[/]"))
-                except (ValueError, TypeError):
-                    pass
-
-        table.add_rows(rows)
-        table.border_title = "[b][#63f3ff]Sync Status[/][/]"
-        table.border_subtitle = (
-            "[#8d98a7]u syncs current week. U refreshes projects and syncs 4 weeks.[/]"
-        )
-
-    def refresh_month_view(self):
-        cache = self._data_cache
-        if cache is None:
-            return
-        table = self.query_one("#month-table", DataTable)
-        with table.prevent(DataTable.RowHighlighted):
-            table.clear(columns=False)
-            months = cache.get_monthly_aggregates(12)
-            for m in months:
-                net_str = format_signed_rich(m["net"])
-                table.add_row(m["month"], f"{m['hours']:.1f}h", net_str, key=m["month"])
-        table.border_title = "[b][#63f3ff]Month Overview (Last 12)[/][/]"
-
-    # ── Event handlers ──
-
-    @on(DataTable.RowHighlighted, "#week-table")
-    def update_selected_day(self, event: DataTable.RowHighlighted):
-        if event.row_key is None:
-            return
-        new_day = str(event.row_key.value)
-        if new_day == self.selected_day:
-            return
-        self.selected_day = new_day
-        self.refresh_day_view()
-
-    @on(DataTable.RowHighlighted, "#month-table")
-    def month_row_highlighted(self, event: DataTable.RowHighlighted):
-        if self.active_view_index != 3:
-            return
-        if event.row_key is None:
-            return
-        month_str = str(event.row_key.value)
-        year_str, month_str_part = month_str.split("-")
-        first = date(int(year_str), int(month_str_part), 1)
-        week_str = get_week_str(first)
-        self._active_week = week_str
-        self.refresh_week_view()
-        self.update_status_line()
-
-    def _sync_week_table_cursor(self):
-        table = self.query_one("#week-table", DataTable)
-        for i, key in enumerate(table.rows.keys()):
-            if str(key.value) == self.selected_day:
-                with table.prevent(DataTable.RowHighlighted):
-                    table.move_cursor(row=i, animate=False)
-                break
-
+    def refresh_sync_view(self) -> None:
+        """Refresh the Sync/Quota panel."""
+        try:
+            panel = self.query_one(SyncPanel)
+            panel.refresh_data()
+        except Exception:
+            pass  # Panel may not be mounted yet
     @on(Tabs.TabActivated, "#view-tabs")
-    def on_tab_activated(self, event: Tabs.TabActivated):
+    def on_tab_activated(self, event: Tabs.TabActivated) -> None:
         if event.tab.id and event.tab.id.startswith("tab-"):
             # Guard against stale events: verify this tab is actually active
             tabs = self.query_one("#view-tabs", Tabs)
@@ -1762,7 +358,7 @@ class TogglTUI(App):
             self.focus_active_view()
             self._schedule_resize()
 
-    def action_next_view(self):
+    def action_next_view(self) -> None:
         self.active_view_index = (self.active_view_index + 1) % len(self.VIEWS)
         self._refresh_view_by_index(self.active_view_index)
         self.update_tabs()
@@ -1771,7 +367,7 @@ class TogglTUI(App):
         self.focus_active_view()
         self._schedule_resize()
 
-    def action_prev_view(self):
+    def action_prev_view(self) -> None:
         self.active_view_index = (self.active_view_index - 1) % len(self.VIEWS)
         self._refresh_view_by_index(self.active_view_index)
         self.update_tabs()
@@ -1780,37 +376,21 @@ class TogglTUI(App):
         self.focus_active_view()
         self._schedule_resize()
 
-    def action_nav_month_prev(self):
-        if self.active_view_index == 3:
-            table = self.query_one("#month-table", DataTable)
-            cursor = table.cursor_row
-            if cursor is None or cursor == 0:
-                return
-            table.move_cursor(row=cursor - 1, animate=False)
-
-    def action_nav_month_next(self):
-        if self.active_view_index == 3:
-            table = self.query_one("#month-table", DataTable)
-            cursor = table.cursor_row
-            if cursor is None:
-                table.move_cursor(row=0, animate=False)
-            elif cursor < len(table.rows) - 1:
-                table.move_cursor(row=cursor + 1, animate=False)
-
-    def action_refresh_data(self):
+    def action_refresh_data(self) -> None:
         load_runtime_settings()
+        self._data_cache = DataCache.load()
         self.refresh_all_views()
         self.notify("Reloaded local data")
 
-    def action_show_help(self):
+    def action_show_help(self) -> None:
         self.notify(
             "Left/right switch views, n add negative, u sync, U full sync, "
-            "b backfill, q quit"
+            "q quit"
         )
 
-    def action_sync_current_week(self):
+    def action_sync_current_week(self) -> None:
         logger.debug("[SYNC] action_sync_current_week: user pressed 'u'")
-        def after_confirm(confirmed):
+        def after_confirm(confirmed: bool) -> None:
             if confirmed:
                 self.notify("Syncing current week...")
                 self._do_sync_current_week()
@@ -1821,7 +401,7 @@ class TogglTUI(App):
         )
 
     @work(thread=True)
-    def _do_sync_current_week(self):
+    def _do_sync_current_week(self) -> None:
         logger.debug("[SYNC] _do_sync_current_week: starting")
         try:
             result = sync_current_week_light(prompt_on_warning=False)
@@ -1839,8 +419,8 @@ class TogglTUI(App):
         logger.debug("[SYNC] calling _on_sync_done: ok=%s, message=%s", ok, message)
         self.call_from_thread(self._on_sync_done, ok, message, "Synced current week")
 
-    def action_sync_full(self):
-        def after_confirm(confirmed):
+    def action_sync_full(self) -> None:
+        def after_confirm(confirmed: bool) -> None:
             if confirmed:
                 self.notify("Syncing last 4 weeks...")
                 self._do_sync_full()
@@ -1851,7 +431,7 @@ class TogglTUI(App):
         )
 
     @work(thread=True)
-    def _do_sync_full(self):
+    def _do_sync_full(self) -> None:
         try:
             result = sync_api_to_csv(4, prompt_on_warning=False)
         except (TogglRateLimitError, TogglAPIError) as e:
@@ -1861,10 +441,11 @@ class TogglTUI(App):
         message = result.get("message", "")
         self.call_from_thread(self._on_sync_done, ok, message, "Synced last 4 weeks")
 
-    def _on_sync_done(self, ok, message, success_msg):
+    def _on_sync_done(self, ok: bool, message: str, success_msg: str) -> None:
         logger.debug("[SYNC] _on_sync_done: ok=%s, message=%s", ok, message)
         load_runtime_settings()
         reset_cache()
+        self._data_cache = get_cache()
         try:
             self.refresh_all_views()
             logger.debug("[SYNC] refresh_all_views completed")
@@ -1876,47 +457,8 @@ class TogglTUI(App):
             self.notify(success_msg)
         else:
             self.notify(message or "Sync skipped", severity="warning")
-
-    def action_backfill(self):
-        def after_confirm(confirmed):
-            if confirmed:
-                self.notify("Starting backfill (pauses on quota, resumes automatically)...")
-                self._do_backfill()
-
-        self.push_screen(
-            ConfirmScreen("Backfill", "Fetch all historical data from Toggl? "
-                          "Pauses when quota runs out, resumes when quota resets."),
-            after_confirm,
-        )
-
-    @work(thread=True)
-    def _do_backfill(self):
-        from toggl.backfill import run_backfill
-        from toggl.api import get_api_token, get_projects_map
-
-        try:
-            token = get_api_token()
-            projects_map = get_projects_map(token)
-            result = run_backfill(token, projects_map)
-        except (TogglRateLimitError, TogglAPIError) as e:
-            self.call_from_thread(self.notify, str(e), severity="error")
-            return
-        except Exception as e:
-            self.call_from_thread(
-                self.notify, f"Backfill error: {e}", severity="error")
-            return
-
-        ok = result["status"] == "success"
-        weeks = result.get("weeks_backfilled", 0)
-        reason = result.get("stopped_reason", "")
-        if ok:
-            msg = f"Backfill complete ({weeks} weeks)"
-        else:
-            msg = f"Backfill stopped: {reason} ({weeks} weeks done)"
-        self.call_from_thread(self._on_sync_done, ok, msg, msg)
-
-    def action_add_negative(self):
-        def after_input(value):
+    def action_add_negative(self) -> None:
+        def after_input(value: str | None) -> None:
             if value:
                 ok, message = log_negative_direct(value)
                 self.refresh_all_views()
@@ -1927,8 +469,8 @@ class TogglTUI(App):
 
         self.push_screen(NegativeInputScreen(), after_input)
 
-    def action_add_positive(self):
-        def after_input(value):
+    def action_add_positive(self) -> None:
+        def after_input(value: str | None) -> None:
             if value:
                 ok, message = log_positive_direct(value)
                 self.refresh_all_views()
@@ -1939,147 +481,28 @@ class TogglTUI(App):
 
         self.push_screen(PositiveInputScreen(), after_input)
 
-    def action_cmd_zoom_in(self):
+    def action_cmd_zoom_in(self) -> None:
         if self.active_view_index == 1:
             self.query_one(CommandTab)._on_zoom_in()
 
-    def action_cmd_zoom_out(self):
+    def action_cmd_zoom_out(self) -> None:
         if self.active_view_index == 1:
             self.query_one(CommandTab)._on_zoom_out()
 
-    @on(Button.Pressed, "#btn-neg-log")
-    def on_neg_log_btn(self):
+
+    @on(LogNegRequested)
+    def on_log_neg_requested(self) -> None:
         self.action_add_negative()
 
-    @on(Button.Pressed, "#btn-pos-log")
-    def on_pos_log_btn(self):
+    @on(LogPosRequested)
+    def on_log_pos_requested(self) -> None:
         self.action_add_positive()
 
-    def on_resize(self, event) -> None:
+    def on_resize(self, event: Resize) -> None:
         new_size = event.size
         if new_size.width == 0 or new_size.height == 0:
             return
         self._schedule_resize()
 
-    def _resize_tables(self):
-        from rich.text import Text
-
-        # ── Main content tables ────────────────────────────────────────────
-        table_ids = [
-            "#week-table",
-            "#week-category-table",
-            "#day-table",
-            "#sync-table",
-        ]
-        text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
-
-        rail_w = 34
-        content_w = self.size.width - rail_w
-
-        if content_w <= 0:
-            return
-
-        available_width = max(10, content_w - 2)
-
-        for t_id in table_ids:
-            try:
-                table = self.query_one(t_id, DataTable)
-            except Exception:
-                continue
-
-            if not table.columns:
-                continue
-
-            # Skip tables in hidden views to avoid forced reflows
-            if not table.display:
-                continue
-
-            col_keys = list(table.columns.keys())
-            n_cols = len(col_keys)
-            cell_padding = table.cell_padding
-
-            req_widths = {
-                key: len(col.label.plain) for key, col in table.columns.items()
-            }
-
-            for row_idx in range(table.row_count):
-                row_data = table.get_row_at(row_idx)
-                for col_idx, col_key in enumerate(col_keys):
-                    val = str(row_data[col_idx])
-                    try:
-                        cell_w = Text.from_markup(val).cell_len
-                    except Exception:
-                        cell_w = len(strip_ansi(val))
-                    if cell_w > req_widths[col_key]:
-                        req_widths[col_key] = cell_w
-
-            total_padding = 2 * cell_padding * n_cols
-            content_budget = available_width - total_padding
-            total_req_content = sum(req_widths.values())
-
-            expandable_keys = []
-            fixed_keys = []
-            for key, col in table.columns.items():
-                label_str = col.label.plain
-                if label_str in text_cols or label_str.startswith("Cat"):
-                    expandable_keys.append(key)
-                else:
-                    fixed_keys.append(key)
-
-            if not expandable_keys:
-                expandable_keys = list(table.columns.keys())
-                fixed_keys = []
-
-            if content_budget >= total_req_content:
-                extra = content_budget - total_req_content
-                for key in fixed_keys:
-                    table.columns[key].width = req_widths[key]
-                    table.columns[key].auto_width = False
-                expand_extra = extra // len(expandable_keys)
-                rem = extra % len(expandable_keys)
-                for i, key in enumerate(expandable_keys):
-                    table.columns[key].width = (
-                        req_widths[key] + expand_extra + (1 if i < rem else 0)
-                    )
-                    table.columns[key].auto_width = False
-            else:
-                min_widths = {
-                    key: max(3, len(col.label.plain))
-                    for key, col in table.columns.items()
-                }
-                total_min = sum(min_widths.values())
-
-                if content_budget <= total_min:
-                    base_w = content_budget // n_cols
-                    rem = content_budget % n_cols
-                    for i, key in enumerate(table.columns.keys()):
-                        table.columns[key].width = max(
-                            1, base_w + (1 if i < rem else 0)
-                        )
-                        table.columns[key].auto_width = False
-                else:
-                    remaining = content_budget
-                    widths = dict(min_widths)
-                    remaining -= total_min
-
-                    for key in fixed_keys:
-                        extra = min(req_widths[key] - min_widths[key], remaining)
-                        if extra > 0:
-                            widths[key] += extra
-                            remaining -= extra
-
-                    if remaining > 0 and expandable_keys:
-                        expand_extra = remaining // len(expandable_keys)
-                        rem = remaining % len(expandable_keys)
-                        for i, key in enumerate(expandable_keys):
-                            widths[key] += expand_extra + (1 if i < rem else 0)
-
-                    for key, w in widths.items():
-                        table.columns[key].width = w
-                        table.columns[key].auto_width = False
-
-            table._require_update_dimensions = True
-            table.refresh(layout=True)
-            table.scroll_to(x=0, animate=False)
-
-        # ── Spark rail tables (disabled) ───────────────────────────────────
+    def _resize_tables(self) -> None:
+        """Resize tables. SyncPanel handles its own sizing."""

@@ -117,6 +117,8 @@ class TestInteractionSnapshots:
     def test_negative_modal_snapshot(self, snap_compare, app_with_data):
         """Negative input modal renders correctly."""
         async def open_negative_modal(pilot: Pilot):
+            while pilot.app._data_cache is None:
+                await pilot.pause()
             await pilot.press("n")
         
         assert snap_compare(
@@ -128,6 +130,8 @@ class TestInteractionSnapshots:
     def test_positive_modal_snapshot(self, snap_compare, app_with_data):
         """Positive input modal renders correctly."""
         async def open_positive_modal(pilot: Pilot):
+            while pilot.app._data_cache is None:
+                await pilot.pause()
             await pilot.press("p")
         
         assert snap_compare(
