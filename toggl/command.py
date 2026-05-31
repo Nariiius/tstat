@@ -275,7 +275,7 @@ class CommandTab(Container):
         height: 1fr;
     }
 
-    /* ── Graph header (3 rows) ────────────────────────── */
+    /* ── Graph header (2 rows: nav + period modes) ───── */
     #cmd-graph-header {
         height: auto;
         padding: 0 1;
@@ -307,22 +307,19 @@ class CommandTab(Container):
         layout: horizontal;
         align: center middle;
     }
-    .period-mode-btn, .scale-btn {
+    .period-mode-btn {
         background: transparent;
         border: none;
         padding: 0 1;
         min-width: 4;
         color: #8d98a7;
     }
-    .period-mode-btn:hover, .scale-btn:hover {
+    .period-mode-btn:hover {
         color: #63f3ff;
         background: #1e2a36;
     }
-    .period-mode-btn.selected,     .scale-btn.selected {
+    .period-mode-btn.selected {
         color: #63f3ff;
-    }
-    .scale-btn.hidden {
-        display: none;
     }
     #cmd-period-sep {
         color: #3d4f63;
@@ -348,7 +345,7 @@ class CommandTab(Container):
         height: 1fr;
     }
 
-    /* ── Graph footer (mode selector) ─────────────────── */
+    /* ── Graph footer (mode selector + scale) ────────── */
     #cmd-graph-footer {
         height: auto;
         layout: horizontal;
@@ -361,33 +358,10 @@ class CommandTab(Container):
     .graph-mode-btn {
         background: transparent;
         border: none;
-        padding: 0 2;
-        color: #8d98a7;
-        min-width: 8;
-        height: 1;
-    }
-    .graph-mode-btn:hover {
-        color: #d7dde8;
-        background: #1e2a36;
-    }
-    .graph-mode-btn.selected {
-        color: #0b1016;
-        background: #63f3ff;
-    }
-    .period-mode-btn, .scale-btn {
-        background: transparent;
-        border: none;
         padding: 0 1;
+        color: #8d98a7;
         min-width: 4;
         height: 1;
-        color: #8d98a7;
-    }
-    .period-mode-btn:hover, .scale-btn:hover {
-        color: #d7dde8;
-        background: #1e2a36;
-    }
-    .period-mode-btn.selected,     .scale-btn.selected {
-        color: #63f3ff;
     }
     .graph-mode-btn:hover {
         color: #d7dde8;
@@ -397,6 +371,26 @@ class CommandTab(Container):
         color: #0b1016;
         background: #63f3ff;
         text-style: bold;
+    }
+    .scale-btn {
+        background: transparent;
+        border: none;
+        padding: 0 1;
+        min-width: 4;
+        height: 1;
+        color: #8d98a7;
+    }
+    .scale-btn:hover {
+        color: #d7dde8;
+        background: #1e2a36;
+    }
+    .scale-btn.selected {
+        color: #0b1016;
+        background: #63f3ff;
+        text-style: bold;
+    }
+    .scale-btn.hidden {
+        display: none;
     }
 
     /* ── Bottom section: two tables ────────────────────── */
@@ -434,7 +428,7 @@ class CommandTab(Container):
     """
 
     GRAPH_MODES = ["trajectory", "positive", "negative", "logged_pos", "logged_neg"]
-    GRAPH_MODE_LABELS = ["Traj", "Pos", "Neg", "Log+", "Log-"]
+    GRAPH_MODE_LABELS = ["Net", "Pos", "Neg", "Log+", "Log-"]
 
     PERIOD_MODES = [PeriodMode.DAY, PeriodMode.WEEK, PeriodMode.MONTH]
 
@@ -469,22 +463,18 @@ class CommandTab(Container):
                 )
 
     def _compose_graph_header(self):
-        """Yield graph panel header (3 rows)."""
+        """Yield graph panel header (2 rows: nav + period modes)."""
         with Container(id="cmd-graph-header"):
             # Row 1: navigation
             with Horizontal(id="cmd-nav-row"):
                 yield Button("<<<", id="cmd-prev")
                 yield Label("...", id="cmd-period-label")
                 yield Button(">>>", id="cmd-next")
-            # Row 2: period modes + scale selector
+            # Row 2: period modes
             with Horizontal(id="cmd-control-row"):
                 for mode in self.PERIOD_MODES:
                     cls = "period-mode-btn selected" if mode == self.period.mode else "period-mode-btn"
                     yield Button(PeriodMode.label(mode), id=f"cmd-period-{mode}", classes=cls)
-                yield Label("|", id="cmd-period-sep")
-                # Pre-create ALL possible scale buttons (show/hide per mode)
-                for scale_val in [7, 30, 90, 365, 4, 13, 26, 52, 3, 6, 12]:
-                    yield Button(str(scale_val), id=f"cmd-scale-{scale_val}", classes="scale-btn hidden")
             # Row 3: statistics (stacked, NET prominent)
             with Vertical(id="cmd-stats-row"):
                 yield Label("", id="cmd-stats-best")
@@ -493,13 +483,16 @@ class CommandTab(Container):
                 yield Label("", id="cmd-stats-avg")
 
     def _compose_graph_footer(self):
-        """Yield graph panel footer (mode selector)."""
+        """Yield graph panel footer (mode selector + scale)."""
         with Horizontal(id="cmd-graph-footer"):
             for mode, label in zip(self.GRAPH_MODES, self.GRAPH_MODE_LABELS):
                 cls = "graph-mode-btn selected" if mode == self._current_graph_mode else "graph-mode-btn"
                 yield Button(label, id=f"cmd-gmode-{mode}", classes=cls)
                 if mode != self.GRAPH_MODES[-1]:
                     yield Label("|")
+            yield Label("|")
+            for scale_val in [7, 30, 90, 365, 4, 13, 26, 52, 3, 6, 12]:
+                yield Button(str(scale_val), id=f"cmd-scale-{scale_val}", classes="scale-btn hidden")
 
     # ── Mount ────────────────────────────────────────────────────────
 

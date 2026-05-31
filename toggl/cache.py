@@ -690,8 +690,11 @@ def _patch_daily_csv(week_str, daily_data):
         d = row["Date"]
         p = row["Project"]
         h = float(row["Hours"])
-        merged.setdefault(d, {})[p] = h
+        # Drop existing rows for days in THIS week — they'll be replaced
+        if d not in week_dates:
+            merged.setdefault(d, {})[p] = h
 
+    # Write fresh API data for this week's days
     for day_str, projs in daily_data.items():
         if day_str in week_dates:
             for proj, hours in projs.items():
@@ -722,8 +725,11 @@ def _patch_weekly_csv(week_str, weekly_data):
         wk = row["Week"]
         p = row["Project"]
         h = float(row["Hours"])
-        merged.setdefault(wk, {})[p] = h
+        # Drop existing rows for THIS week — they'll be replaced
+        if wk != week_str:
+            merged.setdefault(wk, {})[p] = h
 
+    # Write fresh API data for this week
     for proj, hours in weekly_data.items():
         if hours > 0:
             merged.setdefault(week_str, {})[proj] = hours

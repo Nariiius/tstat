@@ -16,7 +16,7 @@ _CANVAS = (11, 16, 22)
 _BORDER = (25, 35, 45)
 _TICK_DIM = (50, 60, 75)
 _ZERO_LINE = (215, 221, 232)
-_AVG_LINE = (61, 79, 99)
+_AVG_LINE = (100, 120, 140)
 
 _MODE_COLORS = {
     "trajectory": _GREEN, "positive": _GREEN, "negative": _RED,
@@ -24,15 +24,13 @@ _MODE_COLORS = {
 }
 
 
-def _iso_to_plotext(iso_dates: list[str]) -> list[str]:
-    result = []
-    for d in iso_dates:
-        try:
-            parts = d.split("-")
-            result.append(f"{parts[2]}/{parts[1]}/{parts[0]}")
-        except (IndexError, ValueError):
-            result.append(d)
-    return result
+def _format_date_label(iso_date: str) -> str:
+    """Convert '2026-05-31' to short label '05/31'."""
+    try:
+        parts = iso_date.split("-")
+        return f"{parts[1]}/{parts[2]}"
+    except (IndexError, ValueError):
+        return iso_date
 
 
 def _median(vals: list[float]) -> float:
@@ -45,12 +43,40 @@ def _median(vals: list[float]) -> float:
     return (s[n // 2 - 1] + s[n // 2]) / 2.0
 
 
+def _nice_yticks(lo: float, hi: float) -> list[float]:
+    """Return at most 5 nicely-rounded y-tick values spanning [lo, hi]."""
+    span = hi - lo or 1
+    raw_step = span / 4
+    magnitude = 10 ** (int(raw_step).bit_length() // 3 * 3) if raw_step >= 1 else 0.1
+    nice_step = _round_to(raw_step, magnitude)
+    # Guard: if nice_step rounds to 0 (small span vs magnitude), fall back
+    # to raw_step to avoid an infinite loop.
+    if nice_step <= 0:
+        nice_step = raw_step or span / 4 or 1
+    ticks = []
+    t = _round_to(lo, nice_step)
+    while t <= hi + nice_step * 0.01:
+        ticks.append(round(t, 2))
+        t += nice_step
+        if len(ticks) > 20:  # safety cap
+            break
+    return ticks
+
+
+def _round_to(val: float, step: float) -> float:
+    if step == 0:
+        return val
+    return round(val / step) * step
+
+
 class GraphWidget(Widget):
     """Plotext-rendered trajectory chart."""
 
     DEFAULT_CSS = """
     GraphWidget { width: 1fr; height: 1fr; }
     """
+
+    _MAX_XTICKS = 8
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -88,13 +114,6 @@ class GraphWidget(Widget):
         plt.grid(True)
         plt.ticks_style("dim")
 
-        pt_dates = _iso_to_plotext(self._dates)
-
-        if len(pt_dates) > 60:
-            plt.date_form(output_form="%m/%y")
-        else:
-            plt.date_form(output_form="%m/%d")
-
         # ── Dynamic Y scaling with outlier clipping ────────────────
         nonzero = [v for v in self._values if v != 0]
         if nonzero:
@@ -119,9 +138,18 @@ class GraphWidget(Widget):
         else:
             plt.ylim(-1, 1)
 
-        # ── Plot ───────────────────────────────────────────────────
+        # ── X-axis: numeric indices + manual labels ───────────────
+        n = len(self._dates)
+        x_indices = list(range(n))
+
         line_color = _MODE_COLORS.get(self._mode, _GREEN)
-        plt.plot(pt_dates, self._values, color=line_color, marker="braille")
+        plt.plot(x_indices, self._values, color=line_color, marker="braille")
+
+        # Spread x-tick labels to avoid overlap
+        step = max(1, n // self._MAX_XTICKS)
+        xtick_positions = x_indices[::step]
+        xtick_labels = [_format_date_label(self._dates[i]) for i in xtick_positions]
+        plt.xticks(xtick_positions, xtick_labels)
 
         # ── Zero line (bright) ─────────────────────────────────────
         plt.hline(0, color=_ZERO_LINE)
@@ -130,12 +158,13 @@ class GraphWidget(Widget):
         if self._avg is not None:
             plt.hline(self._avg, color=_AVG_LINE)
 
-        # ── 3 Y-axis labels only: max / 0 / min ────────────────────
-        if self._mode == "trajectory":
-            plt.yticks([lo, 0, hi])
+        # ── Clean Y-axis ticks ─────────────────────────────────────
+        if nonzero:
+            if self._mode == "trajectory":
+                plt.yticks([lo, 0, hi])
+            else:
+                plt.yticks([lo, hi])
         else:
-            plt.yticks([lo, hi])
-
-        # No markers — clean graph
+            plt.yticks([0])
 
         return Text.from_ansi(plt.build())
