@@ -288,7 +288,7 @@ class CommandTab(Container):
         table.border_title = f"[b][#63f3ff]{suffix}[/][/]"
 
         svc = MetricsService(cache)
-        period_nets = svc.compute_period_nets(cache, start, end, mode)
+        period_nets = svc.compute_period_nets(start, end, mode)
         subtitle = period_nets.get("subtitle", "Insights coming soon")
         table.border_subtitle = f"[#8d98a7]{subtitle}[/]"
 
