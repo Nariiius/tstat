@@ -16,7 +16,7 @@ from textual.widgets import Button, Label, Static
 
 from toggl.cache import get_week_str
 from toggl.formatters import _label_for_day
-from toggl.period import PeriodMode
+from toggl.state.period import PeriodMode
 
 
 def _get_anchor_week_dates(anchor: date) -> set[date]:

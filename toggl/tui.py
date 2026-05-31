@@ -231,8 +231,10 @@ class TogglTUI(App):
 
     @work(thread=False, exclusive=True)
     async def load_data(self) -> None:
-        """Load cache data in background worker."""
-        self.data_cache = DataCache.load()
+        """Load cache data asynchronously (I/O runs in thread pool)."""
+        import asyncio
+
+        self.data_cache = await asyncio.to_thread(DataCache.load)
         # watch_data_cache handles refresh_all_views automatically
 
     @work(thread=True)
@@ -387,8 +389,8 @@ class TogglTUI(App):
 
     def action_refresh_data(self) -> None:
         load_runtime_settings()
-        self.data_cache = DataCache.load()
-        self.notify("Reloaded local data")
+        self.load_data()  # reload via async worker
+        self.notify("Reloading local data...")
 
     def action_show_help(self) -> None:
         self.notify(
@@ -464,7 +466,7 @@ class TogglTUI(App):
         def after_input(value: str | None) -> None:
             if value:
                 ok, message = log_negative_direct(value)
-                self.refresh_all_views()
+                self.load_data()  # reload cache → watch_data_cache refreshes views
                 if ok:
                     self.notify(message)
                 else:
@@ -476,7 +478,7 @@ class TogglTUI(App):
         def after_input(value: str | None) -> None:
             if value:
                 ok, message = log_positive_direct(value)
-                self.refresh_all_views()
+                self.load_data()  # reload cache → watch_data_cache refreshes views
                 if ok:
                     self.notify(message)
                 else:

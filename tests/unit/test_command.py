@@ -4,7 +4,7 @@ import pytest
 from datetime import date, timedelta
 from unittest.mock import patch
 
-from toggl.period import PeriodController, PeriodMode
+from toggl.state.period import PeriodController, PeriodMode
 
 
 class TestPeriodController:
@@ -238,7 +238,7 @@ class TestGraphScalingAndTicks:
     """Tests for nice yticks and cumulative average logic."""
 
     def test_nice_yticks_positive_free_floating(self):
-        from toggl.graph import _nice_yticks
+        from toggl.widgets.graph import _nice_yticks
         ymin, ymax, ticks = _nice_yticks(12.5, 45.2)
         # Should start <= 12.5 and end >= 45.2
         assert ymin <= 12.5
@@ -249,7 +249,7 @@ class TestGraphScalingAndTicks:
             assert pytest.approx(ticks[i+1] - ticks[i]) == ticks[1] - ticks[0]
 
     def test_nice_yticks_negative_to_positive(self):
-        from toggl.graph import _nice_yticks
+        from toggl.widgets.graph import _nice_yticks
         ymin, ymax, ticks = _nice_yticks(-796, 69)
         assert ymin <= -796
         assert ymax >= 69
@@ -258,14 +258,14 @@ class TestGraphScalingAndTicks:
         assert ticks[1] - ticks[0] in [100, 200, 250, 500]
 
     def test_nice_yticks_degenerate(self):
-        from toggl.graph import _nice_yticks
+        from toggl.widgets.graph import _nice_yticks
         ymin, ymax, ticks = _nice_yticks(0.0, 0.0)
         assert ymin < ymax
         assert len(ticks) >= 3
         assert 0.0 in ticks
 
     def test_nice_yticks_degenerate_nonzero(self):
-        from toggl.graph import _nice_yticks
+        from toggl.widgets.graph import _nice_yticks
         ymin, ymax, ticks = _nice_yticks(10.0, 10.0)
         assert ymin < 10.0
         assert ymax > 10.0

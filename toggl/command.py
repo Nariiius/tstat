@@ -19,8 +19,8 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Button, DataTable, Label, Static
 
 from toggl.cache import DataCache, get_week_str
-from toggl.graph import GraphWidget
-from toggl.period import PeriodController, PeriodMode
+from toggl.widgets.graph import GraphWidget
+from toggl.state.period import PeriodController, PeriodMode
 from toggl.services.metrics import MetricsService
 
 
@@ -420,7 +420,7 @@ class CommandTab(Container):
 
     def _update_cycle_labels(self) -> None:
         """Update cycle button labels based on the current state."""
-        from toggl.period import PeriodMode
+        from toggl.state.period import PeriodMode
         period_btn = self.query_one("#cmd-cycle-period", Button)
         period_btn.label = f"View: {PeriodMode.label(self.period.mode)} ↻"
 

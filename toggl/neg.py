@@ -52,7 +52,7 @@ def log_activity_direct(name: str, mode: Literal["positive", "negative"]) -> tup
     writer = csv.DictWriter(buf, fieldnames=["Date", field, "Points"])
     writer.writeheader()
     writer.writerows(rows)
-    from toggl.cache import _atomic_write
+    from toggl.services.sync import _atomic_write
     _atomic_write(csv_file, buf.getvalue())
     return True, f"Logged {canonical} ({sign}{lookup[canonical]} pts)"
 
