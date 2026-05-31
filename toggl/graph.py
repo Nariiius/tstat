@@ -14,9 +14,9 @@ _CYAN = (45, 212, 191)
 _PURPLE = (192, 132, 252)
 _CANVAS = (11, 16, 22)
 _BORDER = (25, 35, 45)
-_TICK_DIM = (141, 152, 167)
-_ZERO_LINE = (215, 221, 232)
-_AVG_LINE = (100, 120, 140)
+_TICK_DIM = (140, 150, 160)
+_ZERO_LINE = (42, 50, 60)
+_AVG_LINE = (75, 62, 27)
 
 _MODE_COLORS = {
     "net": _GREEN, "positive": _GREEN, "negative": _RED,
@@ -42,30 +42,61 @@ def _median(vals: list[float]) -> float:
     return (s[n // 2 - 1] + s[n // 2]) / 2.0
 
 
-def _nice_yticks(lo: float, hi: float) -> list[float]:
-    """Return at most 5 nicely-rounded y-tick values spanning [lo, hi]."""
-    span = hi - lo or 1
-    raw_step = span / 4
-    magnitude = 10 ** (int(raw_step).bit_length() // 3 * 3) if raw_step >= 1 else 0.1
-    nice_step = _round_to(raw_step, magnitude)
-    # Guard: if nice_step rounds to 0 (small span vs magnitude), fall back
-    # to raw_step to avoid an infinite loop.
-    if nice_step <= 0:
-        nice_step = raw_step or span / 4 or 1
+def _nice_yticks(lo: float, hi: float, count: int = 5) -> tuple[float, float, list[float]]:
+    """Return (ymin, ymax, ticks) for nicely-rounded, evenly-spaced y-tick values spanning [lo, hi]."""
+    if lo == hi:
+        if lo == 0:
+            lo, hi = -1.0, 1.0
+        else:
+            lo = lo - abs(lo) * 0.1 - 1.0
+            hi = hi + abs(hi) * 0.1 + 1.0
+
+    span = hi - lo
+    import math
+    raw_step = span / (count - 1)
+    
+    # Calculate step magnitude and nice fraction
+    log10_step = math.log10(raw_step)
+    power = math.floor(log10_step)
+    fraction = raw_step / (10 ** power)
+    
+    if fraction < 1.5:
+        nice_fraction = 1.0
+    elif fraction < 3.0:
+        nice_fraction = 2.0
+    elif fraction < 7.0:
+        nice_fraction = 5.0
+    else:
+        nice_fraction = 10.0
+        
+    nice_step = nice_fraction * (10 ** power)
+    
+    # Outer rounded bounds based on the nice step size
+    ymin = math.floor(lo / nice_step) * nice_step
+    ymax = math.ceil(hi / nice_step) * nice_step
+    
+    # If nice_step is degenerate, fall back to basic division
+    if nice_step <= 0 or ymin >= ymax:
+        ymin = lo
+        ymax = hi
+        nice_step = span / (count - 1)
+        ticks = [round(lo + i * nice_step, 1) for i in range(count)]
+        return ymin, ymax, ticks
+        
     ticks = []
-    t = _round_to(lo, nice_step)
-    while t <= hi + nice_step * 0.01:
-        ticks.append(round(t, 2))
+    t = ymin
+    while t <= ymax + nice_step * 0.01:
+        val = round(t, 2 if nice_step < 1 else 0)
+        if not ticks or val != ticks[-1]:
+            ticks.append(val)
         t += nice_step
-        if len(ticks) > 20:  # safety cap
+        if len(ticks) > 15:  # safety cap
             break
-    return ticks
-
-
-def _round_to(val: float, step: float) -> float:
-    if step == 0:
-        return val
-    return round(val / step) * step
+            
+    if len(ticks) < 3:
+        ticks = [round(ymin, 1), round((ymin + ymax) / 2, 1), round(ymax, 1)]
+        
+    return ymin, ymax, ticks
 
 
 class GraphWidget(Widget):
@@ -113,37 +144,57 @@ class GraphWidget(Widget):
         plt.ticks_color(_TICK_DIM)
         plt.frame(False)
         plt.grid(True)
-        plt.ticks_style("dim")
+        plt.ticks_style("normal")
 
-        # ── Dynamic Y scaling with outlier clipping ────────────────
-        nonzero = [v for v in self._values if v != 0]
-        if nonzero:
-            lo = min(nonzero)
-            hi = max(nonzero)
-            span = hi - lo or 1
-            med = _median(nonzero)
-            max_abs = max(abs(lo), abs(hi))
-
-            # Cap extreme outliers: one terrible day shouldn't flatten everything (disable for net mode)
-            if self._mode != "net" and med != 0 and max_abs > 3 * abs(med):
-                cap = 3 * abs(med)
-                lo = max(lo, -cap)
-                hi = min(hi, cap)
-
-            pad = (hi - lo) * 0.15 or max_abs * 0.1
-            if self._mode == "net":
-                bound = max(abs(lo - pad), abs(hi + pad), 1)
-                plt.ylim(-bound, bound)
-            else:
-                plt.ylim(min(0, lo - pad), hi + pad)
+        # ── Dynamic Y scaling with nice rounded ticks ──────────────
+        if self._mode == "net":
+            # For cumulative net mode, float completely freely based on min/max of the trajectory
+            lo = min(self._values)
+            hi = max(self._values)
+            span = hi - lo
+            pad = span * 0.15 if span > 0 else 1.0
+            ymin, ymax, ticks = _nice_yticks(lo - pad, hi + pad)
         else:
-            plt.ylim(-1, 1)
+            # For Positive / Negative modes, start scaling from 0.0 baseline reference
+            nonzero = [v for v in self._values if v != 0]
+            if nonzero:
+                lo = min(nonzero)
+                hi = max(nonzero)
+                
+                # Cap extreme outliers: one terrible day shouldn't flatten everything
+                med = _median(nonzero)
+                max_abs = max(abs(lo), abs(hi))
+                if med != 0 and max_abs > 3 * abs(med):
+                    cap = 3 * abs(med)
+                    lo = max(lo, -cap) if lo >= 0 else min(lo, cap)
+                    hi = min(hi, cap) if hi >= 0 else max(hi, -cap)
+                    
+                pad = (hi - lo) * 0.15 or max_abs * 0.1
+                
+                if lo >= 0:
+                    # Positive mode: scales upwards from 0.0
+                    ymin = 0.0
+                    ymax = hi + pad
+                else:
+                    # Negative mode: scales downwards from 0.0
+                    ymin = lo - pad
+                    ymax = 0.0
+                    
+                ymin, ymax, ticks = _nice_yticks(ymin, ymax)
+            else:
+                ymin, ymax = -1.0, 1.0
+                ticks = [0.0]
+
+        plt.ylim(ymin, ymax)
 
         # ── X-axis: numeric indices + manual labels ───────────────
         n = len(self._dates)
         x_indices = list(range(n))
 
-        line_color = _MODE_COLORS.get(self._mode, _GREEN)
+        if self._mode == "net":
+            line_color = _RED if self._values[-1] < 0 else _GREEN
+        else:
+            line_color = _MODE_COLORS.get(self._mode, _GREEN)
         plt.plot(x_indices, self._values, color=line_color, marker="braille")
 
         # Explicitly set X limits to cover exactly the data range
@@ -156,31 +207,15 @@ class GraphWidget(Widget):
         plt.xticks(xtick_positions, xtick_labels)
 
         # ── Zero line (bright) ─────────────────────────────────────
-        plt.hline(0, color=_ZERO_LINE)
+        if ymin <= 0 <= ymax:
+            plt.hline(0, color=_ZERO_LINE)
 
         # ── Average line (dim grey) ────────────────────────────────
-        if self._avg is not None:
+        if self._avg is not None and ymin <= self._avg <= ymax:
             plt.hline(self._avg, color=_AVG_LINE)
 
         # ── Clean Y-axis ticks ─────────────────────────────────────
-        if nonzero:
-            if self._mode == "net":
-                bound = max(abs(lo - pad), abs(hi + pad), 1)
-                ticks = [round(-bound, 1), 0.0, round(bound, 1)]
-            else:
-                ymin = min(0, lo - pad)
-                ymax = hi + pad
-                ticks = [round(ymin, 1), round(ymax, 1)]
-            
-            if self._avg is not None:
-                ticks.append(round(self._avg, 1))
-            
-            plt.yticks(ticks)
-        else:
-            ticks = [0.0]
-            if self._avg is not None:
-                ticks.append(round(self._avg, 1))
-            plt.yticks(ticks)
+        plt.yticks(ticks)
 
         ansi_str = plt.build()
         if ansi_str.endswith("\n"):

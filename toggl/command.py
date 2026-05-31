@@ -504,12 +504,20 @@ class CommandTab(Container):
             for v in raw_values:
                 cum += v
                 values.append(round(cum, 1))
+        elif self._current_graph_mode == "negative":
+            values = [-v for v in raw_values]
         else:
             values = raw_values
 
         graph = self.query_one("#cmd-graph", GraphWidget)
-        nonzero = [v for v in raw_values if v != 0]
-        avg = round(sum(nonzero) / len(nonzero), 1) if nonzero else None
+        if self._current_graph_mode == "net":
+            avg = round(sum(values) / len(values), 1) if values else None
+        elif self._current_graph_mode == "negative":
+            nonzero = [v for v in raw_values if v != 0]
+            avg = round(-sum(nonzero) / len(nonzero), 1) if nonzero else None
+        else:
+            nonzero = [v for v in raw_values if v != 0]
+            avg = round(sum(nonzero) / len(nonzero), 1) if nonzero else None
         graph.set_data(dates, values, avg=avg)
         graph.set_mode(self._current_graph_mode)
         graph.refresh()
@@ -527,7 +535,7 @@ class CommandTab(Container):
         self._refresh_daily_table(daily_data)
 
         # ── Statistics ──────────────────────────────────────────────
-        self._update_stats(raw_values)
+        self._update_stats(raw_values, values, avg)
 
         # ── Controls (rebuild scale buttons on mode change) ──────────
         self._update_controls()
@@ -729,21 +737,67 @@ class CommandTab(Container):
 
     # ── Statistics ────────────────────────────────────────────────────
 
-    def _update_stats(self, raw_values):
-        nonzero = [v for v in raw_values if v != 0]
+    def _update_stats(self, raw_values, values, avg):
         panel = self.query_one("#cmd-graph-panel")
-        if nonzero:
-            t, b, w = round(sum(raw_values), 1), max(nonzero), min(nonzero)
+        if not values:
+            panel.border_subtitle = ""
+            return
+
+        if self._current_graph_mode == "net":
+            b = max(values)
+            w = min(values)
+            t = sum(raw_values)
+            
             high_str = f"+{int(b)}" if b >= 0 else str(int(b))
             low_str = f"+{int(w)}" if w >= 0 else str(int(w))
             
             t_color = "#37d994" if t > 0 else ("#ff5f5f" if t < 0 else "")
             t_markup = f"[{t_color}]{t:+.0f}[/]" if t_color else f"{t:+.0f}"
             
-            text = f"HIGH [bold #37d994]{high_str}[/]   LOW [bold #ff5f5f]{low_str}[/]   NET [bold]{t_markup}[/]"
+            avg_val = avg if avg is not None else 0.0
+            avg_str = f"+{int(avg_val)}" if avg_val >= 0 else str(int(avg_val))
+            
+            text = f"HIGH [bold #37d994]{high_str}[/]   LOW [bold #ff5f5f]{low_str}[/]   NET [bold]{t_markup}[/]   AVG [bold #63f3ff]{avg_str}[/]"
             panel.border_subtitle = text
+        elif self._current_graph_mode == "negative":
+            nonzero = [v for v in raw_values if v != 0]
+            if nonzero:
+                b = max(nonzero)
+                w = min(nonzero)
+                t = sum(raw_values)
+                
+                # Show HIGH as the maximum loss (worst day) and LOW as the minimum loss (best day)
+                high_str = f"-{int(b)}"
+                low_str = f"-{int(w)}"
+                t_markup = f"[#ff5f5f]-{int(t)}[/]"
+                
+                avg_val = avg if avg is not None else 0.0
+                avg_str = f"{avg_val:.1f}"
+                
+                text = f"HIGH [bold #ff5f5f]{high_str}[/]   LOW [bold #37d994]{low_str}[/]   NET [bold]{t_markup}[/]   AVG [bold #63f3ff]{avg_str}[/]"
+                panel.border_subtitle = text
+            else:
+                panel.border_subtitle = ""
         else:
-            panel.border_subtitle = ""
+            nonzero = [v for v in raw_values if v != 0]
+            if nonzero:
+                b = max(nonzero)
+                w = min(nonzero)
+                t = sum(raw_values)
+                
+                high_str = f"+{int(b)}" if b >= 0 else str(int(b))
+                low_str = f"+{int(w)}" if w >= 0 else str(int(w))
+                
+                t_color = "#37d994" if t > 0 else ("#ff5f5f" if t < 0 else "")
+                t_markup = f"[{t_color}]{t:+.0f}[/]" if t_color else f"{t:+.0f}"
+                
+                avg_val = avg if avg is not None else 0.0
+                avg_str = f"+{avg_val:.1f}" if avg_val >= 0 else f"{avg_val:.1f}"
+                
+                text = f"HIGH [bold #37d994]{high_str}[/]   LOW [bold #ff5f5f]{low_str}[/]   NET [bold]{t_markup}[/]   AVG [bold #63f3ff]{avg_str}[/]"
+                panel.border_subtitle = text
+            else:
+                panel.border_subtitle = ""
 
         # Graph panel title shows date range
         start, end = self.period.get_visible_range()
