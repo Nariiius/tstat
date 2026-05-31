@@ -144,6 +144,21 @@ class TestMetricsServiceReportSections:
 
         assert report["total_hours"] > 0
 
+    def test_report_sections_cache(self, tmp_data_dir, sample_daily_csv, sample_config):
+        """Same key returns cached result (identity check)."""
+        svc = MetricsService(DataCache.load())
+        r1 = svc.get_report_sections("2023-W01", "WEEK")
+        r2 = svc.get_report_sections("2023-W01", "WEEK")
+        assert r1 is r2, "Second call should return cached object"
+
+    def test_report_sections_cache_key_differentiates(self, tmp_data_dir, sample_weekly_csv, sample_config):
+        """Different keys produce different cached entries."""
+        svc = MetricsService(DataCache.load())
+        r1 = svc.get_report_sections("2023-W01", "WEEK")
+        r2 = svc.get_report_sections("2023-W02", "WEEK")
+        assert r1 is not r2
+        assert r1["total_hours"] != r2["total_hours"]
+
 
 class TestMetricsServiceGraphData:
     """Tests for MetricsService.get_graph_data."""

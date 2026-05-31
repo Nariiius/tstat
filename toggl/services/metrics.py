@@ -23,6 +23,7 @@ class MetricsService:
     ):
         self._cache = cache
         self._get_daily_target = get_daily_target
+        self._report_sections_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
     def get_day_metrics(self, day_str: str) -> dict[str, Any]:
         projects = self._cache.get_day_projects(day_str) or {}
@@ -95,6 +96,10 @@ class MetricsService:
         }
 
     def get_report_sections(self, label: str, context_type: str) -> dict[str, Any]:
+        key = (label, context_type)
+        if key in self._report_sections_cache:
+            return self._report_sections_cache[key]
+
         if context_type == "DAY":
             projects = self._cache.get_day_projects(label) or {}
         elif context_type == "WEEK":
@@ -108,7 +113,7 @@ class MetricsService:
             sum(r[3] for r in results if r[3] is not None) + sum(r[3] for r in negative_results) + sum(r[3] for r in positive_results),
             2,
         )
-        return {
+        result = {
             "results": results,
             "negative_results": negative_results,
             "positive_results": positive_results,
@@ -118,6 +123,8 @@ class MetricsService:
             "total_points": total_pts,
             "total_hours": round(sum(r[1] for r in results if r[1] is not None), 2),
         }
+        self._report_sections_cache[key] = result
+        return result
 
     def get_graph_data(
         self, daily_data: list[dict[str, Any]], mode: str
