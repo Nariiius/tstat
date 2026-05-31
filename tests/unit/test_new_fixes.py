@@ -41,43 +41,43 @@ def test_needs_auto_update_true_on_fresh_install(monkeypatch):
     assert needs_auto_update() is True
 
 
-def test_patch_daily_csv_non_destructive_merge(tmp_data_dir):
-    """_patch_daily_csv must perform a non-destructive merge (preserve zero-activity or manual rows)."""
+def test_patch_daily_csv_replaces_synced_week(tmp_data_dir):
+    """_patch_daily_csv replaces all data for the synced week; data from other weeks is preserved."""
     import toggl.const
     
-    # Write some existing rows (with one untracked manual project)
+    # Write existing rows: W01 dates (2023-01-01, 2023-01-02) and a W02 date (2023-01-08)
     with open(toggl.const.DAILY_CSV_FILE, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["Date", "Project", "Hours"])
         w.writeheader()
         w.writerow({"Date": "2023-01-01", "Project": "Learning to Code", "Hours": "1.5"})
         w.writerow({"Date": "2023-01-01", "Project": "Manual Points", "Hours": "2.0"})
         w.writerow({"Date": "2023-01-02", "Project": "Fitness", "Hours": "1.0"})
+        w.writerow({"Date": "2023-01-08", "Project": "Reading", "Hours": "3.0"})  # W02 — untouched
 
-    # Patch with new API data for 2023-W01: updates "Learning to Code" but doesn't mention "Manual Points"
-    # weekly range is 2023-01-01 to 2023-01-07
+    # Sync W01: API returns only "Learning to Code" on 2023-01-01
     daily_data = {
         "2023-01-01": {"Learning to Code": 3.0}
     }
     
     _patch_daily_csv("2023-W01", daily_data)
     
-    # Load back the CSV
     with open(toggl.const.DAILY_CSV_FILE, "r", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
         
-    # Verify that:
-    # 1. "Learning to Code" got updated to 3.0 on 2023-01-01
-    # 2. "Manual Points" got preserved on 2023-01-01
-    # 3. "Fitness" got preserved on 2023-01-02
     by_date_proj = {(row["Date"], row["Project"]): float(row["Hours"]) for row in rows}
     
+    # 1. "Learning to Code" updated to 3.0
     assert by_date_proj[("2023-01-01", "Learning to Code")] == 3.0
-    assert by_date_proj[("2023-01-01", "Manual Points")] == 2.0
-    assert by_date_proj[("2023-01-02", "Fitness")] == 1.0
+    # 2. "Manual Points" REMOVED — API didn't return it for this week
+    assert ("2023-01-01", "Manual Points") not in by_date_proj
+    # 3. "Fitness" on 2023-01-02 REMOVED — day is in W01 but API returned nothing for it
+    assert ("2023-01-02", "Fitness") not in by_date_proj
+    # 4. W02 data preserved
+    assert by_date_proj[("2023-01-08", "Reading")] == 3.0
 
 
-def test_patch_weekly_csv_non_destructive_merge(tmp_data_dir):
-    """_patch_weekly_csv must perform a non-destructive merge of weekly totals."""
+def test_patch_weekly_csv_replaces_synced_week(tmp_data_dir):
+    """_patch_weekly_csv replaces all data for the synced week; other weeks are preserved."""
     import toggl.const
     
     with open(toggl.const.CSV_FILE, "w", newline="", encoding="utf-8") as f:
@@ -87,6 +87,7 @@ def test_patch_weekly_csv_non_destructive_merge(tmp_data_dir):
         w.writerow({"Week": "2023-W01", "Project": "Manual Points", "Hours": "5.0"})
         w.writerow({"Week": "2023-W02", "Project": "Learning to Code", "Hours": "8.0"})
 
+    # Sync W01: API returns only "Learning to Code" (no "Manual Points")
     weekly_data = {
         "Learning to Code": 12.0
     }
@@ -98,8 +99,11 @@ def test_patch_weekly_csv_non_destructive_merge(tmp_data_dir):
         
     by_week_proj = {(row["Week"], row["Project"]): float(row["Hours"]) for row in rows}
     
+    # 1. "Learning to Code" updated to 12.0
     assert by_week_proj[("2023-W01", "Learning to Code")] == 12.0
-    assert by_week_proj[("2023-W01", "Manual Points")] == 5.0
+    # 2. "Manual Points" REMOVED — API didn't return it
+    assert ("2023-W01", "Manual Points") not in by_week_proj
+    # 3. W02 data preserved
     assert by_week_proj[("2023-W02", "Learning to Code")] == 8.0
 
 

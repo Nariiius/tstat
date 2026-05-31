@@ -51,13 +51,13 @@ class TestPeriodController:
         pc.zoom_out()
         assert pc.scale == 30
         pc.zoom_out()
-        assert pc.scale == 60
+        assert pc.scale == 90
         pc.zoom_out()
-        assert pc.scale == 90
+        assert pc.scale == 365
         pc.zoom_out()  # at max, no-op
-        assert pc.scale == 90
+        assert pc.scale == 365
         pc.zoom_in()
-        assert pc.scale == 60
+        assert pc.scale == 90
         pc.zoom_in()
         pc.zoom_in()
         assert pc.scale == 7
@@ -80,7 +80,7 @@ class TestPeriodController:
         pc = PeriodController()
         pc.zoom_out()
         pc.zoom_out()
-        assert pc.scale == 60
+        assert pc.scale == 90
         pc.mode = PeriodMode.WEEK
         assert pc.scale == 4  # reset
         assert pc.scale_index == 0
@@ -110,6 +110,28 @@ class TestPeriodController:
         pc.set_from_week(target)
         assert pc.mode == PeriodMode.WEEK
         assert pc.scale == 4  # reset
+
+    def test_month_mode(self):
+        pc = PeriodController()
+        pc.mode = PeriodMode.MONTH
+        assert pc.mode == PeriodMode.MONTH
+        assert pc.scale == 3
+        assert pc.scale_label == "3m"
+        pc.zoom_out()
+        assert pc.scale == 6
+        assert pc.scale_label == "6m"
+        pc.zoom_out()
+        assert pc.scale == 12
+        assert pc.scale_label == "12m"
+
+    def test_set_scale(self):
+        pc = PeriodController()
+        pc.set_scale(90)
+        assert pc.scale == 90
+        pc.set_scale(7)
+        assert pc.scale == 7
+        pc.set_scale(999)  # invalid, no-op
+        assert pc.scale == 7
 
     def test_day_period_labels(self):
         pc = PeriodController()
@@ -210,3 +232,42 @@ class TestDailyDataForRange:
         # net = earned - tracked_neg - logged_neg + logged_pos
         expected = d["positive"] - d["negative"]
         assert d["net"] == pytest.approx(expected, rel=1e-2)
+
+
+class TestGraphScalingAndTicks:
+    """Tests for nice yticks and cumulative average logic."""
+
+    def test_nice_yticks_positive_free_floating(self):
+        from toggl.graph import _nice_yticks
+        ymin, ymax, ticks = _nice_yticks(12.5, 45.2)
+        # Should start <= 12.5 and end >= 45.2
+        assert ymin <= 12.5
+        assert ymax >= 45.2
+        # Ticks should be evenly spaced and nice integers/decimals
+        assert len(ticks) >= 3
+        for i in range(len(ticks) - 1):
+            assert pytest.approx(ticks[i+1] - ticks[i]) == ticks[1] - ticks[0]
+
+    def test_nice_yticks_negative_to_positive(self):
+        from toggl.graph import _nice_yticks
+        ymin, ymax, ticks = _nice_yticks(-796, 69)
+        assert ymin <= -796
+        assert ymax >= 69
+        assert len(ticks) >= 3
+        # Should include nice round intervals (like multiples of 100 or 200)
+        assert ticks[1] - ticks[0] in [100, 200, 250, 500]
+
+    def test_nice_yticks_degenerate(self):
+        from toggl.graph import _nice_yticks
+        ymin, ymax, ticks = _nice_yticks(0.0, 0.0)
+        assert ymin < ymax
+        assert len(ticks) >= 3
+        assert 0.0 in ticks
+
+    def test_nice_yticks_degenerate_nonzero(self):
+        from toggl.graph import _nice_yticks
+        ymin, ymax, ticks = _nice_yticks(10.0, 10.0)
+        assert ymin < 10.0
+        assert ymax > 10.0
+        assert len(ticks) >= 3
+

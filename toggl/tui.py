@@ -868,12 +868,13 @@ class TogglTUI(App):
     }
 
     #overview-insights {
-        height: auto;
+        height: 1fr;
         min-height: 5;
         border: round #3d4f63;
         padding: 0 1;
         background: #0b1016;
         text-align: center;
+        content-align: center middle;
     }
     #overview-insights:focus {
         border: round #63f3ff;
@@ -914,16 +915,13 @@ class TogglTUI(App):
     VIEWS = [
         "Overview",
         "Command",
-        "Day",
-        "Week",
-        "Month",
         "Sync/Quota",
     ]
 
     def __init__(self):
         super().__init__()
         self._initialized = False
-        self.active_view_index = 2  # Day view is the default landing view
+        self.active_view_index = 0  # Overview view is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self._table_resize_timer = None
         self._data_cache: DataCache | None = None
@@ -963,23 +961,6 @@ class TogglTUI(App):
                                         yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
                     with Container(id="command-view", classes="view"):
                         yield CommandTab()
-                    with Container(id="day-view", classes="view -active"):
-                        yield DataTable(
-                            zebra_stripes=False, cursor_type="row", id="day-table"
-                        )
-                    with Container(id="week-view", classes="view"):
-                        yield DataTable(
-                            zebra_stripes=False, cursor_type="row", id="week-table"
-                        )
-                        yield DataTable(
-                            zebra_stripes=False,
-                            cursor_type="row",
-                            id="week-category-table",
-                        )
-                    with Container(id="month-view", classes="view"):
-                        yield DataTable(
-                            zebra_stripes=False, cursor_type="row", id="month-table"
-                        )
                     with Container(id="sync-view", classes="view"):
                         yield DataTable(
                             zebra_stripes=False, cursor_type="row", id="sync-table"
@@ -1019,12 +1000,6 @@ class TogglTUI(App):
             self.notify(message or "Auto-refresh failed", severity="warning")
 
     def _setup_tables(self):
-        week_table = self.query_one("#week-table", DataTable)
-        week_table.add_columns("Day", "Date", "Hours", "Earned", "Pos", "Negs", "Net")
-
-        week_category_table = self.query_one("#week-category-table", DataTable)
-        week_category_table.add_columns("Category", "Hours", "Rate", "Points")
-
         overview_recovery = self.query_one("#overview-recovery-table", DataTable)
         overview_recovery.add_columns("Category", "Rate", "Hours Needed")
         for col in overview_recovery.columns.values():
@@ -1044,17 +1019,10 @@ class TogglTUI(App):
 
         self.query_one("#overview-insights", Static).can_focus = True
 
-        day_table = self.query_one("#day-table", DataTable)
-        day_table.add_columns("Category", "Hours", "Rate", "Points")
-
         sync_table = self.query_one("#sync-table", DataTable)
         sync_table.add_columns("Metric", "Value")
 
-        month_table = self.query_one("#month-table", DataTable)
-        month_table.add_columns("Month", "Hours", "Net")
-
         for table_id in [
-            "#day-table", "#week-table", "#month-table",
             "#sync-table",
             "#overview-recovery-table", "#overview-categories-table",
             "#overview-recent-log-table",
@@ -1081,10 +1049,7 @@ class TogglTUI(App):
     _VIEW_REFRESH_MAP = {
         0: "refresh_overview_view",
         1: "refresh_command_view",
-        2: "refresh_day_view",
-        3: "refresh_week_view",
-        4: "refresh_month_view",
-        5: "refresh_sync_view",
+        2: "refresh_sync_view",
     }
 
     def _refresh_view_by_index(self, index):
@@ -1117,9 +1082,6 @@ class TogglTUI(App):
         view_ids = [
             "#overview-view",
             "#command-view",
-            "#day-view",
-            "#week-view",
-            "#month-view",
             "#sync-view",
         ]
         for index, view_id in enumerate(view_ids):
@@ -1130,10 +1092,7 @@ class TogglTUI(App):
         focus_targets = {
             0: "#overview-categories-table",
             1: "#command-container",
-            2: "#day-table",
-            3: "#week-table",
-            4: "#month-table",
-            5: "#sync-table",
+            2: "#sync-table",
         }
         selector = focus_targets.get(self.active_view_index)
         if selector:
