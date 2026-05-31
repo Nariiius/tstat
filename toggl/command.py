@@ -4,17 +4,19 @@ CalendarWidget: month-grid calendar sidebar (adapted from Bagels' DateMode).
   - Day cells are colored green/red based on net daily points.
 CommandTab: main container with top bar, graph, calendar, and mode selector.
   - Trajectory mode renders cumulative daily net (running total).
+  - Category breakdown table below the graph (aggregated across visible range).
 """
 
 from __future__ import annotations
 
 from datetime import date, timedelta
 
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import Click
-from textual.widgets import Button, Label, Static
+from textual.widgets import Button, DataTable, Label, Static
 
 from toggl.graph import GraphWidget
 from toggl.period import PeriodController, PeriodMode
@@ -25,9 +27,9 @@ from toggl.period import PeriodController, PeriodMode
 def _net_color(value: float) -> str:
     """Return a Rich color tag for a net value."""
     if value > 0:
-        return "#37d994"     # green
+        return "#37d994"
     if value < 0:
-        return "#ff5f5f"     # red
+        return "#ff5f5f"
     return ""
 
 
@@ -41,15 +43,11 @@ def _label_for_day(
     net: float,
 ) -> str:
     """Return Rich markup for a calendar day cell."""
-    # Determine base color from net value
     bg = _net_color(net)
     label = f"{d.day:>2}"
-
     if bg:
-        # Color the number: green for positive net, red for negative
         label = f"[{bg}]{label}[/]"
 
-    # Apply highlight overlays
     if d == anchor and d == today:
         label = f"[bold #e2b714 on #1e2a36]{label}[/]"
     elif d == today:
@@ -60,7 +58,6 @@ def _label_for_day(
         label = f"[#63f3ff]{label}[/]"
     elif d.month != display_month or d.year != display_year:
         label = f"[dim #4a5568]{label}[/]"
-
     return label
 
 
@@ -82,8 +79,8 @@ class CalendarWidget(Static):
 
     DEFAULT_CSS = """
     CalendarWidget {
-        width: 17;
-        min-width: 17;
+        width: 24;
+        min-width: 20;
         height: 1fr;
         border: round #3d4f63;
         background: #0b1016;
@@ -101,7 +98,7 @@ class CalendarWidget(Static):
     #cal-nav > Button {
         background: transparent;
         border: none;
-        min-width: 4;
+        min-width: 5;
         color: #8d98a7;
     }
     #cal-nav > Button:hover {
@@ -122,7 +119,7 @@ class CalendarWidget(Static):
         layout: horizontal;
     }
     .cal-row > Label {
-        width: 2;
+        width: 3;
         text-align: center;
         padding: 0;
     }
@@ -143,11 +140,10 @@ class CalendarWidget(Static):
         self._day_nets: dict[str, float] = {}
 
     def set_day_net_values(self, day_nets: dict[str, float]):
-        """Store daily net values for calendar coloring."""
         self._day_nets = day_nets
 
     def compose(self) -> ComposeResult:
-        day_names = ["M", "T", "W", "T", "F", "S", "S"]
+        day_names = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
         with Container(id="cal-nav"):
             yield Button("<<", id="cal-prev-month")
             yield Label("", id="cal-month-label")
@@ -163,7 +159,6 @@ class CalendarWidget(Static):
                         yield Label("", id=f"cal-day-{cell_idx}", classes="cal-day")
 
     def rebuild(self):
-        """Update calendar to show the month around the graph's anchor date."""
         pc = self._command.period
         anchor = pc.get_anchor_date()
         self._display_year = anchor.year
@@ -246,20 +241,20 @@ class CommandTab(Container):
     """Main Command tab container.
 
     Layout:
-      ┌─ Top bar ───────────────────────────────────────────────────────────┐
-      │  <<<  [period]  >>>   Day  [+] 7d [-]                              │
-      ├─ Summary ───────────────────────────────────────────────────────────┤
-      │  Net: +214   Best: +72   Worst: -95   Avg: +31                      │
-      ├─ 82% Graph ──────────────────────────┬─ 18% Calendar ───────────────┤
-      │                                      │                              │
-      ├─ Mode selector ──────────────────────┴─────────────────────────────┤
-      │  Trajectory | Positive | Negative | Logged Pos | Logged Neg          │
+      Top bar: nav arrows + period label + Day/Week toggle + zoom
+      Summary: Net / Best / Worst / Avg
+      Main area:
+        Left: Graph (fills space) + Category breakdown table (below)
+        Right: Calendar (24 cols)
+      Bottom bar: graph mode selector
     """
 
     DEFAULT_CSS = """
     CommandTab {
         height: 1fr;
     }
+
+    /* ── Top bar ───────────────────────────────────────── */
     #cmd-top-bar {
         height: auto;
         layout: horizontal;
@@ -289,6 +284,7 @@ class CommandTab(Container):
         text-style: bold;
     }
 
+    /* ── Summary ───────────────────────────────────────── */
     #cmd-summary {
         height: auto;
         text-align: center;
@@ -296,20 +292,68 @@ class CommandTab(Container):
         margin: 0 1;
     }
 
+    /* ── Main area ─────────────────────────────────────── */
     #cmd-main {
         height: 1fr;
     }
-    #cmd-graph-wrapper {
+    #cmd-left-stack {
         width: 1fr;
         height: 1fr;
     }
-    #cmd-graph {
+
+    /* Graph wrapper — provides the border around the plot */
+    #cmd-graph-wrapper {
+        height: 1fr;
         border: round #3d4f63;
     }
-    #cmd-graph:focus, #cmd-graph:focus-within {
+    #cmd-graph-wrapper:focus,
+    #cmd-graph-wrapper:focus-within {
         border: round #63f3ff;
     }
 
+    /* ── Category table (below graph) ──────────────────── */
+    #cmd-category-table {
+        height: auto;
+        max-height: 12;
+        border: round #3d4f63;
+        background: #0b1016;
+    }
+    #cmd-category-table:focus,
+    #cmd-category-table:focus-within {
+        border: round #63f3ff;
+    }
+    #cmd-category-table > .datatable--header {
+        background: #0b1016;
+        color: #63f3ff;
+        text-style: bold;
+    }
+    #cmd-category-table > .datatable--cursor {
+        background: #1e2a36;
+        color: #d7dde8;
+    }
+
+    /* ── Daily breakdown table ──────────────────────────── */
+    #cmd-daily-table {
+        height: auto;
+        max-height: 10;
+        border: round #3d4f63;
+        background: #0b1016;
+    }
+    #cmd-daily-table:focus,
+    #cmd-daily-table:focus-within {
+        border: round #63f3ff;
+    }
+    #cmd-daily-table > .datatable--header {
+        background: #0b1016;
+        color: #63f3ff;
+        text-style: bold;
+    }
+    #cmd-daily-table > .datatable--cursor {
+        background: #1e2a36;
+        color: #d7dde8;
+    }
+
+    /* ── Bottom bar ────────────────────────────────────── */
     #cmd-bottom-bar {
         height: auto;
         layout: horizontal;
@@ -358,10 +402,21 @@ class CommandTab(Container):
         # ── Summary label ──
         yield Label("", id="cmd-summary")
 
-        # ── Graph + Calendar ──
+        # ── Main area: left stack (graph + table) | calendar ──
         with Horizontal(id="cmd-main"):
-            with Container(id="cmd-graph-wrapper"):
-                yield GraphWidget(id="cmd-graph")
+            with Container(id="cmd-left-stack"):
+                with Container(id="cmd-graph-wrapper"):
+                    yield GraphWidget(id="cmd-graph")
+                yield DataTable(
+                    zebra_stripes=False,
+                    cursor_type="row",
+                    id="cmd-category-table",
+                )
+                yield DataTable(
+                    zebra_stripes=False,
+                    cursor_type="row",
+                    id="cmd-daily-table",
+                )
             yield CalendarWidget(self)
 
         # ── Bottom bar ──
@@ -373,19 +428,29 @@ class CommandTab(Container):
                     yield Label("|")
 
     def on_mount(self):
+        # Category table
+        table = self.query_one("#cmd-category-table", DataTable)
+        table.add_columns("Category", "Hours", "Rate", "Points")
+        table.styles.min_height = 1
+        table.show_cursor = True
+        # Daily breakdown table
+        daily = self.query_one("#cmd-daily-table", DataTable)
+        daily.add_columns("Day", "Date", "Hours", "Earned", "Pos", "Negs", "Net")
+        daily.styles.min_height = 1
+        daily.show_cursor = True
         self.refresh_all()
 
     # ── Refresh ──────────────────────────────────────────────────────
 
     def refresh_all(self):
-        """Refresh the graph, calendar, controls, and summary."""
+        """Refresh the graph, calendar, category table, controls, and summary."""
         start, end = self.period.get_visible_range()
 
         from toggl.cache import DataCache
         cache = DataCache.load()
         daily_data = cache.get_daily_data_for_range(start, end)
 
-        # Extract raw daily values
+        # ── Graph data ──────────────────────────────────────────────
         mode_field_map = {
             "trajectory": "net",
             "positive": "positive",
@@ -397,7 +462,6 @@ class CommandTab(Container):
         dates = [d["date"] for d in daily_data]
         raw_values = [d[field] for d in daily_data]
 
-        # ── Trajectory mode: render cumulative (running total) ────────
         if self._current_graph_mode == "trajectory":
             values = []
             cum = 0.0
@@ -407,20 +471,136 @@ class CommandTab(Container):
         else:
             values = raw_values
 
-        # Update graph
         graph = self.query_one("#cmd-graph", GraphWidget)
         graph.set_data(dates, values)
         graph.set_mode(self._current_graph_mode)
         graph.refresh()
 
-        # Update calendar with day net values for coloring
+        # ── Calendar ────────────────────────────────────────────────
         net_map = {d["date"]: d["net"] for d in daily_data}
         cal = self.query_one(CalendarWidget)
         cal.set_day_net_values(net_map)
         cal.rebuild()
 
-        # Update summary
-        nonzero = [v for v in values if v != 0]
+        # ── Category breakdown table ────────────────────────────────
+        self._refresh_category_table(cache, start, end)
+
+        # ── Daily breakdown table ───────────────────────────────────
+        self._refresh_daily_table(daily_data)
+
+        # ── Summary ─────────────────────────────────────────────────
+        self._update_summary(raw_values)
+
+        # ── Controls ────────────────────────────────────────────────
+        self._update_controls()
+
+    def _refresh_category_table(self, cache, start, end):
+        """Populate the category breakdown table below the graph."""
+        import toggl.tui as _tui  # lazy import to avoid circular dep
+
+        agg = cache.get_range_aggregate(start, end)
+        table = self.query_one("#cmd-category-table", DataTable)
+        table.clear(columns=False)
+
+        rows = []
+        for section_name in ("positive", "negative", "unscored"):
+            section_rows = agg[section_name]
+            section_key = section_name.upper()
+            section_color = _tui.SECTION_COLORS.get(section_key, "")
+            if section_rows:
+                rows.append(
+                    (_tui._fmt_section_header(f"• {section_key}"),
+                     Text(""), Text(""), Text(""))
+                )
+            rows.extend(
+                _tui._render_category_section(
+                    section_rows, _tui._fmt_project_tree, _tui._fmt_tree_cells,
+                    section_color=section_color,
+                )
+            )
+
+        if agg["positive_results"]:
+            rows.append((_tui._fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(agg["positive_results"]):
+                is_last = (i == len(agg["positive_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                rows.append((
+                    Text.assemble(
+                        (prefix, _tui.SECTION_COLORS["LOGGED POSITIVE"]),
+                        (name, ""),
+                    ),
+                    Text(f"×{count}"),
+                    _tui.fmt_pts_rich(per_event),
+                    _tui.fmt_pts_rich(total),
+                ))
+
+        if agg["negative_results"]:
+            rows.append((_tui._fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(agg["negative_results"]):
+                is_last = (i == len(agg["negative_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                rows.append((
+                    Text.assemble(
+                        (prefix, _tui.SECTION_COLORS["LOGGED NEGATIVE"]),
+                        (name, ""),
+                    ),
+                    Text(f"×{count}"),
+                    _tui.fmt_pts_rich(per_event),
+                    _tui.fmt_pts_rich(total),
+                ))
+
+        table.add_rows(rows)
+
+    def _refresh_daily_table(self, daily_data):
+        """Populate the daily breakdown table (like Week view's per-day table)."""
+        import toggl.tui as _tui
+
+        table = self.query_one("#cmd-daily-table", DataTable)
+        table.clear(columns=False)
+
+        for day in daily_data:
+            d_str = day["date"]
+            try:
+                d = date.fromisoformat(d_str)
+            except (ValueError, TypeError):
+                continue
+            day_name = d.strftime("%a")
+            date_short = d.strftime("%d %b")
+            hours = day["total_hours"]
+            earned = day["earned"]
+            pos_total = day["positive"]
+            neg_total = day["negative"]
+            net = day["net"]
+            has_data = day["has_data"]
+
+            is_today = d == date.today()
+
+            if is_today:
+                day_cell = f"[bold #e2b714]{day_name} ◀[/]"
+            elif not has_data:
+                day_cell = f"[dim]{day_name}[/]"
+            else:
+                day_cell = day_name
+
+            hour_text = "—" if hours == 0 else f"{hours:.1f}h"
+            earned_text = "—" if earned == 0 and not has_data else _tui.format_signed_rich(earned)
+            pos_text = "—" if pos_total == 0 else f"[#37d994]+{pos_total:.1f}[/]"
+            neg_text = "—" if neg_total == 0 else f"[#ff5f5f]-{neg_total:.1f}[/]"
+
+            from rich.text import Text as RichText
+            table.add_row(
+                RichText.from_markup(day_cell),
+                date_short,
+                hour_text,
+                RichText.from_markup(earned_text) if isinstance(earned_text, str) else earned_text,
+                RichText.from_markup(pos_text),
+                RichText.from_markup(neg_text),
+                RichText.from_markup(_tui.format_signed_rich(net)),
+                key=d_str,
+            )
+
+    def _update_summary(self, raw_values):
+        nonzero = [v for v in raw_values if v != 0]
         if nonzero:
             total = round(sum(raw_values), 1)
             best = max(nonzero)
@@ -437,12 +617,7 @@ class CommandTab(Container):
                 f"[#8d98a7]Avg:[/] {_fs(avg)}"
             )
         else:
-            self.query_one("#cmd-summary", Label).update(
-                "[dim]No data in range[/]"
-            )
-
-        # Update controls
-        self._update_controls()
+            self.query_one("#cmd-summary", Label).update("[dim]No data in range[/]")
 
     def _update_controls(self):
         self.query_one("#cmd-period-label", Label).update(

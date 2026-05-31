@@ -559,13 +559,64 @@ class DataCache:
                 "net": net if has_data else 0.0,
                 "positive": positive,
                 "negative": negative,
+                "earned": round(earned, 1),
+                "tracked_neg": round(tracked_neg, 1),
                 "logged_pos": round(logged_pos, 1),
                 "logged_neg": round(logged_neg, 1),
+                "total_hours": round(sum(projs.values()), 1) if projs else 0.0,
                 "has_data": has_data,
             })
             d += timedelta(days=1)
 
         return results
+
+    def get_range_aggregate(self, start_date: date, end_date: date):
+        """Aggregate projects and logged activities across a date range.
+
+        Returns (project_results, negative_results, positive_results)
+        where each is structured identically to get_report_sections output.
+        """
+        # Aggregate project hours
+        projects: dict[str, float] = {}
+        d = start_date
+        while d <= end_date:
+            d_str = d.strftime("%Y-%m-%d")
+            for proj, hrs in self.daily_data.get(d_str, {}).items():
+                projects[proj] = projects.get(proj, 0.0) + hrs
+            d += timedelta(days=1)
+
+        results = calculate(projects)
+
+        # Aggregate logged negatives
+        neg_entries = []
+        for d_str, entries in self.negatives_raw.items():
+            try:
+                dd = date.fromisoformat(d_str)
+            except (ValueError, TypeError):
+                continue
+            if start_date <= dd <= end_date:
+                neg_entries.extend(entries)
+        negative_results = calculate_logged_activity_totals(neg_entries, NEGATIVES, sign=-1)
+
+        # Aggregate logged positives
+        pos_entries = []
+        for d_str, entries in self.positives_raw.items():
+            try:
+                dd = date.fromisoformat(d_str)
+            except (ValueError, TypeError):
+                continue
+            if start_date <= dd <= end_date:
+                pos_entries.extend(entries)
+        positive_results = calculate_logged_activity_totals(pos_entries, POSITIVES)
+
+        return {
+            "results": results,
+            "positive": [r for r in results if r[3] is not None and r[3] >= 0],
+            "negative": [r for r in results if r[3] is not None and r[3] < 0],
+            "unscored": [r for r in results if r[3] is None],
+            "positive_results": positive_results,
+            "negative_results": negative_results,
+        }
 
     def get_recovery_rows(self, label, context_type):
         import math
