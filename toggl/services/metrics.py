@@ -72,8 +72,10 @@ class MetricsService:
                 "earned": metrics["earned"],
                 "tracked_negative": metrics["tracked_negative"],
                 "logged_positive": metrics["logged_positive"],
+                "positive": round(metrics["earned"] + metrics["logged_positive"], 1),
                 "positive_total": round(metrics["earned"] + metrics["logged_positive"], 1),
                 "logged_negative": metrics["logged_negative"],
+                "negative": round(metrics["tracked_negative"] + metrics["logged_negative"], 1),
                 "negative_total": round(metrics["tracked_negative"] + metrics["logged_negative"], 1),
                 "goal": self._get_daily_target(),
                 "delta": metrics["delta"],
@@ -169,7 +171,7 @@ class MetricsService:
                 current_group["positive"] += day["positive"]
                 current_group["negative"] += day["negative"]
                 current_group["net"] += day["net"]
-                if day["has_data"]:
+                if day["has_activity"]:
                     current_group["has_data"] = True
                 if d == date.today():
                     current_group["contains_today"] = True
@@ -196,7 +198,7 @@ class MetricsService:
                 current_group["positive"] += day["positive"]
                 current_group["negative"] += day["negative"]
                 current_group["net"] += day["net"]
-                if day["has_data"]:
+                if day["has_activity"]:
                     current_group["has_data"] = True
                 if d == date.today():
                     current_group["contains_today"] = True
@@ -212,7 +214,7 @@ class MetricsService:
                     "positive": day["positive"],
                     "negative": day["negative"],
                     "net": day["net"],
-                    "has_data": day["has_data"],
+                    "has_data": day["has_activity"],
                     "contains_today": d == date.today(),
                 })
 

@@ -54,8 +54,10 @@ class WeekDashboardRow:
     earned: float
     tracked_negative: float
     logged_positive: float
+    positive: float                  # earned + logged_positive (alias)
     positive_total: float            # earned + logged_positive
     logged_negative: float
+    negative: float                  # tracked_negative + logged_negative (alias)
     negative_total: float            # tracked_negative + logged_negative
     goal: float                      # daily_target
     delta: float                     # net - goal
