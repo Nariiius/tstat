@@ -15,14 +15,13 @@ from textual.widgets import Button, DataTable, Static
 from toggl.api import API_RUN_STATS, _format_reset_window
 from toggl.formatters import (
     _fmt_recovery_cells,
-    _fmt_section_header,
     _fmt_tree_cells,
     _fmt_project_tree,
     _render_category_section,
-    _render_logged_results,
     fmt_pts_rich,
     format_signed_rich,
     SECTION_COLORS,
+    build_category_rows,
 )
 from toggl.services.metrics import MetricsService
 
@@ -308,24 +307,7 @@ class OverviewPanel(Container):
         report = MetricsService(cache).get_report_sections("ALL_TIME", "ALL")
         cat_table = self.query_one("#overview-categories-table", DataTable)
         cat_table.clear(columns=False)
-        rows = []
-        for section_name in ("positive", "negative", "unscored"):
-            section_rows = report[section_name]
-            if section_rows:
-                rows.append(
-                    (_fmt_section_header(f"• {section_name.upper()}"),
-                     Text(""), Text(""), Text(""))
-                )
-            rows.extend(
-                _render_category_section(
-                    section_rows, _fmt_project_tree, _fmt_tree_cells,
-                    section_color=SECTION_COLORS.get(section_name.upper(), ""),
-                )
-            )
-        if report["positive_results"]:
-            _render_logged_results(rows, report["positive_results"], "• LOGGED POSITIVE", SECTION_COLORS["LOGGED POSITIVE"])
-        if report["negative_results"]:
-            _render_logged_results(rows, report["negative_results"], "• LOGGED NEGATIVE", SECTION_COLORS["LOGGED NEGATIVE"])
+        rows = build_category_rows(report)
         self._add_rows_mark_sections(cat_table, rows)
         total_hours = report["total_hours"]
         th_h = int(total_hours)

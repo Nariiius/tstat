@@ -27,7 +27,7 @@ from toggl.services.metrics import MetricsService
 
 # ── Color helpers ────────────────────────────────────────────────────
 
-from toggl.formatters import _net_color, _label_for_day, format_signed_rich
+from toggl.formatters import _net_color, _label_for_day, format_signed_rich, build_category_rows
 
 def _get_anchor_week_dates(anchor: date) -> set[date]:
     sunday = anchor - timedelta(days=(anchor.weekday() + 1) % 7)
@@ -472,13 +472,6 @@ class CommandTab(Container):
     # ── Category table ───────────────────────────────────────────────
 
     def _refresh_category_table(self, cache: DataCache, start: date, end: date) -> None:
-        from toggl.formatters import (
-            _fmt_section_header, _render_category_section,
-            _fmt_project_tree, _fmt_tree_cells,
-            _render_logged_results,
-            SECTION_COLORS,
-        )
-
         agg = cache.get_range_aggregate(start, end)
         table = self.query_one("#cmd-category-table", DataTable)
         table.clear(columns=False)
@@ -499,24 +492,7 @@ class CommandTab(Container):
         subtitle = period_nets.get("subtitle", "Insights coming soon")
         table.border_subtitle = f"[#8d98a7]{subtitle}[/]"
 
-        rows = []
-        for section_name in ("positive", "negative", "unscored"):
-            section_rows = agg[section_name]
-            if section_rows:
-                rows.append((_fmt_section_header(f"• {section_name.upper()}"),
-                             Text(""), Text(""), Text("")))
-            rows.extend(
-                _render_category_section(
-                    section_rows, _fmt_project_tree, _fmt_tree_cells,
-                    section_color=SECTION_COLORS.get(section_name.upper(), ""),
-                )
-            )
-
-        if agg["positive_results"]:
-            _render_logged_results(rows, agg["positive_results"], "• LOGGED POSITIVE", SECTION_COLORS["LOGGED POSITIVE"])
-        if agg["negative_results"]:
-            _render_logged_results(rows, agg["negative_results"], "• LOGGED NEGATIVE", SECTION_COLORS["LOGGED NEGATIVE"])
-
+        rows = build_category_rows(agg)
         table.add_rows(rows)
 
     # ── Daily breakdown table ────────────────────────────────────────

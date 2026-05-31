@@ -20,6 +20,7 @@ from toggl.formatters.sections import (
     _render_category_section,
     _render_logged_results,
     SECTION_COLORS,
+    build_category_rows,
 )
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "format_signed_rich", "_spark_net_rich", "fmt_rate", "fmt_pts", "fmt_pts_rich",
     "_fmt_project_name", "_fmt_project_name_by_rate", "_fmt_project_tree",
     "_fmt_tree_cells", "_fmt_recovery_cells",
-    "_fmt_section_header", "_render_category_section", "_render_logged_results", "SECTION_COLORS",
+    "_fmt_section_header", "_render_category_section", "_render_logged_results",
+    "SECTION_COLORS", "build_category_rows",
 ]

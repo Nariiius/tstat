@@ -1,11 +1,13 @@
 """Section-rendering utilities for TUI category tables."""
 
+from __future__ import annotations
+
 from typing import Any, Callable
 
 from rich.text import Text
 
 from toggl.config import CATEGORY_REGISTRY
-from toggl.formatters.cells import fmt_pts_rich
+from toggl.formatters.cells import _fmt_project_tree, _fmt_tree_cells, fmt_pts_rich
 
 
 # ──────────────────────────────────────────────
@@ -99,6 +101,73 @@ def _render_logged_results(
             Text.assemble((prefix, section_color), (name, "")),
             Text(f"\u00d7{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total),
         ))
+
+
+# ──────────────────────────────────────────────
+# SHARED CATEGORY-TABLE BUILDER
+# ──────────────────────────────────────────────
+
+
+_SCORED_SECTION_NAMES = ("positive", "negative", "unscored")
+
+
+def build_category_rows(
+    section_data: dict[str, Any],
+    fmt_name_fn: Callable = _fmt_project_tree,
+    fmt_cells_fn: Callable = _fmt_tree_cells,
+) -> list[Any]:
+    """Build a flat row list for a category DataTable.
+
+    Iterates over the three scored sections (positive, negative, unscored),
+    adding a coloured section header and rendered tree rows for each.
+    Then appends logged-positive and logged-negative sections if present.
+
+    Parameters
+    ----------
+    section_data:
+        Dict with keys ``positive``, ``negative``, ``unscored`` (each a list of
+        ``(name, hours, rate, pts)`` tuples) and optionally ``positive_results`` /
+        ``negative_results`` (each a list of ``(name, count, per_event, total)``).
+    fmt_name_fn:
+        Callable ``(name, rate) -> Text`` for the project-name column.
+    fmt_cells_fn:
+        Callable ``(name, hours, rate, pts, rate_color, dim) -> tuple`` for
+        full-row cell formatting.
+
+    Returns
+    -------
+    list[Any]
+        Flat list of 4-tuples ready for ``DataTable.add_rows()``.
+    """
+    rows: list[Any] = []
+    for section_name in _SCORED_SECTION_NAMES:
+        section_rows = section_data.get(section_name, [])
+        if section_rows:
+            rows.append(
+                (_fmt_section_header(f"\u2022 {section_name.upper()}"),
+                 Text(""), Text(""), Text(""))
+            )
+        rows.extend(
+            _render_category_section(
+                section_rows, fmt_name_fn, fmt_cells_fn,
+                section_color=SECTION_COLORS.get(section_name.upper(), ""),
+            )
+        )
+
+    if section_data.get("positive_results"):
+        _render_logged_results(
+            rows, section_data["positive_results"],
+            "\u2022 LOGGED POSITIVE",
+            SECTION_COLORS["LOGGED POSITIVE"],
+        )
+    if section_data.get("negative_results"):
+        _render_logged_results(
+            rows, section_data["negative_results"],
+            "\u2022 LOGGED NEGATIVE",
+            SECTION_COLORS["LOGGED NEGATIVE"],
+        )
+
+    return rows
 
 
 
