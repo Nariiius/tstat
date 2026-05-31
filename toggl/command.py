@@ -1,10 +1,9 @@
-"""Command tab — trajectory analytics view.
+"""Command tab — trajectory analytics workspace.
 
-CalendarWidget: month-grid calendar sidebar (adapted from Bagels' DateMode).
-  - Day cells are colored green/red based on net daily points.
-CommandTab: main container with top bar, graph, calendar, and mode selector.
-  - Trajectory mode renders cumulative daily net (running total).
-  - Category breakdown table below the graph (aggregated across visible range).
+CalendarWidget: month-grid calendar sidebar with heatmap coloring.
+CommandTab: unified analytics layout.
+  Top section: Graph panel (75%) + Calendar (25%)
+  Bottom section: Category Summary (35%) + Daily Breakdown (65%)
 """
 
 from __future__ import annotations
@@ -22,14 +21,18 @@ from toggl.graph import GraphWidget
 from toggl.period import PeriodController, PeriodMode
 
 
-# ── Color helpers for calendar cells ────────────────────────────────
+# ── Color helpers ────────────────────────────────────────────────────
 
 def _net_color(value: float) -> str:
     """Return a Rich color tag for a net value."""
+    if value >= 30:
+        return "#2ecc71"     # bright green (excellent)
     if value > 0:
-        return "#37d994"
+        return "#37d994"     # green (positive)
+    if value <= -30:
+        return "#ff4444"     # bright red (very negative)
     if value < 0:
-        return "#ff5f5f"
+        return "#ff5f5f"     # red (negative)
     return ""
 
 
@@ -42,7 +45,7 @@ def _label_for_day(
     display_year: int,
     net: float,
 ) -> str:
-    """Return Rich markup for a calendar day cell."""
+    """Return Rich markup for a calendar day cell with heatmap coloring."""
     bg = _net_color(net)
     label = f"{d.day:>2}"
     if bg:
@@ -62,7 +65,6 @@ def _label_for_day(
 
 
 def _get_anchor_week_dates(anchor: date) -> set[date]:
-    """Return all dates in the calendar week containing *anchor*."""
     monday = anchor - timedelta(days=anchor.weekday())
     return {monday + timedelta(days=i) for i in range(7)}
 
@@ -71,16 +73,11 @@ def _get_anchor_week_dates(anchor: date) -> set[date]:
 
 
 class CalendarWidget(Static):
-    """Month-grid calendar sidebar.
-
-    - Day cells colored green/red based on daily net points.
-    - Click navigates graph (Day→day, Week→containing week).
-    """
+    """Month-grid calendar sidebar with net-based heatmap coloring."""
 
     DEFAULT_CSS = """
     CalendarWidget {
-        width: 24;
-        min-width: 20;
+        width: 1fr;
         height: 1fr;
         border: round #3d4f63;
         background: #0b1016;
@@ -168,11 +165,9 @@ class CalendarWidget(Static):
         grid_start = first_day - timedelta(days=first_day.weekday())
 
         today = date.today()
-        anchor_week = _get_anchor_week_dates(anchor) if pc.mode == PeriodMode.WEEK else None
+        anchor_week = _get_anchor_week_dates(anchor) if pc.mode in (PeriodMode.WEEK,) else None
 
-        self.query_one("#cal-month-label", Label).update(
-            first_day.strftime("%B %Y")
-        )
+        self.query_one("#cal-month-label", Label).update(first_day.strftime("%B %Y"))
 
         for i in range(42):
             label = self.query_one(f"#cal-day-{i}", Label)
@@ -229,8 +224,10 @@ class CalendarWidget(Static):
         pc = self._command.period
         if pc.mode == PeriodMode.DAY:
             pc.set_from_day(clicked_date)
-        else:
+        elif pc.mode == PeriodMode.WEEK:
             pc.set_from_week(clicked_date)
+        else:
+            pc.set_from_month(clicked_date)
         self._command.refresh_all()
 
 
@@ -238,15 +235,20 @@ class CalendarWidget(Static):
 
 
 class CommandTab(Container):
-    """Main Command tab container.
+    """Command tab — unified analytics workspace.
 
     Layout:
-      Top bar: nav arrows + period label + Day/Week toggle + zoom
-      Summary: Net / Best / Worst / Avg
-      Main area:
-        Left: Graph (fills space) + Category breakdown table (below)
-        Right: Calendar (24 cols)
-      Bottom bar: graph mode selector
+      ┌───────────────────────────────────┬──────────────┐
+      │ Graph Panel (75%)                 │ Calendar     │
+      │  <<< Today >>>                    │ (25%)        │
+      │  Day Week Month   7d 30d 90d 365d │              │
+      │  Net: x  Best: x  Worst: x  Avg:x │              │
+      │  ┌─ Graph ────────────────────────┤              │
+      │  └────────────────────────────────┤              │
+      │  Traj Pos Neg Log+ Log-            │              │
+      ├───────────────────────────────────┴──────────────┤
+      │ Category Summary (35%)  │ Daily Breakdown (65%)  │
+      └─────────────────────────────────┴────────────────┘
     """
 
     DEFAULT_CSS = """
@@ -254,20 +256,41 @@ class CommandTab(Container):
         height: 1fr;
     }
 
-    /* ── Top bar ───────────────────────────────────────── */
-    #cmd-top-bar {
+    /* ── Top section: graph + calendar ────────────────── */
+    #cmd-top-section {
+        height: 1fr;
+    }
+    #cmd-graph-panel {
+        width: 1fr;
+        height: 1fr;
+        border: round #3d4f63;
+    }
+    #cmd-graph-panel:focus-within {
+        border: round #63f3ff;
+    }
+    #cmd-calendar-col {
+        width: 22;
+        min-width: 20;
+        height: 1fr;
+    }
+
+    /* ── Graph header (3 rows) ────────────────────────── */
+    #cmd-graph-header {
+        height: auto;
+        padding: 0 1;
+    }
+    #cmd-nav-row {
         height: auto;
         layout: horizontal;
         align: center middle;
-        padding: 0 1;
     }
-    #cmd-top-bar > Button {
+    #cmd-nav-row > Button {
         background: transparent;
         border: none;
         min-width: 5;
         color: #8d98a7;
     }
-    #cmd-top-bar > Button:hover {
+    #cmd-nav-row > Button:hover {
         color: #63f3ff;
         background: #1e2a36;
     }
@@ -277,173 +300,196 @@ class CommandTab(Container):
         color: #63f3ff;
         text-style: bold;
     }
-    #cmd-scale-label {
-        min-width: 5;
-        text-align: center;
-        color: #e2b714;
+
+    #cmd-control-row {
+        height: auto;
+        layout: horizontal;
+        align: center middle;
+    }
+    .period-mode-btn, .scale-btn {
+        background: transparent;
+        border: none;
+        padding: 0 1;
+        min-width: 4;
+        color: #8d98a7;
+    }
+    .period-mode-btn:hover, .scale-btn:hover {
+        color: #d7dde8;
+        background: #1e2a36;
+    }
+    .period-mode-btn.selected,     .scale-btn.selected {
+        color: #63f3ff;
         text-style: bold;
     }
-
-    /* ── Summary ───────────────────────────────────────── */
-    #cmd-summary {
-        height: auto;
-        text-align: center;
-        color: #8d98a7;
+    .scale-btn.hidden {
+        display: none;
+    }
+    #cmd-period-sep {
+        color: #3d4f63;
         margin: 0 1;
     }
 
-    /* ── Main area ─────────────────────────────────────── */
-    #cmd-main {
-        height: 1fr;
+    #cmd-stats-row {
+        height: auto;
+        layout: horizontal;
+        align: center middle;
+        color: #8d98a7;
     }
-    #cmd-left-stack {
+    #cmd-stats-label {
         width: 1fr;
+        text-align: center;
+    }
+
+    /* ── Graph area ───────────────────────────────────── */
+    #cmd-graph-area {
         height: 1fr;
     }
 
-    /* Graph wrapper — provides the border around the plot */
-    #cmd-graph-wrapper {
-        height: 1fr;
-        border: round #3d4f63;
-    }
-    #cmd-graph-wrapper:focus,
-    #cmd-graph-wrapper:focus-within {
-        border: round #63f3ff;
-    }
-
-    /* ── Category table (below graph) ──────────────────── */
-    #cmd-category-table {
-        height: auto;
-        max-height: 12;
-        border: round #3d4f63;
-        background: #0b1016;
-    }
-    #cmd-category-table:focus,
-    #cmd-category-table:focus-within {
-        border: round #63f3ff;
-    }
-    #cmd-category-table > .datatable--header {
-        background: #0b1016;
-        color: #63f3ff;
-        text-style: bold;
-    }
-    #cmd-category-table > .datatable--cursor {
-        background: #1e2a36;
-        color: #d7dde8;
-    }
-
-    /* ── Daily breakdown table ──────────────────────────── */
-    #cmd-daily-table {
-        height: auto;
-        max-height: 10;
-        border: round #3d4f63;
-        background: #0b1016;
-    }
-    #cmd-daily-table:focus,
-    #cmd-daily-table:focus-within {
-        border: round #63f3ff;
-    }
-    #cmd-daily-table > .datatable--header {
-        background: #0b1016;
-        color: #63f3ff;
-        text-style: bold;
-    }
-    #cmd-daily-table > .datatable--cursor {
-        background: #1e2a36;
-        color: #d7dde8;
-    }
-
-    /* ── Bottom bar ────────────────────────────────────── */
-    #cmd-bottom-bar {
+    /* ── Graph footer (mode selector) ─────────────────── */
+    #cmd-graph-footer {
         height: auto;
         layout: horizontal;
         align: center middle;
         padding: 0 1;
     }
-    #cmd-bottom-bar > Label {
+    #cmd-graph-footer > Label {
         color: #3d4f63;
     }
-    .mode-btn {
+    .graph-mode-btn {
         background: transparent;
         border: none;
         padding: 0 1;
         color: #8d98a7;
-        min-width: 10;
+        min-width: 8;
     }
-    .mode-btn:hover {
+    .graph-mode-btn:hover {
         color: #d7dde8;
         background: #1e2a36;
     }
-    .mode-btn.selected {
+    .graph-mode-btn.selected {
         color: #63f3ff;
         text-style: bold;
+    }
+
+    /* ── Bottom section: two tables ────────────────────── */
+    #cmd-bottom-section {
+        height: auto;
+        max-height: 16;
+        min-height: 4;
+    }
+    #cmd-category-panel {
+        width: 35%;
+        height: 1fr;
+    }
+    #cmd-daily-panel {
+        width: 1fr;
+        height: 1fr;
+    }
+    #cmd-category-table, #cmd-daily-table {
+        height: 1fr;
+        border: round #3d4f63;
+        background: #0b1016;
+    }
+    #cmd-category-table:focus-within, #cmd-daily-table:focus-within {
+        border: round #63f3ff;
+    }
+    #cmd-category-table > .datatable--header,
+    #cmd-daily-table > .datatable--header {
+        background: #0b1016;
+        color: #63f3ff;
+        text-style: bold;
+    }
+    #cmd-category-table > .datatable--cursor,
+    #cmd-daily-table > .datatable--cursor {
+        background: #1e2a36;
+        color: #d7dde8;
     }
     """
 
     GRAPH_MODES = ["trajectory", "positive", "negative", "logged_pos", "logged_neg"]
-    MODE_LABELS = ["Trajectory", "Positive", "Negative", "Logged Pos", "Logged Neg"]
+    GRAPH_MODE_LABELS = ["Traj", "Pos", "Neg", "Log+", "Log-"]
+
+    PERIOD_MODES = [PeriodMode.DAY, PeriodMode.WEEK, PeriodMode.MONTH]
 
     def __init__(self, *args, **kwargs):
         super().__init__(id="command-container", *args, **kwargs)
         self.period = PeriodController()
         self._current_graph_mode = "trajectory"
 
+    # ── Compose ──────────────────────────────────────────────────────
+
     def compose(self) -> ComposeResult:
-        # ── Top bar ──
-        with Horizontal(id="cmd-top-bar"):
-            yield Button("<<<", id="cmd-prev")
-            yield Label("...", id="cmd-period-label")
-            yield Button(">>>", id="cmd-next")
-            yield Button("Day", id="cmd-mode-toggle")
-            yield Button("+", id="cmd-zoom-in")
-            yield Label("7d", id="cmd-scale-label")
-            yield Button("-", id="cmd-zoom-out")
+        # ── Top section: graph panel + calendar ──
+        with Horizontal(id="cmd-top-section"):
+            with Vertical(id="cmd-graph-panel"):
+                yield from self._compose_graph_header()
+                yield GraphWidget(id="cmd-graph")
+                yield from self._compose_graph_footer()
+            with Container(id="cmd-calendar-col"):
+                yield CalendarWidget(self)
 
-        # ── Summary label ──
-        yield Label("", id="cmd-summary")
-
-        # ── Main area: left stack (graph + table) | calendar ──
-        with Horizontal(id="cmd-main"):
-            with Container(id="cmd-left-stack"):
-                with Container(id="cmd-graph-wrapper"):
-                    yield GraphWidget(id="cmd-graph")
+        # ── Bottom section: category + daily tables ──
+        with Horizontal(id="cmd-bottom-section"):
+            with Container(id="cmd-category-panel"):
                 yield DataTable(
-                    zebra_stripes=False,
-                    cursor_type="row",
+                    zebra_stripes=False, cursor_type="row",
                     id="cmd-category-table",
                 )
+            with Container(id="cmd-daily-panel"):
                 yield DataTable(
-                    zebra_stripes=False,
-                    cursor_type="row",
+                    zebra_stripes=False, cursor_type="row",
                     id="cmd-daily-table",
                 )
-            yield CalendarWidget(self)
 
-        # ── Bottom bar ──
-        with Horizontal(id="cmd-bottom-bar"):
-            for mode, label in zip(self.GRAPH_MODES, self.MODE_LABELS):
-                cls = "mode-btn selected" if mode == self._current_graph_mode else "mode-btn"
-                yield Button(label, id=f"mode-{mode}", classes=cls)
+    def _compose_graph_header(self):
+        """Yield graph panel header (3 rows)."""
+        with Container(id="cmd-graph-header"):
+            # Row 1: navigation
+            with Horizontal(id="cmd-nav-row"):
+                yield Button("<<<", id="cmd-prev")
+                yield Label("...", id="cmd-period-label")
+                yield Button(">>>", id="cmd-next")
+            # Row 2: period modes + scale selector
+            with Horizontal(id="cmd-control-row"):
+                for mode in self.PERIOD_MODES:
+                    cls = "period-mode-btn selected" if mode == self.period.mode else "period-mode-btn"
+                    yield Button(PeriodMode.label(mode), id=f"cmd-period-{mode}", classes=cls)
+                yield Label("|", id="cmd-period-sep")
+                # Pre-create ALL possible scale buttons (show/hide per mode)
+                for scale_val in [7, 30, 90, 365, 4, 13, 26, 52, 3, 6, 12]:
+                    yield Button(str(scale_val), id=f"cmd-scale-{scale_val}", classes="scale-btn hidden")
+            # Row 3: statistics
+            with Horizontal(id="cmd-stats-row"):
+                yield Label("", id="cmd-stats-label")
+
+    def _compose_graph_footer(self):
+        """Yield graph panel footer (mode selector)."""
+        with Horizontal(id="cmd-graph-footer"):
+            for mode, label in zip(self.GRAPH_MODES, self.GRAPH_MODE_LABELS):
+                cls = "graph-mode-btn selected" if mode == self._current_graph_mode else "graph-mode-btn"
+                yield Button(label, id=f"cmd-gmode-{mode}", classes=cls)
                 if mode != self.GRAPH_MODES[-1]:
                     yield Label("|")
 
+    # ── Mount ────────────────────────────────────────────────────────
+
     def on_mount(self):
-        # Category table
-        table = self.query_one("#cmd-category-table", DataTable)
-        table.add_columns("Category", "Hours", "Rate", "Points")
-        table.styles.min_height = 1
-        table.show_cursor = True
-        # Daily breakdown table
+        cat = self.query_one("#cmd-category-table", DataTable)
+        cat.add_columns("Category", "Hours", "Rate", "Points")
+        cat.styles.min_height = 1
+        cat.show_cursor = True
+
         daily = self.query_one("#cmd-daily-table", DataTable)
-        daily.add_columns("Day", "Date", "Hours", "Earned", "Pos", "Negs", "Net")
+        daily.add_columns("Day", "Date", "Hours", "Positive", "Negative", "Net")
         daily.styles.min_height = 1
         daily.show_cursor = True
+
         self.refresh_all()
 
     # ── Refresh ──────────────────────────────────────────────────────
 
     def refresh_all(self):
-        """Refresh the graph, calendar, category table, controls, and summary."""
+        """Single refresh entry point — graph, calendar, tables, stats, controls."""
         start, end = self.period.get_visible_range()
 
         from toggl.cache import DataCache
@@ -482,81 +528,70 @@ class CommandTab(Container):
         cal.set_day_net_values(net_map)
         cal.rebuild()
 
-        # ── Category breakdown table ────────────────────────────────
+        # ── Category table (aggregated over visible range) ──────────
         self._refresh_category_table(cache, start, end)
 
         # ── Daily breakdown table ───────────────────────────────────
         self._refresh_daily_table(daily_data)
 
-        # ── Summary ─────────────────────────────────────────────────
-        self._update_summary(raw_values)
+        # ── Statistics ──────────────────────────────────────────────
+        self._update_stats(raw_values)
 
-        # ── Controls ────────────────────────────────────────────────
+        # ── Controls (rebuild scale buttons on mode change) ──────────
         self._update_controls()
 
+    # ── Category table ───────────────────────────────────────────────
+
     def _refresh_category_table(self, cache, start, end):
-        """Populate the category breakdown table below the graph."""
-        import toggl.tui as _tui  # lazy import to avoid circular dep
+        import toggl.tui as _tui
 
         agg = cache.get_range_aggregate(start, end)
         table = self.query_one("#cmd-category-table", DataTable)
         table.clear(columns=False)
+        table.border_title = "[b][#63f3ff]Category Summary[/][/]"
 
         rows = []
         for section_name in ("positive", "negative", "unscored"):
             section_rows = agg[section_name]
-            section_key = section_name.upper()
-            section_color = _tui.SECTION_COLORS.get(section_key, "")
             if section_rows:
-                rows.append(
-                    (_tui._fmt_section_header(f"• {section_key}"),
-                     Text(""), Text(""), Text(""))
-                )
+                rows.append((_tui._fmt_section_header(f"• {section_name.upper()}"),
+                             Text(""), Text(""), Text("")))
             rows.extend(
                 _tui._render_category_section(
                     section_rows, _tui._fmt_project_tree, _tui._fmt_tree_cells,
-                    section_color=section_color,
+                    section_color=_tui.SECTION_COLORS.get(section_name.upper(), ""),
                 )
             )
 
         if agg["positive_results"]:
             rows.append((_tui._fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
             for i, (name, count, per_event, total) in enumerate(agg["positive_results"]):
-                is_last = (i == len(agg["positive_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
+                prefix = "└ " if i == len(agg["positive_results"]) - 1 else "├ "
                 rows.append((
-                    Text.assemble(
-                        (prefix, _tui.SECTION_COLORS["LOGGED POSITIVE"]),
-                        (name, ""),
-                    ),
-                    Text(f"×{count}"),
-                    _tui.fmt_pts_rich(per_event),
-                    _tui.fmt_pts_rich(total),
+                    Text.assemble((prefix, _tui.SECTION_COLORS["LOGGED POSITIVE"]), (name, "")),
+                    Text(f"×{count}"), _tui.fmt_pts_rich(per_event), _tui.fmt_pts_rich(total),
                 ))
 
         if agg["negative_results"]:
             rows.append((_tui._fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
             for i, (name, count, per_event, total) in enumerate(agg["negative_results"]):
-                is_last = (i == len(agg["negative_results"]) - 1)
-                prefix = "└ " if is_last else "├ "
+                prefix = "└ " if i == len(agg["negative_results"]) - 1 else "├ "
                 rows.append((
-                    Text.assemble(
-                        (prefix, _tui.SECTION_COLORS["LOGGED NEGATIVE"]),
-                        (name, ""),
-                    ),
-                    Text(f"×{count}"),
-                    _tui.fmt_pts_rich(per_event),
-                    _tui.fmt_pts_rich(total),
+                    Text.assemble((prefix, _tui.SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")),
+                    Text(f"×{count}"), _tui.fmt_pts_rich(per_event), _tui.fmt_pts_rich(total),
                 ))
 
         table.add_rows(rows)
 
+    # ── Daily breakdown table ────────────────────────────────────────
+
     def _refresh_daily_table(self, daily_data):
-        """Populate the daily breakdown table (like Week view's per-day table)."""
         import toggl.tui as _tui
+        from rich.text import Text as RichText
 
         table = self.query_one("#cmd-daily-table", DataTable)
         table.clear(columns=False)
+        table.border_title = "[b][#63f3ff]Daily Breakdown[/][/]"
 
         for day in daily_data:
             d_str = day["date"]
@@ -567,12 +602,10 @@ class CommandTab(Container):
             day_name = d.strftime("%a")
             date_short = d.strftime("%d %b")
             hours = day["total_hours"]
-            earned = day["earned"]
-            pos_total = day["positive"]
-            neg_total = day["negative"]
+            positive = day["positive"]
+            negative = day["negative"]
             net = day["net"]
             has_data = day["has_data"]
-
             is_today = d == date.today()
 
             if is_today:
@@ -583,23 +616,22 @@ class CommandTab(Container):
                 day_cell = day_name
 
             hour_text = "—" if hours == 0 else f"{hours:.1f}h"
-            earned_text = "—" if earned == 0 and not has_data else _tui.format_signed_rich(earned)
-            pos_text = "—" if pos_total == 0 else f"[#37d994]+{pos_total:.1f}[/]"
-            neg_text = "—" if neg_total == 0 else f"[#ff5f5f]-{neg_total:.1f}[/]"
+            pos_text = "—" if positive == 0 else f"[#37d994]+{positive:.1f}[/]"
+            neg_text = "—" if negative == 0 else f"[#ff5f5f]-{negative:.1f}[/]"
 
-            from rich.text import Text as RichText
             table.add_row(
                 RichText.from_markup(day_cell),
                 date_short,
                 hour_text,
-                RichText.from_markup(earned_text) if isinstance(earned_text, str) else earned_text,
                 RichText.from_markup(pos_text),
                 RichText.from_markup(neg_text),
-                RichText.from_markup(_tui.format_signed_rich(net)),
+                _tui.format_signed_rich(net),
                 key=d_str,
             )
 
-    def _update_summary(self, raw_values):
+    # ── Statistics ────────────────────────────────────────────────────
+
+    def _update_stats(self, raw_values):
         nonzero = [v for v in raw_values if v != 0]
         if nonzero:
             total = round(sum(raw_values), 1)
@@ -608,26 +640,51 @@ class CommandTab(Container):
             avg = round(sum(nonzero) / len(nonzero), 1)
 
             def _fs(v: float) -> str:
-                return f"+{v}" if v > 0 else str(v)
+                return f"+{int(v)}" if v > 0 else str(int(v))
 
-            self.query_one("#cmd-summary", Label).update(
+            self.query_one("#cmd-stats-label", Label).update(
                 f"[#8d98a7]Net:[/] [#37d994]{_fs(total)}[/]  "
-                f"[#8d98a7]Best:[/] [#37d994]+{best:.0f}[/]  "
-                f"[#8d98a7]Worst:[/] [#ff5f5f]{worst:.0f}[/]  "
+                f"[#8d98a7]Best:[/] [#37d994]+{int(best)}[/]  "
+                f"[#8d98a7]Worst:[/] [#ff5f5f]{int(worst)}[/]  "
                 f"[#8d98a7]Avg:[/] {_fs(avg)}"
             )
         else:
-            self.query_one("#cmd-summary", Label).update("[dim]No data in range[/]")
+            self.query_one("#cmd-stats-label", Label).update("[dim]No data in range[/]")
+
+    # ── Controls ─────────────────────────────────────────────────────
 
     def _update_controls(self):
-        self.query_one("#cmd-period-label", Label).update(
-            self.period.get_period_label()
-        )
-        self.query_one("#cmd-scale-label", Label).update(
-            self.period.scale_label
-        )
-        mode_btn = self.query_one("#cmd-mode-toggle", Button)
-        mode_btn.label = "Day" if self.period.mode == PeriodMode.DAY else "Week"
+        self.query_one("#cmd-period-label", Label).update(self.period.get_period_label())
+        self._show_scale_buttons()
+        self._highlight_selected_buttons()
+
+    def _show_scale_buttons(self):
+        """Show only scale buttons valid for the current mode, hide the rest.
+        Also updates button labels to match current mode's scale labels."""
+        active_scales = set(self.period.scales)
+        for btn in self.query(".scale-btn"):
+            try:
+                scale_val = int(btn.id.replace("cmd-scale-", ""))
+            except (ValueError, AttributeError):
+                continue
+            if scale_val in active_scales:
+                btn.remove_class("hidden")
+                # Update label to show proper scale label for current mode
+                btn.label = PeriodController._SCALE_LABELS.get(
+                    self.period.mode, {}).get(scale_val, str(scale_val))
+            else:
+                btn.add_class("hidden")
+
+    def _highlight_selected_buttons(self):
+        """Set .selected class on active period mode and scale buttons."""
+        for btn in self.query(".period-mode-btn"):
+            btn.set_class(btn.id == f"cmd-period-{self.period.mode}", "selected")
+        for btn in self.query(".scale-btn"):
+            try:
+                scale_val = int(btn.id.replace("cmd-scale-", ""))
+                btn.set_class(scale_val == self.period.scale, "selected")
+            except (ValueError, AttributeError):
+                pass
 
     # ── Event handlers ───────────────────────────────────────────────
 
@@ -641,30 +698,27 @@ class CommandTab(Container):
         self.period.next()
         self.refresh_all()
 
-    @on(Button.Pressed, "#cmd-zoom-in")
-    def _on_zoom_in(self):
-        self.period.zoom_in()
+    @on(Button.Pressed, ".period-mode-btn")
+    def _on_period_mode(self, event: Button.Pressed):
+        mode = event.button.id.replace("cmd-period-", "")
+        self.period.mode = mode
         self.refresh_all()
 
-    @on(Button.Pressed, "#cmd-zoom-out")
-    def _on_zoom_out(self):
-        self.period.zoom_out()
-        self.refresh_all()
+    @on(Button.Pressed, ".scale-btn")
+    def _on_scale(self, event: Button.Pressed):
+        try:
+            scale_val = int(event.button.id.replace("cmd-scale-", ""))
+            self.period.set_scale(scale_val)
+            self.refresh_all()
+        except (ValueError, AttributeError):
+            pass
 
-    @on(Button.Pressed, "#cmd-mode-toggle")
-    def _on_mode_toggle(self):
-        new_mode = PeriodMode.WEEK if self.period.mode == PeriodMode.DAY else PeriodMode.DAY
-        self.period.mode = new_mode
-        self.refresh_all()
-
-    @on(Button.Pressed, ".mode-btn")
+    @on(Button.Pressed, ".graph-mode-btn")
     def _on_graph_mode(self, event: Button.Pressed):
-        btn_id = event.button.id
-        mode = btn_id.replace("mode-", "", 1)
+        mode = event.button.id.replace("cmd-gmode-", "")
         if mode not in self.GRAPH_MODES:
             return
         self._current_graph_mode = mode
-        for btn in self.query(".mode-btn"):
-            btn.remove_class("selected")
-        event.button.add_class("selected")
+        for btn in self.query(".graph-mode-btn"):
+            btn.set_class(btn.id == f"cmd-gmode-{mode}", "selected")
         self.refresh_all()
