@@ -6,6 +6,8 @@ import json
 
 from toggl.const import CONFIG_FILE, DEFAULT_DAILY_TARGET, RED, RESET
 from toggl.const import GREEN, YELLOW, CYAN, DIM
+from toggl.rate_colors import RateColors
+from toggl.category import CategoryRegistry
 
 CONFIG_EXAMPLE_FILE = CONFIG_FILE.replace(".json", ".json.example")
 _REQUIRED_RATE_MAPS = ("points", "negatives", "positives")
@@ -13,13 +15,20 @@ _REQUIRED_RATE_MAPS = ("points", "negatives", "positives")
 
 class Config:
     """Encapsulates all runtime configuration loaded from toggl_config.json."""
-    __slots__ = ("points", "negatives", "positives", "daily_target")
+    __slots__ = (
+        "points", "negatives", "positives", "daily_target",
+        "rate_colors", "category_registry", "recovery_ignore",
+    )
 
-    def __init__(self, points, negatives, positives, daily_target):
+    def __init__(self, points, negatives, positives, daily_target,
+                 rate_colors, category_registry, recovery_ignore):
         self.points = points
         self.negatives = negatives
         self.positives = positives
         self.daily_target = daily_target
+        self.rate_colors = rate_colors
+        self.category_registry = category_registry
+        self.recovery_ignore = recovery_ignore
 
     @classmethod
     def load(cls) -> "Config":
@@ -30,7 +39,28 @@ class Config:
         daily_target = float(_coerce_number(
             config.get("daily_target", DEFAULT_DAILY_TARGET), "daily_target"
         ))
-        return cls(points, negatives, positives, daily_target)
+        rate_colors_raw = config.get("rate_colors")
+        if rate_colors_raw is not None and not isinstance(rate_colors_raw, dict):
+            _exit_config_error(
+                f"Error: 'rate_colors' in {CONFIG_FILE} must be a JSON object "
+                f"mapping rates to hex colors."
+            )
+        rate_colors = RateColors(rate_colors_raw)
+        categories_raw = config.get("categories")
+        if categories_raw is not None and not isinstance(categories_raw, dict):
+            _exit_config_error(
+                f"Error: 'categories' in {CONFIG_FILE} must be a JSON object "
+                f"mapping category names to {{color, projects}}."
+            )
+        category_registry = CategoryRegistry(categories_raw)
+        recovery_ignore_raw = config.get("recovery_ignore")
+        if recovery_ignore_raw is not None and not isinstance(recovery_ignore_raw, list):
+            _exit_config_error(
+                f"Error: 'recovery_ignore' in {CONFIG_FILE} must be a JSON array of strings."
+            )
+        recovery_ignore = [str(x) for x in (recovery_ignore_raw or [])]
+        return cls(points, negatives, positives, daily_target,
+                   rate_colors, category_registry, recovery_ignore)
 
 
 def _config_setup_hint():
@@ -94,11 +124,14 @@ def _load_rate_map(config, key):
 POINTS = {}
 NEGATIVES = {}
 POSITIVES = {}
+RECOVERY_IGNORE: list[str] = []
 DAILY_TARGET = DEFAULT_DAILY_TARGET
+RATE_COLORS = RateColors()
+CATEGORY_REGISTRY = CategoryRegistry()
 
 
 def load_runtime_settings():
-    global POINTS, NEGATIVES, POSITIVES, DAILY_TARGET
+    global POINTS, NEGATIVES, POSITIVES, RECOVERY_IGNORE, DAILY_TARGET, RATE_COLORS, CATEGORY_REGISTRY
     cfg = Config.load()
     POINTS.clear()
     POINTS.update(cfg.points)
@@ -106,7 +139,11 @@ def load_runtime_settings():
     NEGATIVES.update(cfg.negatives)
     POSITIVES.clear()
     POSITIVES.update(cfg.positives)
+    RECOVERY_IGNORE.clear()
+    RECOVERY_IGNORE.extend(cfg.recovery_ignore)
     DAILY_TARGET = cfg.daily_target
+    RATE_COLORS.update(cfg.rate_colors)
+    CATEGORY_REGISTRY.update(cfg.category_registry)
 
 def get_daily_target():
     return DAILY_TARGET

@@ -106,6 +106,8 @@ def sample_config(tmp_data_dir, monkeypatch):
     import toggl.calc
     import toggl.cache
     import toggl.neg
+    from toggl.rate_colors import RateColors
+    from toggl.category import CategoryRegistry
 
     points = {
         "Learning to Code": 1.5,
@@ -128,3 +130,6 @@ def sample_config(tmp_data_dir, monkeypatch):
     monkeypatch.setattr(toggl.config, "POSITIVES", positives)
     monkeypatch.setattr(toggl.neg, "POSITIVES", positives)
     monkeypatch.setattr(toggl.config, "DAILY_TARGET", 13.0)
+    monkeypatch.setattr(toggl.config, "RATE_COLORS", RateColors())
+    monkeypatch.setattr(toggl.config, "CATEGORY_REGISTRY", CategoryRegistry())
+    monkeypatch.setattr(toggl.config, "RECOVERY_IGNORE", [])

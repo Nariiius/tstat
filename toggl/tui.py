@@ -44,9 +44,11 @@ from toggl.calc import (
     get_positive_catalog_rows,
 )
 from toggl.config import (
+    CATEGORY_REGISTRY,
     NEGATIVES,
     POINTS,
     POSITIVES,
+    RATE_COLORS,
     get_daily_target,
     load_runtime_settings,
 )
@@ -185,6 +187,133 @@ def fmt_pts_rich(pts):
     if pts > 0:
         return f"[#37d994]+{pts:.1f}[/]"
     return f"[#ff5f5f]{pts:.1f}[/]"
+
+
+# ──────────────────────────────────────────────
+# SECTION HEADER COLORS
+# ──────────────────────────────────────────────
+SECTION_COLORS = {
+    "POSITIVE": "#4ADE80",
+    "NEGATIVE": "#FF6B6B",
+    "UNSCORED": "#8d98a7",
+    "LOGGED POSITIVE": "#2DD4BF",
+    "LOGGED NEGATIVE": "#C084FC",
+}
+
+
+def _fmt_section_header(label: str) -> Text:
+    """Return a Rich Text section-divider row label with its fixed semantic color."""
+    # Compute the canonical section key (strip • or [ ] wrapper)
+    key = label
+    if key.startswith("• "):
+        key = key[2:]
+    elif key.startswith("["):
+        key = key[1:-1] if key.endswith("]") else key[1:]
+    color = SECTION_COLORS.get(key, "")
+    if color:
+        return Text(label, style=f"bold {color}")
+    return Text(label, style="bold")
+
+
+def _fmt_project_name(name: str) -> Text:
+    """Return a Rich Text project name colored by category or rate group.
+
+    Priority: category color > rate_colors > plain.
+    """
+    cat_color = CATEGORY_REGISTRY.get_color(name)
+    if cat_color:
+        return Text(name, style=cat_color)
+    # Fall back to rate_colors — we need the rate; caller should use
+    # _fmt_project_name_by_rate if they have rate info.
+    return Text(name)
+
+
+def _fmt_project_name_by_rate(name: str, rate: float | None) -> Text:
+    """Return a Rich Text project name colored by category or rate group.
+
+    Priority: category color > rate_colors > plain.
+    """
+    cat_color = CATEGORY_REGISTRY.get_color(name)
+    if cat_color:
+        return Text(name, style=cat_color)
+    if rate is not None:
+        rate_color = RATE_COLORS.get_color(rate)
+        if rate_color:
+            return Text(name, style=rate_color)
+    return Text(name)
+
+
+# ──────────────────────────────────────────────
+# TREE-RENDERED CATEGORY GROUPS
+# ──────────────────────────────────────────────
+
+def _render_category_section(rows, fmt_name_fn, fmt_cells_fn, section_color=""):
+    """Render scored rows as a flat list with tree characters.
+
+    No parent rows, no grouping by category. Items stay in their incoming
+    sort order (rate desc → hours desc).
+
+    - Only the ``├`` / ``└`` prefix is colored with *section_color*; names stay plain.
+    - The Rate column receives the *category group* color.
+    - Zero-rate / zero-point items are dimmed entirely (``#8d98a7``).
+
+    Returns a flat list of cell-tuples ready for ``DataTable.add_rows()``.
+    """
+    if not rows:
+        return []
+
+    dim_color = "#8d98a7"
+    result = []
+    total = len(rows)
+    for i, crow in enumerate(rows):
+        is_last = (i == total - 1)
+        prefix = "└ " if is_last else "├ "
+        name, hours, rate, pts = crow
+        name_text = fmt_name_fn(name, rate)
+        rate_color = CATEGORY_REGISTRY.get_color(name) or ""
+
+        # Grey out zero-rate / zero-point items
+        is_zero = (rate is not None and rate == 0) or (pts is not None and pts == 0)
+        if is_zero:
+            tree_name = Text.assemble((prefix, dim_color), (name_text.plain, dim_color))
+            result.append(fmt_cells_fn(tree_name, hours, rate, pts, rate_color="", dim=dim_color))
+        else:
+            # Prefix color: section color if set, otherwise group color (Recovery view)
+            prefix_color = section_color or rate_color
+            tree_name = Text.assemble((prefix, prefix_color), (name_text.plain, ""))
+            result.append(fmt_cells_fn(tree_name, hours, rate, pts, rate_color=rate_color))
+
+    return result
+
+
+def _fmt_tree_cells(name_text, hours, rate, pts, rate_color="", dim=""):
+    """Build a 4-tuple for a category-tree row.
+
+    The Rate column inherits *rate_color* (the category group color).
+    When *dim* is set the entire row uses that color.
+    """
+    if dim:
+        return (
+            name_text,
+            Text(f"{hours:.2f}h", style=dim) if hours is not None else Text(""),
+            Text(fmt_rate(rate), style=dim) if rate is not None else Text(""),
+            Text(f"{pts:.1f}", style=dim) if pts is not None else Text(""),
+        )
+    rate_cell = Text(fmt_rate(rate), style=rate_color) if rate is not None else Text("")
+    return (
+        name_text,
+        f"{hours:.2f}h" if hours is not None else "",
+        rate_cell,
+        fmt_pts_rich(pts) if pts is not None else Text(""),
+    )
+
+
+def _fmt_project_tree(name: str, rate: float | None) -> Text:
+    """Name formatter for category-tree rows (category color only, no rate fallback)."""
+    cat_color = CATEGORY_REGISTRY.get_color(name)
+    if cat_color:
+        return Text(name, style=cat_color)
+    return Text(name)
 
 
 # ──────────────────────────────────────────────
@@ -529,24 +658,24 @@ class TogglTUI(App):
 
     DataTable:focus > .datatable--cursor,
     DataTable:focus-within > .datatable--cursor {
-        background: transparent;
+        background: #1e2a36;
         color: $accent;
         text-style: bold;
     }
 
     DataTable:focus > .datatable--fixed-cursor,
     DataTable:focus-within > .datatable--fixed-cursor {
-        background: transparent;
+        background: #1e2a36;
         color: $accent;
     }
 
     DataTable > .datatable--cursor {
-        background: transparent;
+        background: #1e2a36;
         color: #d7dde8;
     }
 
     DataTable > .datatable--fixed-cursor {
-        background: transparent;
+        background: #1e2a36;
     }
 
     DataTable > .datatable--header {
@@ -931,6 +1060,35 @@ class TogglTUI(App):
             self.query_one(selector).focus()
         self.query_one(ScrollableFooter).refresh_bindings()
 
+    # ── Helpers ──
+
+    def _add_rows_mark_sections(self, table: DataTable, rows: list) -> None:
+        """Add rows, marking section headers with keys so cursor skips them."""
+        for row in rows:
+            first = row[0]
+            if isinstance(first, Text) and str(first).startswith("•"):
+                table.add_row(*row, key=f"_section_{len(table.rows)}")
+            else:
+                table.add_row(*row)
+
+    @on(DataTable.RowHighlighted, "#week-category-table")
+    @on(DataTable.RowHighlighted, "#overview-table")
+    @on(DataTable.RowHighlighted, "#day-table")
+    def _skip_section_rows(self, event: DataTable.RowHighlighted) -> None:
+        """Skip past section-header rows so they can't be selected."""
+        if event.row_key is None:
+            return
+        key = str(event.row_key.value)
+        if not key.startswith("_section_"):
+            return
+        table = event.control
+        table_keys = list(table.rows.keys())
+        total = len(table_keys)
+        idx = next(i for i, k in enumerate(table_keys) if str(k.value) == key)
+        target = idx + 1 if idx < total - 1 else idx - 1
+        if target >= 0:
+            table.move_cursor(row=target)
+
     # ── Spark tables ──
 
     def refresh_spark_tables(self):
@@ -1216,22 +1374,30 @@ class TogglTUI(App):
         category_table.clear(columns=False)
         cat_rows = []
         for section_name in ("positive", "negative", "unscored"):
-            rows = report[section_name]
-            if rows:
-                cat_rows.append((f"[{section_name.upper()}]", "", "", ""))
-            for name, hours, rate, pts in rows:
+            section_rows = report[section_name]
+            section_key = section_name.upper()
+            section_color = SECTION_COLORS.get(section_key, "")
+            if section_rows:
                 cat_rows.append(
-                    (name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts))
+                    (_fmt_section_header(f"• {section_key}"),
+                     Text(""), Text(""), Text(""))
                 )
+            cat_rows.extend(
+                _render_category_section(section_rows, _fmt_project_tree, _fmt_tree_cells,
+                    section_color=section_color)
+            )
         if report["positive_results"]:
-            cat_rows.append(("[LOGGED POSITIVE]", "", "", ""))
-            for name, _, _, pts in report["positive_results"]:
-                cat_rows.append((name, "—", "logged", fmt_pts_rich(pts)))
+            cat_rows.append((_fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(report["positive_results"]):
+                is_last = (i == len(report["positive_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                cat_rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED POSITIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
         if report["negative_results"]:
-            cat_rows.append(("[LOGGED NEGATIVE]", "", "", ""))
-            for name, _, _, pts in report["negative_results"]:
-                cat_rows.append((name, "—", "logged", fmt_pts_rich(pts)))
-        category_table.add_rows(cat_rows)
+            cat_rows.append((_fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(report["negative_results"]):
+                is_last = (i == len(report["negative_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                cat_rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
         summary = dashboard["summary"]
         week_hours = sum(r["hours"] for r in dashboard["rows"])
         wh_h = int(week_hours)
@@ -1251,18 +1417,29 @@ class TogglTUI(App):
         for section_name in ("positive", "negative", "unscored"):
             section_rows = report[section_name]
             if section_rows:
-                rows.append((f"[{section_name.upper()}]", "", "", ""))
-            for name, hours, rate, pts in section_rows:
-                rows.append((name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts)))
+                rows.append(
+                    (_fmt_section_header(f"• {section_name.upper()}"),
+                     Text(""), Text(""), Text(""))
+                )
+            rows.extend(
+                _render_category_section(
+                    section_rows, _fmt_project_tree, _fmt_tree_cells,
+                    section_color=SECTION_COLORS.get(section_name.upper(), ""),
+                )
+            )
         if report["positive_results"]:
-            rows.append(("[LOGGED POSITIVE]", "", "", ""))
-            for name, _, _, pts in report["positive_results"]:
-                rows.append((name, "—", "logged", fmt_pts_rich(pts)))
+            rows.append((_fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(report["positive_results"]):
+                is_last = (i == len(report["positive_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED POSITIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
         if report["negative_results"]:
-            rows.append(("[LOGGED NEGATIVE]", "", "", ""))
-            for name, _, _, pts in report["negative_results"]:
-                rows.append((name, "—", "logged", fmt_pts_rich(pts)))
-        table.add_rows(rows)
+            rows.append((_fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(report["negative_results"]):
+                is_last = (i == len(report["negative_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
+        self._add_rows_mark_sections(table, rows)
         total_hours = report["total_hours"]
         th_h = int(total_hours)
         th_m = int((total_hours - th_h) * 60)
@@ -1280,26 +1457,30 @@ class TogglTUI(App):
 
         rows = []
         if pos_rows:
-            rows.append(("[POSITIVE]", "", "", ""))
-            for name, hours, rate, pts in pos_rows:
-                rows.append((name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts)))
+            rows.append((_fmt_section_header("• POSITIVE"), Text(""), Text(""), Text("")))
+            rows.extend(_render_category_section(pos_rows, _fmt_project_tree, _fmt_tree_cells,
+                section_color=SECTION_COLORS["POSITIVE"]))
         if neg_rows:
-            rows.append(("[NEGATIVE]", "", "", ""))
-            for name, hours, rate, pts in neg_rows:
-                rows.append((name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts)))
+            rows.append((_fmt_section_header("• NEGATIVE"), Text(""), Text(""), Text("")))
+            rows.extend(_render_category_section(neg_rows, _fmt_project_tree, _fmt_tree_cells,
+                section_color=SECTION_COLORS["NEGATIVE"]))
         if metrics["positive_results"]:
-            rows.append(("[LOGGED POSITIVE]", "", "", ""))
-            for name, _, _, pts in metrics["positive_results"]:
-                rows.append((name, "—", "logged", fmt_pts_rich(pts)))
+            rows.append((_fmt_section_header("• LOGGED POSITIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(metrics["positive_results"]):
+                is_last = (i == len(metrics["positive_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED POSITIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
         if metrics["negative_results"]:
-            rows.append(("[LOGGED NEGATIVE]", "", "", ""))
-            for name, _, _, pts in metrics["negative_results"]:
-                rows.append((name, "—", "logged", fmt_pts_rich(pts)))
+            rows.append((_fmt_section_header("• LOGGED NEGATIVE"), Text(""), Text(""), Text("")))
+            for i, (name, count, per_event, total) in enumerate(metrics["negative_results"]):
+                is_last = (i == len(metrics["negative_results"]) - 1)
+                prefix = "└ " if is_last else "├ "
+                rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
         if unscored_rows:
-            rows.append(("[UNSCORED]", "", "", ""))
-            for name, hours, rate, pts in unscored_rows:
-                rows.append((name, f"{hours:.2f}h", fmt_rate(rate), fmt_pts_rich(pts)))
-        table.add_rows(rows)
+            rows.append((_fmt_section_header("• UNSCORED"), Text(""), Text(""), Text("")))
+            rows.extend(_render_category_section(unscored_rows, _fmt_project_tree, _fmt_tree_cells,
+                section_color=SECTION_COLORS["UNSCORED"]))
+        self._add_rows_mark_sections(table, rows)
         dh = int(metrics["total_hours"])
         dm = int((metrics["total_hours"] - dh) * 60)
         table.border_title = f"[b][#63f3ff]Day ({self.selected_day})[/][/]   [#8d98a7]Tracked: {dh}hrs {dm:02d}min[/]"
@@ -1363,31 +1544,31 @@ class TogglTUI(App):
         data = cache.get_recovery_rows("ALL_TIME", "ALL")
         table = self.query_one("#recovery-table", DataTable)
         table.clear(columns=False)
-        rows = []
-        for row in data["rows"]:
-            rate = row["rate"]
-            color = (
-                "[#37d994]"
-                if rate >= 3
-                else (
-                    "[#ffd700]"
-                    if rate >= 2
-                    else ("[#63f3ff]" if rate >= 1 else "[#d7dde8]")
-                )
+
+        if not data["rows"]:
+            table.border_title = "[b][#63f3ff]Recovery[/][/]"
+            table.border_subtitle = "[#8d98a7]Already non-negative.[/]"
+            return
+
+        # Convert recovery dicts to tuples: (name, None, rate, hours_needed)
+        recovery_tuples = [
+            (r["category"], 0, r["rate"], r["hours_needed"])
+            for r in data["rows"]
+        ]
+
+        def _fmt_recovery_cells(name_text, _hours, rate, hours_needed, rate_color="", dim=""):
+            rate_text = Text(fmt_rate(rate), style=rate_color) if rate is not None else Text("")
+            return (
+                name_text,
+                rate_text,
+                Text(str(hours_needed)) if hours_needed is not None else Text(""),
             )
-            rows.append(
-                (
-                    f"{color}{row['category']}[/]",
-                    f"{color}{fmt_rate(rate)}[/]",
-                    f"{color}{row['hours_needed']}[/]",
-                )
-            )
+
+        rows = _render_category_section(recovery_tuples, _fmt_project_tree, _fmt_recovery_cells)
         table.add_rows(rows)
         table.border_title = "[b][#63f3ff]Recovery[/][/]"
         table.border_subtitle = (
-            "[#8d98a7]Already non-negative.[/]"
-            if not data["rows"]
-            else f"[#8d98a7]Current total {format_signed_rich(data['total_points'])} pts[/]"
+            f"[#8d98a7]Current total {format_signed_rich(data['total_points'])} pts[/]"
         )
 
     def refresh_sync_view(self):

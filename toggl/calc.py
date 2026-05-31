@@ -3,6 +3,44 @@
 from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target
 
 
+def calculate_logged_activity_totals(entries, config_points, sign=1):
+    """Aggregate logged activity entries into (name, count, points_per_event, total_points).
+
+    Args:
+        entries: List of {"name": str, "points": float} — one dict per logged occurrence
+                 (already filtered to the selected timeframe).  CSV stores absolute
+                 (positive) point values for both positives and negatives.
+        config_points: Dict of activity name → configured points_per_event value
+                       (absolute, positive).
+        sign: 1 for positives, -1 for negatives.  Applied to points_per_event and
+              total_points so the UI receives signed values.
+
+    Returns:
+        List of (name, count, points_per_event, total_points) tuples, sorted by name.
+        total_points = count × points_per_event (signed).
+    """
+    counts: dict[str, int] = {}
+    totals: dict[str, float] = {}
+    per_event: dict[str, float] = {}
+
+    for entry in entries:
+        name = entry["name"]
+        counts[name] = counts.get(name, 0) + 1
+        totals[name] = totals.get(name, 0.0) + entry["points"]
+        if name not in per_event:
+            # Config stores absolute values — apply sign for display.
+            per_event[name] = sign * abs(config_points.get(name, 0.0))
+
+    results = []
+    for name in sorted(counts.keys()):
+        count = counts[name]
+        points_per_event = per_event[name]
+        total_points = round(sign * abs(totals[name]), 1)
+        results.append((name, count, points_per_event, total_points))
+
+    return results
+
+
 def calculate(projects):
     results = []
     for name, hours in projects.items():

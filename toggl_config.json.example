@@ -1,6 +1,37 @@
 {
   "api_token": "YOUR_TOGGL_API_TOKEN",
   "daily_target": 13,
+  "categories": {
+    "Learning": {
+      "color": "#63f3ff",
+      "projects": ["Learning to Code", "Learning Japanese", "Acads / Study"]
+    },
+    "Finance": {
+      "color": "#ffd700",
+      "projects": ["Finance / Markets"]
+    },
+    "Fitness": {
+      "color": "#37d994",
+      "projects": ["Fitness", "Sleep / Rest"]
+    },
+    "Productivity": {
+      "color": "#e2b714",
+      "projects": ["Obligations / Social", "Plan / Org / Review", "Focus Thoughts"]
+    },
+    "Misc": {
+      "color": "#8d98a7",
+      "projects": ["Chores / Waste"]
+    },
+    "Entertainment": {
+      "color": "#ff5f5f",
+      "projects": ["Leisure / Entertainment", "Timepass / Trash"]
+    }
+  },
+  "rate_colors": {
+    "3": "#63f3ff",
+    "2": "#e2b714",
+    "1": "#37d994"
+  },
   "points": {
     "Building Projects": 3,
     "Finance / Markets": 3,
