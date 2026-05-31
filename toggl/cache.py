@@ -633,7 +633,11 @@ class DataCache:
             hours_needed = deficit / rate
             h = int(hours_needed)
             m = int((hours_needed - h) * 60)
-            rows.append({"category": name, "rate": rate, "hours_needed": f"{h}h {m:02d}m"})
+            if h >= 1:
+                formatted_amount = f"{round(hours_needed)}h"
+            else:
+                formatted_amount = f"{m}m"
+            rows.append({"category": name, "rate": rate, "hours_needed": formatted_amount})
 
         # Logged positive actions (one-time bonuses)
         if POSITIVES:

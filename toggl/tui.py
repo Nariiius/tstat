@@ -926,7 +926,7 @@ class TogglTUI(App):
         self._table_resize_timer = None
         self._data_cache: DataCache | None = None
         self._active_week = get_current_week()
-    
+
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Container(id="chrome"):
@@ -1001,7 +1001,7 @@ class TogglTUI(App):
 
     def _setup_tables(self):
         overview_recovery = self.query_one("#overview-recovery-table", DataTable)
-        overview_recovery.add_columns("Category", "Rate", "Hours Needed")
+        overview_recovery.add_columns("Category", "Rate", "Amount")
         for col in overview_recovery.columns.values():
             col.text_align = "center"
 
@@ -1328,7 +1328,10 @@ class TogglTUI(App):
                 hours_needed = deficit / rate
                 h = int(hours_needed)
                 m = int((hours_needed - h) * 60)
-                h_str = f"{h}h {m:02d}m"
+                if h >= 1:
+                    h_str = f"{round(hours_needed)}h"
+                else:
+                    h_str = f"{m}m"
                 rate_str = f"×{int(rate) if rate == int(rate) else rate}"
                 short: list[str] = [TASK_SHORT_NAMES.get(t) or t for t in tasks]
                 task_str = " ".join(short)
