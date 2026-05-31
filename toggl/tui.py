@@ -1,6 +1,17 @@
 """TogglTUI — Textual terminal UI for TStat."""
 
+import logging
+import os
 from datetime import date, datetime, timedelta
+
+logger = logging.getLogger("TStat")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    from toggl.const import DATA_DIR
+    log_path = os.path.join(DATA_DIR, "sync_debug.log")
+    fh = logging.FileHandler(log_path, mode="a")
+    fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(fh)
 
 from rich.text import Text
 from textual import on
@@ -10,7 +21,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import Click, MouseScrollDown, MouseScrollUp
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Input, Label, OptionList, Static, Tab, Tabs
+from textual.widgets import Button, DataTable, Footer, Input, Label, OptionList, Static, Tab, Tabs
 from textual.worker import Worker, get_current_worker
 
 from toggl.api import (
@@ -53,6 +64,7 @@ from toggl.config import (
     load_runtime_settings,
 )
 from toggl.const import BLAME_W, SPARK_W, TASK_SHORT_NAMES, strip_ansi
+from toggl.command import CommandTab
 from toggl.neg import (
     log_negative_direct,
     log_positive_direct,
@@ -314,6 +326,15 @@ def _fmt_project_tree(name: str, rate: float | None) -> Text:
     if cat_color:
         return Text(name, style=cat_color)
     return Text(name)
+
+
+def _fmt_recovery_cells(name_text, _hours, rate, hours_needed, rate_color="", dim=""):
+    rate_text = Text(fmt_rate(rate), style=rate_color) if rate is not None else Text("")
+    return (
+        name_text,
+        rate_text,
+        Text(str(hours_needed)) if hours_needed is not None else Text(""),
+    )
 
 
 # ──────────────────────────────────────────────
@@ -690,7 +711,7 @@ class TogglTUI(App):
         max-width: 34;
         border: none;
         padding: 0;
-        display: block;
+        display: none;
     }
 
     #spark-weeks-table {
@@ -789,6 +810,91 @@ class TogglTUI(App):
     Toast.-error {
         border: round #ff5f5f;
     }
+
+    #overview-dashboard {
+        height: 1fr;
+    }
+
+    #overview-left {
+        width: 60%;
+        height: 1fr;
+    }
+
+    #overview-right {
+        width: 40%;
+        height: 1fr;
+    }
+
+    #overview-recovery-container {
+        height: 45%;
+        border: round #3d4f63;
+        background: #0b1016;
+    }
+    #overview-recovery-container:focus-within {
+        border: round #63f3ff;
+    }
+    #overview-recovery-table {
+        height: 1fr;
+        border: none;
+    }
+    #recovery-button-bar {
+        height: auto;
+        align: center middle;
+        padding: 0 1;
+        margin: 0;
+    }
+    .recovery-btn {
+        background: transparent;
+        border: none;
+        padding: 0 1;
+        margin: 0;
+        min-width: 0;
+        height: 1;
+        text-style: bold;
+    }
+    #btn-neg-log {
+        color: #ff5f5f;
+    }
+    #btn-neg-log:hover {
+        color: #ff8080;
+        background: #1e2a36;
+    }
+    #btn-pos-log {
+        color: #37d994;
+    }
+    #btn-pos-log:hover {
+        color: #5be8ae;
+        background: #1e2a36;
+    }
+
+    #overview-insights {
+        height: auto;
+        min-height: 5;
+        border: round #3d4f63;
+        padding: 0 1;
+        background: #0b1016;
+        text-align: center;
+    }
+    #overview-insights:focus {
+        border: round #63f3ff;
+    }
+
+    #overview-categories-table {
+        height: 1fr;
+    }
+
+    #overview-recent-log-wrapper {
+        height: 1fr;
+        min-height: 4;
+        border: round #3d4f63;
+    }
+    #overview-recent-log-wrapper:focus-within {
+        border: round #63f3ff;
+    }
+    #overview-recent-log-table {
+        height: 1fr;
+        border: none;
+    }
     """
 
     BINDINGS = [
@@ -801,23 +907,23 @@ class TogglTUI(App):
         Binding("b", "backfill", "Backfill"),
         Binding("n", "add_negative", "Neg"),
         Binding("p", "add_positive", "Pos"),
+        Binding("z", "cmd_zoom_in", "Zoom+", show=False),
+        Binding("Z", "cmd_zoom_out", "Zoom-", show=False),
     ]
 
     VIEWS = [
         "Overview",
+        "Command",
         "Day",
         "Week",
         "Month",
-        "Negatives",
-        "Positives",
-        "Recovery",
         "Sync/Quota",
     ]
 
     def __init__(self):
         super().__init__()
         self._initialized = False
-        self.active_view_index = 1  # Day view is the default landing view
+        self.active_view_index = 2  # Day view is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self._table_resize_timer = None
         self._data_cache: DataCache | None = None
@@ -837,9 +943,26 @@ class TogglTUI(App):
             with Horizontal(id="main"):
                 with Container(id="content"):
                     with Container(id="overview-view", classes="view"):
-                        yield DataTable(
-                            zebra_stripes=False, cursor_type="row", id="overview-table"
-                        )
+                        with Horizontal(id="overview-dashboard"):
+                            with Vertical(id="overview-left"):
+                                yield DataTable(
+                                    zebra_stripes=False, cursor_type="row", id="overview-categories-table"
+                                )
+                                yield Static(id="overview-insights")
+                            with Vertical(id="overview-right"):
+                                with Vertical(id="overview-recovery-container"):
+                                    yield DataTable(
+                                        zebra_stripes=False, cursor_type="row", id="overview-recovery-table"
+                                    )
+                                with Vertical(id="overview-recent-log-wrapper"):
+                                    yield DataTable(
+                                        zebra_stripes=False, cursor_type="row", id="overview-recent-log-table"
+                                    )
+                                    with Horizontal(id="recovery-button-bar"):
+                                        yield Button("Log Neg", id="btn-neg-log", classes="recovery-btn")
+                                        yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
+                    with Container(id="command-view", classes="view"):
+                        yield CommandTab()
                     with Container(id="day-view", classes="view -active"):
                         yield DataTable(
                             zebra_stripes=False, cursor_type="row", id="day-table"
@@ -857,50 +980,12 @@ class TogglTUI(App):
                         yield DataTable(
                             zebra_stripes=False, cursor_type="row", id="month-table"
                         )
-                    with Container(id="negatives-view", classes="view"):
-                        yield DataTable(
-                            zebra_stripes=False,
-                            cursor_type="row",
-                            id="negatives-catalog-table",
-                        )
-                        yield DataTable(
-                            zebra_stripes=False,
-                            cursor_type="row",
-                            id="negatives-log-table",
-                        )
-                    with Container(id="positives-view", classes="view"):
-                        yield DataTable(
-                            zebra_stripes=False,
-                            cursor_type="row",
-                            id="positives-catalog-table",
-                        )
-                        yield DataTable(
-                            zebra_stripes=False,
-                            cursor_type="row",
-                            id="positives-log-table",
-                        )
-                    with Container(id="recovery-view", classes="view"):
-                        yield DataTable(
-                            zebra_stripes=False, cursor_type="row", id="recovery-table"
-                        )
                     with Container(id="sync-view", classes="view"):
                         yield DataTable(
                             zebra_stripes=False, cursor_type="row", id="sync-table"
                         )
                 with Vertical(id="spark-rail"):
-                    yield DataTable(
-                        show_header=False,
-                        cursor_type="row",
-                        id="spark-weeks-table",
-                        zebra_stripes=False,
-                    )
-                    yield DataTable(
-                        show_header=False,
-                        cursor_type="row",
-                        id="spark-days-table",
-                        zebra_stripes=False,
-                    )
-                    yield Static(id="spark-catchup")
+                    pass
         yield ScrollableFooter(show_command_palette=False)
 
     def on_mount(self):
@@ -940,26 +1025,27 @@ class TogglTUI(App):
         week_category_table = self.query_one("#week-category-table", DataTable)
         week_category_table.add_columns("Category", "Hours", "Rate", "Points")
 
-        overview_table = self.query_one("#overview-table", DataTable)
-        overview_table.add_columns("Category", "Hours", "Rate", "Points")
+        overview_recovery = self.query_one("#overview-recovery-table", DataTable)
+        overview_recovery.add_columns("Category", "Rate", "Hours Needed")
+        for col in overview_recovery.columns.values():
+            col.text_align = "center"
+
+        overview_cat = self.query_one("#overview-categories-table", DataTable)
+        overview_cat.add_columns("Category", "Hours", "Rate", "Points")
+        for col in overview_cat.columns.values():
+            col.text_align = "center"
+
+        overview_log = self.query_one("#overview-recent-log-table", DataTable)
+        overview_log.add_columns("Date", "Name", "Points")
+        overview_log.can_focus = True
+        overview_log.cursor_type = "row"
+        for col in overview_log.columns.values():
+            col.text_align = "center"
+
+        self.query_one("#overview-insights", Static).can_focus = True
 
         day_table = self.query_one("#day-table", DataTable)
         day_table.add_columns("Category", "Hours", "Rate", "Points")
-
-        negatives_catalog = self.query_one("#negatives-catalog-table", DataTable)
-        negatives_catalog.add_columns("Negative", "Points")
-
-        negatives_log = self.query_one("#negatives-log-table", DataTable)
-        negatives_log.add_columns("Date", "Negative", "Points")
-
-        positives_catalog = self.query_one("#positives-catalog-table", DataTable)
-        positives_catalog.add_columns("Positive", "Points")
-
-        positives_log = self.query_one("#positives-log-table", DataTable)
-        positives_log.add_columns("Date", "Positive", "Points")
-
-        recovery_table = self.query_one("#recovery-table", DataTable)
-        recovery_table.add_columns("Category", "Rate", "Hours Needed")
 
         sync_table = self.query_one("#sync-table", DataTable)
         sync_table.add_columns("Metric", "Value")
@@ -967,17 +1053,11 @@ class TogglTUI(App):
         month_table = self.query_one("#month-table", DataTable)
         month_table.add_columns("Month", "Hours", "Net")
 
-        spark_weeks = self.query_one("#spark-weeks-table", DataTable)
-        spark_weeks.add_columns("Label", "Net")
-
-        spark_days = self.query_one("#spark-days-table", DataTable)
-        spark_days.add_columns("Day", "Net")
-
         for table_id in [
-            "#overview-table", "#day-table", "#week-table", "#month-table",
-            "#negatives-catalog-table", "#negatives-log-table",
-            "#positives-catalog-table", "#positives-log-table",
-            "#recovery-table", "#sync-table",
+            "#day-table", "#week-table", "#month-table",
+            "#sync-table",
+            "#overview-recovery-table", "#overview-categories-table",
+            "#overview-recent-log-table",
         ]:
             try:
                 t = self.query_one(table_id, DataTable)
@@ -987,6 +1067,7 @@ class TogglTUI(App):
                 pass
 
     def refresh_all_views(self):
+        logger.debug("[SYNC] refresh_all_views: start")
         self._data_cache = DataCache.load()
         self.update_tabs()
         self.update_status_line()
@@ -995,22 +1076,25 @@ class TogglTUI(App):
             self._refresh_view_by_index(idx)
         self.update_view_visibility()
         self._schedule_resize()
+        logger.debug("[SYNC] refresh_all_views: done")
 
     _VIEW_REFRESH_MAP = {
         0: "refresh_overview_view",
-        1: "refresh_day_view",
-        2: "refresh_week_view",
-        3: "refresh_month_view",
-        4: "refresh_negatives_view",
-        5: "refresh_positives_view",
-        6: "refresh_recovery_view",
-        7: "refresh_sync_view",
+        1: "refresh_command_view",
+        2: "refresh_day_view",
+        3: "refresh_week_view",
+        4: "refresh_month_view",
+        5: "refresh_sync_view",
     }
 
     def _refresh_view_by_index(self, index):
         method_name = self._VIEW_REFRESH_MAP.get(index)
         if method_name:
-            getattr(self, method_name)()
+            logger.debug("[SYNC] _refresh_view_by_index(%d) → %s", index, method_name)
+            try:
+                getattr(self, method_name)()
+            except Exception as e:
+                logger.exception("[SYNC] %s FAILED", method_name)
 
     def _schedule_resize(self):
         if self._table_resize_timer is not None:
@@ -1032,12 +1116,10 @@ class TogglTUI(App):
     def update_view_visibility(self):
         view_ids = [
             "#overview-view",
+            "#command-view",
             "#day-view",
             "#week-view",
             "#month-view",
-            "#negatives-view",
-            "#positives-view",
-            "#recovery-view",
             "#sync-view",
         ]
         for index, view_id in enumerate(view_ids):
@@ -1046,14 +1128,12 @@ class TogglTUI(App):
 
     def focus_active_view(self):
         focus_targets = {
-            0: "#overview-table",
-            1: "#day-table",
-            2: "#week-table",
-            3: "#month-table",
-            4: "#negatives-catalog-table",
-            5: "#positives-catalog-table",
-            6: "#recovery-table",
-            7: "#sync-table",
+            0: "#overview-categories-table",
+            1: "#command-container",
+            2: "#day-table",
+            3: "#week-table",
+            4: "#month-table",
+            5: "#sync-table",
         }
         selector = focus_targets.get(self.active_view_index)
         if selector:
@@ -1072,7 +1152,7 @@ class TogglTUI(App):
                 table.add_row(*row)
 
     @on(DataTable.RowHighlighted, "#week-category-table")
-    @on(DataTable.RowHighlighted, "#overview-table")
+    @on(DataTable.RowHighlighted, "#overview-categories-table")
     @on(DataTable.RowHighlighted, "#day-table")
     def _skip_section_rows(self, event: DataTable.RowHighlighted) -> None:
         """Skip past section-header rows so they can't be selected."""
@@ -1092,9 +1172,7 @@ class TogglTUI(App):
     # ── Spark tables ──
 
     def refresh_spark_tables(self):
-        self._refresh_spark_weeks()
-        self._refresh_spark_days()
-        self._refresh_spark_catchup()
+        pass
 
     def _refresh_spark_weeks(self):
         cache = self._data_cache
@@ -1409,10 +1487,13 @@ class TogglTUI(App):
         category_table.border_title = "[b][#63f3ff]Category Totals[/][/]"
 
     def refresh_overview_view(self):
+        logger.debug("[SYNC] refresh_overview_view: start")
         cache = self._data_cache
+
+        # ── Categories Panel (right column) ──
         report = cache.get_report_sections("ALL_TIME", "ALL")
-        table = self.query_one("#overview-table", DataTable)
-        table.clear(columns=False)
+        cat_table = self.query_one("#overview-categories-table", DataTable)
+        cat_table.clear(columns=False)
         rows = []
         for section_name in ("positive", "negative", "unscored"):
             section_rows = report[section_name]
@@ -1439,16 +1520,77 @@ class TogglTUI(App):
                 is_last = (i == len(report["negative_results"]) - 1)
                 prefix = "└ " if is_last else "├ "
                 rows.append((Text.assemble((prefix, SECTION_COLORS["LOGGED NEGATIVE"]), (name, "")), Text(f"×{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total)))
-        self._add_rows_mark_sections(table, rows)
+        self._add_rows_mark_sections(cat_table, rows)
         total_hours = report["total_hours"]
         th_h = int(total_hours)
         th_m = int((total_hours - th_h) * 60)
-        table.border_title = f"[b][#63f3ff]Overview[/][/]   [#8d98a7]Total Time: {th_h}hrs {th_m:02d}min[/]"
-        table.border_subtitle = f"[#8d98a7]Lifetime total {format_signed_rich(report['total_points'])} pts[/]"
+        cat_table.border_title = f"[b][#63f3ff]Lifetime[/][/]   [#8d98a7]{th_h}hrs {th_m:02d}min[/]"
+        cat_table.border_subtitle = f"[#8d98a7]Total {format_signed_rich(report['total_points'])} pts[/]"
+
+        # ── Recovery Panel (left column, top) ──
+        recovery_data = cache.get_recovery_rows("ALL_TIME", "ALL")
+        rec_table = self.query_one("#overview-recovery-table", DataTable)
+        rec_table.clear(columns=False)
+        if recovery_data["rows"]:
+            recovery_tuples = [
+                (r["category"], 0, r["rate"], r["hours_needed"])
+                for r in recovery_data["rows"]
+            ]
+            rec_rows = _render_category_section(
+                recovery_tuples, _fmt_project_tree, _fmt_recovery_cells
+            )
+            rec_table.add_rows(rec_rows)
+        rec_container = self.query_one("#overview-recovery-container")
+        rec_container.border_title = "[b][#63f3ff]Recovery[/][/]"
+
+        # ── Recent Log Panel (right column, bottom) ──
+        log_table = self.query_one("#overview-recent-log-table", DataTable)
+        log_table.clear(columns=False)
+        neg_rows = cache.get_negative_log_rows(limit=30)
+        pos_rows = cache.get_positive_log_rows(limit=30)
+        combined = []
+        for r in neg_rows:
+            combined.append({"date": r["date"], "name": r["name"], "points": -r["points"]})
+        for r in pos_rows:
+            combined.append({"date": r["date"], "name": r["name"], "points": r["points"]})
+        combined.sort(key=lambda r: r["date"], reverse=True)
+        for entry in combined[:15]:
+            pts = entry["points"]
+            name_style = "[#37d994]" if pts >= 0 else "[#ff5f5f]"
+            log_table.add_row(
+                entry["date"],
+                Text.from_markup(f"{name_style}{entry['name']}[/]"),
+                fmt_pts_rich(pts),
+            )
+        log_table.move_cursor(row=0)
+        self.query_one("#overview-recent-log-wrapper").border_title = "[b][#63f3ff]Recent Activity[/][/]"
+
+        # ── Insights Panel (left column, bottom) ──
+        insights = self.query_one("#overview-insights", Static)
+        week_report = cache.get_report_sections(self._active_week, "WEEK")
+        net = week_report["total_points"]
+        insights.update(
+            "[#8d98a7]Coming soon™[/]\n\n"
+            "[dim]Dynamic insights, trend analysis,\n"
+            "and other fancy pants features\n"
+            "will appear here. Eventually.\n\n"
+            "We heard you like data so we\n"
+            "put data in your data.[/]"
+        )
+        insights.border_title = "[b][#63f3ff]Insights[/][/]"
+        insights.border_subtitle = f"[#8d98a7]Week net {format_signed_rich(net)} pts[/]"
+        logger.debug("[SYNC] refresh_overview_view: done")
 
     def refresh_day_view(self):
         cache = self._data_cache
         metrics = cache.get_day_metrics(self.selected_day)
+        logger.debug("[SYNC] refresh_day_view: day=%s projects=%d negs=%d poss=%d hours=%.1f net=%.1f",
+                     self.selected_day,
+                     len(metrics.get("projects", {})),
+                     len(metrics.get("negative_results", [])),
+                     len(metrics.get("positive_results", [])),
+                     metrics.get("total_hours", 0),
+                     metrics.get("net", 0))
         table = self.query_one("#day-table", DataTable)
         table.clear(columns=False)
         pos_rows = [r for r in metrics["results"] if r[3] is not None and r[3] >= 0]
@@ -1491,85 +1633,13 @@ class TogglTUI(App):
             f"Negs [#ff5f5f]-{total_neg:.1f}[/]   Net {format_signed_rich(metrics['net'])}[/]"
         )
 
-    def refresh_negatives_view(self):
-        cache = self._data_cache
-        catalog = self.query_one("#negatives-catalog-table", DataTable)
-        catalog.clear(columns=False)
-        catalog.add_rows(
-            [
-                (name, fmt_pts_rich(-points))
-                for name, points in get_negative_catalog_rows()
-            ]
-        )
-        recent = self.query_one("#negatives-log-table", DataTable)
-        recent.clear(columns=False)
-        recent_rows = cache.get_negative_log_rows()
-        recent.add_rows(
-            [
-                (row["date"], row["name"], fmt_pts_rich(-row["points"]))
-                for row in recent_rows
-            ]
-        )
-        total_recent = sum(row["points"] for row in recent_rows)
-        catalog.border_title = "[b][#63f3ff]Catalog[/][/]"
-        recent.border_title = "[b][#63f3ff]Recent Log[/][/]"
-        recent.border_subtitle = f"[#8d98a7]Press n to log. Visible penalties: [#ff5f5f]-{total_recent:.0f}[/] pts[/]"
-
-    def refresh_positives_view(self):
-        cache = self._data_cache
-        catalog = self.query_one("#positives-catalog-table", DataTable)
-        catalog.clear(columns=False)
-        catalog.add_rows(
-            [
-                (name, fmt_pts_rich(points))
-                for name, points in get_positive_catalog_rows()
-            ]
-        )
-        recent = self.query_one("#positives-log-table", DataTable)
-        recent.clear(columns=False)
-        recent_rows = cache.get_positive_log_rows()
-        recent.add_rows(
-            [
-                (row["date"], row["name"], fmt_pts_rich(row["points"]))
-                for row in recent_rows
-            ]
-        )
-        total_recent = sum(row["points"] for row in recent_rows)
-        catalog.border_title = "[b][#63f3ff]Catalog[/][/]"
-        recent.border_title = "[b][#63f3ff]Recent Log[/][/]"
-        recent.border_subtitle = f"[#8d98a7]Press p to log. Visible positives: [#37d994]+{total_recent:.0f}[/] pts[/]"
-
-    def refresh_recovery_view(self):
-        cache = self._data_cache
-        data = cache.get_recovery_rows("ALL_TIME", "ALL")
-        table = self.query_one("#recovery-table", DataTable)
-        table.clear(columns=False)
-
-        if not data["rows"]:
-            table.border_title = "[b][#63f3ff]Recovery[/][/]"
-            table.border_subtitle = "[#8d98a7]Already non-negative.[/]"
-            return
-
-        # Convert recovery dicts to tuples: (name, None, rate, hours_needed)
-        recovery_tuples = [
-            (r["category"], 0, r["rate"], r["hours_needed"])
-            for r in data["rows"]
-        ]
-
-        def _fmt_recovery_cells(name_text, _hours, rate, hours_needed, rate_color="", dim=""):
-            rate_text = Text(fmt_rate(rate), style=rate_color) if rate is not None else Text("")
-            return (
-                name_text,
-                rate_text,
-                Text(str(hours_needed)) if hours_needed is not None else Text(""),
-            )
-
-        rows = _render_category_section(recovery_tuples, _fmt_project_tree, _fmt_recovery_cells)
-        table.add_rows(rows)
-        table.border_title = "[b][#63f3ff]Recovery[/][/]"
-        table.border_subtitle = (
-            f"[#8d98a7]Current total {format_signed_rich(data['total_points'])} pts[/]"
-        )
+    def refresh_command_view(self):
+        """Refresh the Command tab's graph and controls."""
+        try:
+            cmd_tab = self.query_one(CommandTab)
+            cmd_tab.refresh_all()
+        except Exception:
+            pass  # Container may not be mounted yet
 
     def refresh_sync_view(self):
         status = get_sync_status_data()
@@ -1585,8 +1655,6 @@ class TogglTUI(App):
             status["quota_limit"] if status["quota_limit"] is not None else "Unknown"
         )
         rows = [
-            ("Current week", status["current_week"]),
-            ("Last updated", status["last_updated"]),
             (
                 "Projects cache",
                 "missing" if cache_age is None else f"{cache_age:.1f} days old",
@@ -1691,18 +1759,6 @@ class TogglTUI(App):
             return
         self.selected_day = new_day
         self.refresh_day_view()
-        self._sync_spark_days_cursor()
-
-    @on(DataTable.RowHighlighted, "#spark-days-table")
-    def spark_day_highlighted(self, event: DataTable.RowHighlighted):
-        if event.row_key is None:
-            return
-        new_day = str(event.row_key.value)
-        if new_day == self.selected_day:
-            return
-        self.selected_day = new_day
-        self.refresh_day_view()
-        self._sync_week_table_cursor()
 
     @on(DataTable.RowHighlighted, "#month-table")
     def month_row_highlighted(self, event: DataTable.RowHighlighted):
@@ -1717,28 +1773,6 @@ class TogglTUI(App):
         self._active_week = week_str
         self.refresh_week_view()
         self.update_status_line()
-
-    @on(Click, "#spark-catchup")
-    def on_catchup_click(self):
-        """Click catchup → navigate to Recovery view."""
-        RECOVERY_INDEX = 6
-        if self.active_view_index == RECOVERY_INDEX:
-            return
-        self.active_view_index = RECOVERY_INDEX
-        self._refresh_view_by_index(RECOVERY_INDEX)
-        self.update_tabs()
-        self.update_view_visibility()
-        self.update_status_line()
-        self.focus_active_view()
-        self._schedule_resize()
-
-    def _sync_spark_days_cursor(self):
-        table = self.query_one("#spark-days-table", DataTable)
-        for i, key in enumerate(table.rows.keys()):
-            if str(key.value) == self.selected_day:
-                with table.prevent(DataTable.RowHighlighted):
-                    table.move_cursor(row=i, animate=False)
-                break
 
     def _sync_week_table_cursor(self):
         table = self.query_one("#week-table", DataTable)
@@ -1813,6 +1847,7 @@ class TogglTUI(App):
         )
 
     def action_sync_current_week(self):
+        logger.debug("[SYNC] action_sync_current_week: user pressed 'u'")
         def after_confirm(confirmed):
             if confirmed:
                 self.notify("Syncing current week...")
@@ -1825,13 +1860,21 @@ class TogglTUI(App):
 
     @work(thread=True)
     def _do_sync_current_week(self):
+        logger.debug("[SYNC] _do_sync_current_week: starting")
         try:
             result = sync_current_week_light(prompt_on_warning=False)
+            logger.debug("[SYNC] sync_current_week_light returned: %s", result)
         except (TogglRateLimitError, TogglAPIError) as e:
+            logger.exception("[SYNC] Toggl API error during sync")
             self.call_from_thread(self.notify, str(e), severity="error")
+            return
+        except Exception as e:
+            logger.exception("[SYNC] Unexpected error in sync worker")
+            self.call_from_thread(self.notify, f"Sync error: {e}", severity="error")
             return
         ok = result["success"]
         message = result.get("message", "")
+        logger.debug("[SYNC] calling _on_sync_done: ok=%s, message=%s", ok, message)
         self.call_from_thread(self._on_sync_done, ok, message, "Synced current week")
 
     def action_sync_full(self):
@@ -1857,9 +1900,16 @@ class TogglTUI(App):
         self.call_from_thread(self._on_sync_done, ok, message, "Synced last 4 weeks")
 
     def _on_sync_done(self, ok, message, success_msg):
+        logger.debug("[SYNC] _on_sync_done: ok=%s, message=%s", ok, message)
         load_runtime_settings()
         reset_cache()
-        self.refresh_all_views()
+        try:
+            self.refresh_all_views()
+            logger.debug("[SYNC] refresh_all_views completed")
+        except Exception as e:
+            logger.exception("[SYNC] refresh_all_views FAILED")
+            self.notify(f"View refresh error: {e}", severity="error")
+            return
         if ok:
             self.notify(success_msg)
         else:
@@ -1927,6 +1977,22 @@ class TogglTUI(App):
 
         self.push_screen(PositiveInputScreen(), after_input)
 
+    def action_cmd_zoom_in(self):
+        if self.active_view_index == 1:
+            self.query_one(CommandTab)._on_zoom_in()
+
+    def action_cmd_zoom_out(self):
+        if self.active_view_index == 1:
+            self.query_one(CommandTab)._on_zoom_out()
+
+    @on(Button.Pressed, "#btn-neg-log")
+    def on_neg_log_btn(self):
+        self.action_add_negative()
+
+    @on(Button.Pressed, "#btn-pos-log")
+    def on_pos_log_btn(self):
+        self.action_add_positive()
+
     def on_resize(self, event) -> None:
         new_size = event.size
         if new_size.width == 0 or new_size.height == 0:
@@ -1940,13 +2006,7 @@ class TogglTUI(App):
         table_ids = [
             "#week-table",
             "#week-category-table",
-            "#overview-table",
             "#day-table",
-            "#negatives-catalog-table",
-            "#negatives-log-table",
-            "#positives-catalog-table",
-            "#positives-log-table",
-            "#recovery-table",
             "#sync-table",
         ]
         text_cols = {"Category", "Negative", "Positive", "Metric", "Value", "Cate"}
@@ -2060,34 +2120,4 @@ class TogglTUI(App):
             table.refresh(layout=True)
             table.scroll_to(x=0, animate=False)
 
-        # ── Spark rail tables (fixed 34-char rail) ─────────────────────────
-        # These are independent of the main content area.  Give the label col
-        # a fixed 4-char width; the Net col gets whatever remains.
-        SPARK_RAIL_W = 34
-        for t_id in ("#spark-weeks-table", "#spark-days-table"):
-            try:
-                table = self.query_one(t_id, DataTable)
-            except Exception:
-                continue
-            if not table.columns:
-                continue
-            if not table.display:
-                continue
-
-            col_keys = list(table.columns.keys())
-            cell_padding = table.cell_padding
-            # DataTable border = 2 chars; 2*padding per column
-            inner_w = SPARK_RAIL_W - 2
-            total_padding = 2 * cell_padding * len(col_keys)
-            content_budget = max(8, inner_w - total_padding)
-
-            label_w = 6
-            net_w = max(4, content_budget - label_w)
-
-            for i, key in enumerate(col_keys):
-                table.columns[key].width = label_w if i == 0 else net_w
-                table.columns[key].auto_width = False
-
-            table._require_update_dimensions = True
-            table.refresh(layout=True)
-            table.scroll_to(x=0, animate=False)
+        # ── Spark rail tables (disabled) ───────────────────────────────────
