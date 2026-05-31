@@ -64,7 +64,7 @@ class PeriodController:
         return self._mode
 
     @mode.setter
-    def mode(self, value: str):
+    def mode(self, value: str) -> None:
         if value not in (PeriodMode.DAY, PeriodMode.WEEK, PeriodMode.MONTH):
             raise ValueError(f"Invalid mode: {value}")
         self._mode = value
@@ -84,7 +84,7 @@ class PeriodController:
         return self._scale_index
 
     @scale_index.setter
-    def scale_index(self, value: int):
+    def scale_index(self, value: int) -> None:
         max_i = len(self._scales()) - 1
         self._scale_index = max(0, min(value, max_i))
 

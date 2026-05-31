@@ -12,6 +12,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Button, DataTable, Static
 
+from toggl.cache import DataCache
 from toggl.api import API_RUN_STATS, _format_reset_window
 from toggl.formatters import (
     _fmt_recovery_cells,
@@ -293,7 +294,7 @@ class OverviewPanel(Container):
             except Exception:
                 pass
 
-    def refresh_data(self, cache, active_week: str) -> None:
+    def refresh_data(self, cache: DataCache, active_week: str) -> None:
         """Reload all overview panels from the given DataCache."""
         try:
             self._refresh_categories(cache, active_week)
@@ -303,7 +304,7 @@ class OverviewPanel(Container):
         except Exception:
             logger.exception("OverviewPanel.refresh_data failed")
 
-    def _refresh_categories(self, cache, active_week: str) -> None:
+    def _refresh_categories(self, cache: DataCache, active_week: str) -> None:
         report = MetricsService(cache).get_report_sections("ALL_TIME", "ALL")
         cat_table = self.query_one("#overview-categories-table", DataTable)
         cat_table.clear(columns=False)
@@ -315,7 +316,7 @@ class OverviewPanel(Container):
         cat_table.border_title = f"[b][#63f3ff]Lifetime[/][/]   [#8d98a7]{th_h}hrs {th_m:02d}min[/]"
         cat_table.border_subtitle = f"[#8d98a7]Total {format_signed_rich(report['total_points'])} pts[/]"
 
-    def _refresh_recovery(self, cache) -> None:
+    def _refresh_recovery(self, cache: DataCache) -> None:
         recovery_data = cache.get_recovery_rows("ALL_TIME", "ALL")
         rec_table = self.query_one("#overview-recovery-table", DataTable)
         rec_table.clear(columns=False)
@@ -331,7 +332,7 @@ class OverviewPanel(Container):
         rec_container = self.query_one("#overview-recovery-container")
         rec_container.border_title = "[b][#63f3ff]Recovery[/][/]"
 
-    def _refresh_recent_log(self, cache) -> None:
+    def _refresh_recent_log(self, cache: DataCache) -> None:
         log_table = self.query_one("#overview-recent-log-table", DataTable)
         log_table.clear(columns=False)
         neg_rows = cache.get_negative_log_rows(limit=30)
@@ -353,7 +354,7 @@ class OverviewPanel(Container):
         log_table.move_cursor(row=0)
         self.query_one("#overview-recent-log-wrapper").border_title = "[b][#63f3ff]Recent Activity[/][/]"
 
-    def _refresh_insights(self, cache, active_week: str) -> None:
+    def _refresh_insights(self, cache: DataCache, active_week: str) -> None:
         insights = self.query_one("#overview-insights", Static)
         week_report = MetricsService(cache).get_report_sections(active_week, "WEEK")
         net = week_report["total_points"]

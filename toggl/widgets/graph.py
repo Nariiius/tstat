@@ -118,12 +118,12 @@ class GraphWidget(Widget):
         self._mode: str = "net"
         self._avg: float | None = None
 
-    def set_data(self, dates: list[str], values: list[float], avg: float | None = None):
+    def set_data(self, dates: list[str], values: list[float], avg: float | None = None) -> None:
         self._dates = dates
         self._values = values
         self._avg = avg
 
-    def set_mode(self, mode: str):
+    def set_mode(self, mode: str) -> None:
         self._mode = mode
 
     def render(self) -> RenderResult:

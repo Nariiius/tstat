@@ -52,7 +52,7 @@ def calculate(projects: dict[str, float]) -> list[tuple[str, float, float | None
         pts = round(hours * rate, 2) if rate is not None else None
         results.append((name, hours, rate, pts))
 
-    def sort_key(r):
+    def sort_key(r: tuple[str, float, float | None, float | None]) -> tuple[int, int, float]:
         if r[2] is None:
             return (1, 0, 0)
         return (0, -r[2], -(r[3] or 0))

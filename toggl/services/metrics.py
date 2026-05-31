@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from toggl.cache import DataCache, get_week_dates, get_current_week, get_week_str
 from toggl.calc import calculate
@@ -19,7 +19,7 @@ class MetricsService:
     def __init__(
         self,
         cache: DataCache,
-        get_daily_target=_get_daily_target,
+        get_daily_target: Callable[[], float] = _get_daily_target,
     ):
         self._cache = cache
         self._get_daily_target = get_daily_target

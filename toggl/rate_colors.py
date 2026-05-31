@@ -26,8 +26,8 @@ class RateColors:
             return None
         return self._map.get(rate)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._map)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"RateColors({len(self._map)} mapping{'s' if len(self._map) != 1 else ''})"

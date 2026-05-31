@@ -47,8 +47,8 @@ class CategoryRegistry:
         """Return categories in config order."""
         return list(self._categories)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._categories)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"CategoryRegistry({len(self._categories)} categories)"
