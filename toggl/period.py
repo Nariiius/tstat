@@ -140,6 +140,27 @@ class PeriodController:
         day = min(d.day, last_day)
         return date(year, month, day)
 
+    def get_base_range(self) -> tuple[date, date]:
+        """Return (start_date, end_date) for exactly 1 unit of the current mode (1 day, 1 week, 1 month)."""
+        today = date.today()
+
+        if self._mode == PeriodMode.DAY:
+            anchor = today + timedelta(days=self._offset)
+            return anchor, anchor
+
+        elif self._mode == PeriodMode.WEEK:
+            current_sunday = _get_sunday(today)
+            anchor_sunday = current_sunday + timedelta(weeks=self._offset)
+            end = anchor_sunday + timedelta(days=6)
+            return anchor_sunday, end
+
+        else:  # MONTH
+            anchor_month = self._add_months(today, self._offset)
+            start = anchor_month.replace(day=1)
+            next_month = self._add_months(start, 1)
+            end = next_month - timedelta(days=1)
+            return start, end
+
     def get_visible_range(self) -> tuple[date, date]:
         """Return (start_date, end_date) for the graph's visible range."""
         today = date.today()

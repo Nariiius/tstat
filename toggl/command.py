@@ -39,8 +39,9 @@ def _net_color(value: float) -> str:
 def _label_for_day(
     d: date,
     today: date,
-    anchor: date | None,
+    anchor: date,
     anchor_week_set: set[date] | None,
+    mode: str,
     display_month: int,
     display_year: int,
     net: float,
@@ -51,18 +52,43 @@ def _label_for_day(
     if bg:
         label = f"[{bg}]{label}[/]"
 
-    if d == anchor and d == today:
-        label = f"[bold #e2b714 on #1e2a36]{label}[/]"
-    elif d == today:
-        label = f"[bold #e2b714]{label}[/]"
-    elif d == anchor:
-        label = f"[bold #63f3ff]{label}[/]"
-    elif anchor_week_set and d in anchor_week_set:
-        label = f"[#63f3ff]{label}[/]"
-    elif d.month != display_month or d.year != display_year:
-        label = f"[dim #4a5568]{label}[/]"
-    return label
+    # Determine if 'd' is in the "current real-world period"
+    is_current_period = False
+    if mode == "day":
+        is_current_period = (d == today)
+    elif mode == "week":
+        is_current_period = (d.isocalendar()[:2] == today.isocalendar()[:2])
+    elif mode == "month":
+        is_current_period = (d.month == today.month and d.year == today.year)
 
+    # 1. Base style for selected anchors (reverted to original behavior)
+    style = ""
+    if d == anchor and d == today:
+        style = "bold #e2b714"
+    elif d == today:
+        style = "bold #e2b714"
+    elif d == anchor:
+        style = "bold #63f3ff"
+    elif anchor_week_set and d in anchor_week_set:
+        style = "#63f3ff"
+    elif d.month != display_month or d.year != display_year:
+        style = "dim #4a5568"
+
+    # 2. Add the background highlight if it's the real-world current period
+    if is_current_period:
+        if style:
+            style += " on #1e2a36"
+        else:
+            style = "on #1e2a36"
+
+    # 3. Apply the fallback background for today-anchor if not handled
+    if d == anchor and d == today and not is_current_period:
+        style += " on #1e2a36"
+
+    if style:
+        label = f"[{style}]{label}[/]"
+        
+    return label
 
 def _get_anchor_week_dates(anchor: date) -> set[date]:
     monday = anchor - timedelta(days=anchor.weekday())
@@ -74,6 +100,8 @@ def _get_anchor_week_dates(anchor: date) -> set[date]:
 
 class CalendarWidget(Static):
     """Month-grid calendar sidebar with net-based heatmap coloring."""
+
+    can_focus = True
 
     DEFAULT_CSS = """
     CalendarWidget {
@@ -127,6 +155,13 @@ class CalendarWidget(Static):
     .cal-day {
         color: #d7dde8;
     }
+    .cal-row > .cal-week-num {
+        width: 2;
+        text-align: right;
+        margin-right: 1;
+        color: #3d4f63;
+        text-style: bold;
+    }
     """
 
     def __init__(self, command_tab: "CommandTab"):
@@ -147,10 +182,12 @@ class CalendarWidget(Static):
             yield Button(">>", id="cal-next-month")
         with Container(id="cal-grid"):
             with Horizontal(classes="cal-row"):
+                yield Label("", classes="cal-week-num")
                 for dn in day_names:
                     yield Label(dn, classes="cal-dotw")
             for row_idx in range(6):
                 with Horizontal(classes="cal-row"):
+                    yield Label("", id=f"cal-week-{row_idx}", classes="cal-week-num")
                     for col_idx in range(7):
                         cell_idx = row_idx * 7 + col_idx
                         yield Label("", id=f"cal-day-{cell_idx}", classes="cal-day")
@@ -169,13 +206,18 @@ class CalendarWidget(Static):
 
         self.query_one("#cal-month-label", Label).update(first_day.strftime("%B %Y"))
 
+        for row_idx in range(6):
+            row_start_date = grid_start + timedelta(days=row_idx * 7)
+            week_num = row_start_date.isocalendar()[1]
+            self.query_one(f"#cal-week-{row_idx}", Label).update(str(week_num))
+
         for i in range(42):
             label = self.query_one(f"#cal-day-{i}", Label)
             day_date = grid_start + timedelta(days=i)
             d_str = day_date.strftime("%Y-%m-%d")
             net = self._day_nets.get(d_str, 0.0)
             markup = _label_for_day(
-                day_date, today, anchor, anchor_week,
+                day_date, today, anchor, anchor_week, pc.mode,
                 self._display_month, self._display_year, net,
             )
             label.update(markup)
@@ -230,6 +272,10 @@ class CalendarWidget(Static):
             pc.set_from_month(clicked_date)
         self._command.refresh_all()
 
+    def on_click(self, event) -> None:
+        """Focus the calendar when clicked anywhere."""
+        self.focus()
+
 
 # ── CommandTab ────────────────────────────────────────────────────────
 
@@ -259,7 +305,9 @@ class CommandTab(Container):
 
     /* ── Top section: graph + calendar ────────────────── */
     #cmd-top-section {
-        height: 3fr;
+        height: 1fr;
+        min-height: 10;
+        max-height: 16;
     }
     #cmd-graph-panel {
         width: 1fr;
@@ -275,25 +323,27 @@ class CommandTab(Container):
         height: 1fr;
     }
 
-    /* ── Graph header (2 rows: nav + period modes) ───── */
+    /* ── Graph header (L1.controls) ── */
     #cmd-graph-header {
-        height: auto;
+        height: 1;
         padding: 0 1;
     }
-    #cmd-nav-row {
-        height: auto;
+    #cmd-l1-controls {
+        height: 1;
         layout: horizontal;
         align: center middle;
     }
-    #cmd-nav-row > Button {
-        background: transparent;
+    .nav-btn {
+        background: #0b1016;
         border: none;
         min-width: 5;
+        height: 1;
         color: #8d98a7;
     }
-    #cmd-nav-row > Button:hover {
+    .nav-btn:hover {
         color: #63f3ff;
         background: #1e2a36;
+        border: none;
     }
     #cmd-period-label {
         width: 1fr;
@@ -301,43 +351,23 @@ class CommandTab(Container):
         color: #63f3ff;
         text-style: bold;
     }
-
-    #cmd-control-row {
-        height: auto;
-        layout: horizontal;
-        align: center middle;
-    }
-    .period-mode-btn {
-        background: transparent;
+    .cycle-btn {
+        background: #0b1016;
         border: none;
-        padding: 0 1;
+        padding: 0;
         min-width: 4;
-        color: #8d98a7;
+        height: 1;
+        color: #63f3ff;
+        text-style: bold;
     }
-    .period-mode-btn:hover {
+    .cycle-btn:hover {
         color: #63f3ff;
         background: #1e2a36;
+        border: none;
     }
-    .period-mode-btn.selected {
-        color: #63f3ff;
-    }
-    #cmd-period-sep {
+    .cmd-period-sep {
         color: #3d4f63;
-        margin: 0 1;
-    }
-
-    #cmd-stats-row {
-        height: auto;
-        padding: 0 2;
-        color: #8d98a7;
-    }
-    #cmd-stats-row > Label {
-        width: 1fr;
-        text-align: center;
-    }
-    #cmd-stats-net {
-        color: #d7dde8;
-        text-style: bold;
+        margin: 0;
     }
 
     /* ── Graph area ───────────────────────────────────── */
@@ -345,65 +375,17 @@ class CommandTab(Container):
         height: 1fr;
     }
 
-    /* ── Graph footer (mode selector + scale) ────────── */
-    #cmd-graph-footer {
-        height: auto;
-        layout: horizontal;
-        align: center middle;
-        padding: 0 1;
-    }
-    #cmd-graph-footer > Label {
-        color: #3d4f63;
-    }
-    .graph-mode-btn {
-        background: transparent;
-        border: none;
-        padding: 0 1;
-        color: #8d98a7;
-        min-width: 4;
-        height: 1;
-    }
-    .graph-mode-btn:hover {
-        color: #d7dde8;
-        background: #1e2a36;
-    }
-    .graph-mode-btn.selected {
-        color: #0b1016;
-        background: #63f3ff;
-        text-style: bold;
-    }
-    .scale-btn {
-        background: transparent;
-        border: none;
-        padding: 0 1;
-        min-width: 4;
-        height: 1;
-        color: #8d98a7;
-    }
-    .scale-btn:hover {
-        color: #d7dde8;
-        background: #1e2a36;
-    }
-    .scale-btn.selected {
-        color: #0b1016;
-        background: #63f3ff;
-        text-style: bold;
-    }
-    .scale-btn.hidden {
-        display: none;
-    }
-
     /* ── Bottom section: two tables ────────────────────── */
     #cmd-bottom-section {
-        height: 1fr;
-        min-height: 4;
+        height: 2fr;
+        min-height: 10;
     }
     #cmd-category-panel {
-        width: 35%;
+        width: 55%;
         height: 1fr;
     }
     #cmd-daily-panel {
-        width: 1fr;
+        width: 45%;
         height: 1fr;
     }
     #cmd-category-table, #cmd-daily-table {
@@ -427,15 +409,15 @@ class CommandTab(Container):
     }
     """
 
-    GRAPH_MODES = ["trajectory", "positive", "negative", "logged_pos", "logged_neg"]
-    GRAPH_MODE_LABELS = ["Net", "Pos", "Neg", "Log+", "Log-"]
+    GRAPH_MODES = ["net", "positive", "negative"]
+    GRAPH_MODE_LABELS = ["Net", "Pos", "Neg"]
 
     PERIOD_MODES = [PeriodMode.DAY, PeriodMode.WEEK, PeriodMode.MONTH]
 
     def __init__(self, *args, **kwargs):
         super().__init__(id="command-container", *args, **kwargs)
         self.period = PeriodController()
-        self._current_graph_mode = "trajectory"
+        self._current_graph_mode = "net"
 
     # ── Compose ──────────────────────────────────────────────────────
 
@@ -445,7 +427,6 @@ class CommandTab(Container):
             with Vertical(id="cmd-graph-panel"):
                 yield from self._compose_graph_header()
                 yield GraphWidget(id="cmd-graph")
-                yield from self._compose_graph_footer()
             with Container(id="cmd-calendar-col"):
                 yield CalendarWidget(self)
 
@@ -463,36 +444,19 @@ class CommandTab(Container):
                 )
 
     def _compose_graph_header(self):
-        """Yield graph panel header (2 rows: nav + period modes)."""
+        """Yield graph panel header (L1.controls)."""
         with Container(id="cmd-graph-header"):
-            # Row 1: navigation
-            with Horizontal(id="cmd-nav-row"):
-                yield Button("<<<", id="cmd-prev")
+            # Row 1: L1.controls
+            with Horizontal(id="cmd-l1-controls"):
+                yield Button("<<<", id="cmd-prev", classes="nav-btn")
                 yield Label("...", id="cmd-period-label")
-                yield Button(">>>", id="cmd-next")
-            # Row 2: period modes
-            with Horizontal(id="cmd-control-row"):
-                for mode in self.PERIOD_MODES:
-                    cls = "period-mode-btn selected" if mode == self.period.mode else "period-mode-btn"
-                    yield Button(PeriodMode.label(mode), id=f"cmd-period-{mode}", classes=cls)
-            # Row 3: statistics (stacked, NET prominent)
-            with Vertical(id="cmd-stats-row"):
-                yield Label("", id="cmd-stats-best")
-                yield Label("", id="cmd-stats-net")
-                yield Label("", id="cmd-stats-worst")
-                yield Label("", id="cmd-stats-avg")
-
-    def _compose_graph_footer(self):
-        """Yield graph panel footer (mode selector + scale)."""
-        with Horizontal(id="cmd-graph-footer"):
-            for mode, label in zip(self.GRAPH_MODES, self.GRAPH_MODE_LABELS):
-                cls = "graph-mode-btn selected" if mode == self._current_graph_mode else "graph-mode-btn"
-                yield Button(label, id=f"cmd-gmode-{mode}", classes=cls)
-                if mode != self.GRAPH_MODES[-1]:
-                    yield Label("|")
-            yield Label("|")
-            for scale_val in [7, 30, 90, 365, 4, 13, 26, 52, 3, 6, 12]:
-                yield Button(str(scale_val), id=f"cmd-scale-{scale_val}", classes="scale-btn hidden")
+                yield Button(">>>", id="cmd-next", classes="nav-btn")
+                yield Label("|", classes="cmd-period-sep")
+                yield Button("View: Day ↻", id="cmd-cycle-period", classes="cycle-btn")
+                yield Label("|", classes="cmd-period-sep")
+                yield Button("Range: 7d ↻", id="cmd-cycle-scale", classes="cycle-btn")
+                yield Label("|", classes="cmd-period-sep")
+                yield Button("Metric: Net ↻", id="cmd-cycle-metric", classes="cycle-btn")
 
     # ── Mount ────────────────────────────────────────────────────────
 
@@ -503,7 +467,7 @@ class CommandTab(Container):
         cat.show_cursor = True
 
         daily = self.query_one("#cmd-daily-table", DataTable)
-        daily.add_columns("Day", "Date", "Hours", "Positive", "Negative", "Net")
+        daily.add_columns("Date", "Positive", "Negative", "Net")
         daily.styles.min_height = 1
         daily.show_cursor = True
 
@@ -514,24 +478,24 @@ class CommandTab(Container):
     def refresh_all(self):
         """Single refresh entry point — graph, calendar, tables, stats, controls."""
         start, end = self.period.get_visible_range()
+        base_start, base_end = self.period.get_base_range()
 
         from toggl.cache import DataCache
         cache = DataCache.load()
         daily_data = cache.get_daily_data_for_range(start, end)
+        base_daily_data = cache.get_daily_data_for_range(base_start, base_end)
 
         # ── Graph data ──────────────────────────────────────────────
         mode_field_map = {
-            "trajectory": "net",
+            "net": "net",
             "positive": "positive",
             "negative": "negative",
-            "logged_pos": "logged_pos",
-            "logged_neg": "logged_neg",
         }
         field = mode_field_map[self._current_graph_mode]
         dates = [d["date"] for d in daily_data]
         raw_values = [d[field] for d in daily_data]
 
-        if self._current_graph_mode == "trajectory":
+        if self._current_graph_mode == "net":
             values = []
             cum = 0.0
             for v in raw_values:
@@ -553,8 +517,8 @@ class CommandTab(Container):
         cal.set_day_net_values(net_map)
         cal.rebuild()
 
-        # ── Category table (aggregated over visible range) ──────────
-        self._refresh_category_table(cache, start, end)
+        # ── Category table (aggregated over base range) ──────────
+        self._refresh_category_table(cache, base_start, base_end)
 
         # ── Daily breakdown table ───────────────────────────────────
         self._refresh_daily_table(daily_data)
@@ -613,62 +577,126 @@ class CommandTab(Container):
     def _refresh_daily_table(self, daily_data):
         import toggl.tui as _tui
         from rich.text import Text as RichText
+        from datetime import date, timedelta
 
         table = self.query_one("#cmd-daily-table", DataTable)
         table.clear(columns=False)
-        table.border_title = "[b][#63f3ff]Daily Breakdown[/][/]"
+        
+        title_map = {"day": "Daily", "week": "Weekly", "month": "Monthly"}
+        title_word = title_map.get(self.period.mode, "Daily")
+        table.border_title = f"[b][#63f3ff]{title_word} Breakdown[/][/]"
 
-        for day in daily_data:
-            d_str = day["date"]
-            try:
-                d = date.fromisoformat(d_str)
-            except (ValueError, TypeError):
-                continue
-            day_name = d.strftime("%a")
-            date_short = d.strftime("%d %b")
-            hours = day["total_hours"]
-            positive = day["positive"]
-            negative = day["negative"]
-            net = day["net"]
-            has_data = day["has_data"]
-            is_today = d == date.today()
+        aggregated = []
+        if self.period.mode == "week":
+            current_group = None
+            for day in daily_data:
+                try:
+                    d = date.fromisoformat(day["date"])
+                except:
+                    continue
+                monday = d - timedelta(days=d.weekday())
+                if current_group is None or current_group["start_date"] != monday:
+                    current_group = {
+                        "start_date": monday,
+                        "label": f"Wk {monday.isocalendar()[1]}",
+                        "positive": 0.0,
+                        "negative": 0.0,
+                        "net": 0.0,
+                        "has_data": False,
+                        "contains_today": False,
+                    }
+                    aggregated.append(current_group)
+                
+                current_group["positive"] += day["positive"]
+                current_group["negative"] += day["negative"]
+                current_group["net"] += day["net"]
+                if day["has_data"]: current_group["has_data"] = True
+                if d == date.today(): current_group["contains_today"] = True
+
+        elif self.period.mode == "month":
+            current_group = None
+            for day in daily_data:
+                try:
+                    d = date.fromisoformat(day["date"])
+                except:
+                    continue
+                month_key = (d.year, d.month)
+                if current_group is None or current_group["month_key"] != month_key:
+                    current_group = {
+                        "month_key": month_key,
+                        "label": d.strftime('%b %Y'),
+                        "positive": 0.0,
+                        "negative": 0.0,
+                        "net": 0.0,
+                        "has_data": False,
+                        "contains_today": False,
+                    }
+                    aggregated.append(current_group)
+                
+                current_group["positive"] += day["positive"]
+                current_group["negative"] += day["negative"]
+                current_group["net"] += day["net"]
+                if day["has_data"]: current_group["has_data"] = True
+                if d == date.today(): current_group["contains_today"] = True
+
+        else:
+            for day in daily_data:
+                try:
+                    d = date.fromisoformat(day["date"])
+                except:
+                    continue
+                aggregated.append({
+                    "label": f"{d.strftime('%a')} {d.strftime('%d %b')}",
+                    "positive": day["positive"],
+                    "negative": day["negative"],
+                    "net": day["net"],
+                    "has_data": day["has_data"],
+                    "contains_today": d == date.today(),
+                })
+
+        for i, item in enumerate(aggregated):
+            positive = item["positive"]
+            negative = item["negative"]
+            net = item["net"]
+            has_data = item["has_data"]
+            is_today = item["contains_today"]
+            label = item["label"]
 
             if is_today:
-                day_cell = f"[bold #e2b714]{day_name} ◀[/]"
+                date_cell = f"[bold #e2b714]{label} ◀[/]"
             elif not has_data:
-                day_cell = f"[dim]{day_name}[/]"
+                date_cell = f"[dim]{label}[/]"
             else:
-                day_cell = day_name
+                date_cell = label
 
-            hour_text = "—" if hours == 0 else f"{hours:.1f}h"
             pos_text = "—" if positive == 0 else f"[#37d994]+{positive:.1f}[/]"
             neg_text = "—" if negative == 0 else f"[#ff5f5f]-{negative:.1f}[/]"
 
             table.add_row(
-                RichText.from_markup(day_cell),
-                date_short,
-                hour_text,
+                RichText.from_markup(date_cell),
                 RichText.from_markup(pos_text),
                 RichText.from_markup(neg_text),
                 _tui.format_signed_rich(net),
-                key=d_str,
+                key=str(i),
             )
 
     # ── Statistics ────────────────────────────────────────────────────
 
     def _update_stats(self, raw_values):
         nonzero = [v for v in raw_values if v != 0]
+        panel = self.query_one("#cmd-graph-panel")
         if nonzero:
-            t, b, w, a = round(sum(raw_values), 1), max(nonzero), min(nonzero), round(sum(nonzero) / len(nonzero), 1)
-            for lid, text in [("#cmd-stats-best", f"[#8d98a7]BEST[/] [#37d994]+{int(b)}[/]"),
-                               ("#cmd-stats-net",  f"[#d7dde8]NET  {t:+.0f}[/]"),
-                               ("#cmd-stats-worst", f"[#8d98a7]WORST[/] [#ff5f5f]{int(w)}[/]"),
-                               ("#cmd-stats-avg",  f"[#8d98a7]AVG[/] {a:+.0f}")]:
-                self.query_one(lid, Label).update(text)
+            t, b, w = round(sum(raw_values), 1), max(nonzero), min(nonzero)
+            high_str = f"+{int(b)}" if b >= 0 else str(int(b))
+            low_str = f"+{int(w)}" if w >= 0 else str(int(w))
+            
+            t_color = "#37d994" if t > 0 else ("#ff5f5f" if t < 0 else "")
+            t_markup = f"[{t_color}]{t:+.0f}[/]" if t_color else f"{t:+.0f}"
+            
+            text = f"HIGH [bold #37d994]{high_str}[/]   LOW [bold #ff5f5f]{low_str}[/]   NET [bold]{t_markup}[/]"
+            panel.border_subtitle = text
         else:
-            for lid in ("#cmd-stats-best", "#cmd-stats-net", "#cmd-stats-worst", "#cmd-stats-avg"):
-                try: self.query_one(lid, Label).update("")
-                except Exception: pass
+            panel.border_subtitle = ""
 
         # Graph panel title shows date range
         start, end = self.period.get_visible_range()
@@ -683,37 +711,24 @@ class CommandTab(Container):
     # ── Controls ─────────────────────────────────────────────────────
 
     def _update_controls(self):
-        self.query_one("#cmd-period-label", Label).update(self.period.get_period_label())
-        self._show_scale_buttons()
-        self._highlight_selected_buttons()
+        """Update the L1 labels, controls, and cycle buttons."""
+        lbl = self.query_one("#cmd-period-label", Label)
+        lbl.update(self.period.get_period_label())
+        self._update_cycle_labels()
 
-    def _show_scale_buttons(self):
-        """Show only scale buttons valid for the current mode, hide the rest.
-        Also updates button labels to match current mode's scale labels."""
-        active_scales = set(self.period.scales)
-        for btn in self.query(".scale-btn"):
-            try:
-                scale_val = int(btn.id.replace("cmd-scale-", ""))
-            except (ValueError, AttributeError):
-                continue
-            if scale_val in active_scales:
-                btn.remove_class("hidden")
-                # Update label to show proper scale label for current mode
-                btn.label = PeriodController._SCALE_LABELS.get(
-                    self.period.mode, {}).get(scale_val, str(scale_val))
-            else:
-                btn.add_class("hidden")
+    def _update_cycle_labels(self):
+        """Update cycle button labels based on the current state."""
+        from toggl.period import PeriodMode
+        period_btn = self.query_one("#cmd-cycle-period", Button)
+        period_btn.label = f"View: {PeriodMode.label(self.period.mode)} ↻"
 
-    def _highlight_selected_buttons(self):
-        """Set .selected class on active period mode and scale buttons."""
-        for btn in self.query(".period-mode-btn"):
-            btn.set_class(btn.id == f"cmd-period-{self.period.mode}", "selected")
-        for btn in self.query(".scale-btn"):
-            try:
-                scale_val = int(btn.id.replace("cmd-scale-", ""))
-                btn.set_class(scale_val == self.period.scale, "selected")
-            except (ValueError, AttributeError):
-                pass
+        metric_btn = self.query_one("#cmd-cycle-metric", Button)
+        metric_label = self.GRAPH_MODE_LABELS[self.GRAPH_MODES.index(self._current_graph_mode)]
+        metric_btn.label = f"Metric: {metric_label} ↻"
+
+        scale_btn = self.query_one("#cmd-cycle-scale", Button)
+        scale_btn.label = f"Range: {self.period.scale_label} ↻"
+
 
     # ── Event handlers ───────────────────────────────────────────────
 
@@ -727,27 +742,29 @@ class CommandTab(Container):
         self.period.next()
         self.refresh_all()
 
-    @on(Button.Pressed, ".period-mode-btn")
-    def _on_period_mode(self, event: Button.Pressed):
-        mode = event.button.id.replace("cmd-period-", "")
-        self.period.mode = mode
+    @on(Button.Pressed, "#cmd-cycle-period")
+    def _on_cycle_period(self, event: Button.Pressed):
+        modes = self.PERIOD_MODES
+        current_idx = modes.index(self.period.mode)
+        next_mode = modes[(current_idx + 1) % len(modes)]
+        self.period.mode = next_mode
         self.refresh_all()
 
-    @on(Button.Pressed, ".scale-btn")
-    def _on_scale(self, event: Button.Pressed):
-        try:
-            scale_val = int(event.button.id.replace("cmd-scale-", ""))
-            self.period.set_scale(scale_val)
-            self.refresh_all()
-        except (ValueError, AttributeError):
-            pass
-
-    @on(Button.Pressed, ".graph-mode-btn")
-    def _on_graph_mode(self, event: Button.Pressed):
-        mode = event.button.id.replace("cmd-gmode-", "")
-        if mode not in self.GRAPH_MODES:
-            return
-        self._current_graph_mode = mode
-        for btn in self.query(".graph-mode-btn"):
-            btn.set_class(btn.id == f"cmd-gmode-{mode}", "selected")
+    @on(Button.Pressed, "#cmd-cycle-metric")
+    def _on_cycle_metric(self, event: Button.Pressed):
+        modes = self.GRAPH_MODES
+        current_idx = modes.index(self._current_graph_mode)
+        next_mode = modes[(current_idx + 1) % len(modes)]
+        self._current_graph_mode = next_mode
         self.refresh_all()
+
+    @on(Button.Pressed, "#cmd-cycle-scale")
+    def _on_cycle_scale(self, event: Button.Pressed):
+        current_idx = self.period.scale_index
+        max_idx = self.period.scale_count - 1
+        if current_idx >= max_idx:
+            self.period.scale_index = 0
+        else:
+            self.period.scale_index = current_idx + 1
+        self.refresh_all()
+

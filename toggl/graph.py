@@ -14,13 +14,12 @@ _CYAN = (45, 212, 191)
 _PURPLE = (192, 132, 252)
 _CANVAS = (11, 16, 22)
 _BORDER = (25, 35, 45)
-_TICK_DIM = (50, 60, 75)
+_TICK_DIM = (141, 152, 167)
 _ZERO_LINE = (215, 221, 232)
 _AVG_LINE = (100, 120, 140)
 
 _MODE_COLORS = {
-    "trajectory": _GREEN, "positive": _GREEN, "negative": _RED,
-    "logged_pos": _CYAN, "logged_neg": _PURPLE,
+    "net": _GREEN, "positive": _GREEN, "negative": _RED,
 }
 
 
@@ -72,6 +71,8 @@ def _round_to(val: float, step: float) -> float:
 class GraphWidget(Widget):
     """Plotext-rendered trajectory chart."""
 
+    can_focus = True
+
     DEFAULT_CSS = """
     GraphWidget { width: 1fr; height: 1fr; }
     """
@@ -82,7 +83,7 @@ class GraphWidget(Widget):
         super().__init__(*args, **kwargs)
         self._dates: list[str] = []
         self._values: list[float] = []
-        self._mode: str = "trajectory"
+        self._mode: str = "net"
         self._avg: float | None = None
 
     def set_data(self, dates: list[str], values: list[float], avg: float | None = None):
@@ -102,13 +103,13 @@ class GraphWidget(Widget):
         plt.clear_data()
         plt.clear_figure()
 
-        w = max(10, self.size.width - 2)
-        h = max(5, self.size.height - 2)
+        w = max(10, self.size.width)
+        h = max(5, self.size.height)
         plt.plotsize(w, h)
 
         plt.theme("dark")
         plt.canvas_color(_CANVAS)
-        plt.axes_color(_BORDER)
+        plt.axes_color(_CANVAS)
         plt.ticks_color(_TICK_DIM)
         plt.frame(False)
         plt.grid(True)
@@ -123,14 +124,14 @@ class GraphWidget(Widget):
             med = _median(nonzero)
             max_abs = max(abs(lo), abs(hi))
 
-            # Cap extreme outliers: one terrible day shouldn't flatten everything
-            if med != 0 and max_abs > 3 * abs(med):
+            # Cap extreme outliers: one terrible day shouldn't flatten everything (disable for net mode)
+            if self._mode != "net" and med != 0 and max_abs > 3 * abs(med):
                 cap = 3 * abs(med)
                 lo = max(lo, -cap)
                 hi = min(hi, cap)
 
             pad = (hi - lo) * 0.15 or max_abs * 0.1
-            if self._mode == "trajectory":
+            if self._mode == "net":
                 bound = max(abs(lo - pad), abs(hi + pad), 1)
                 plt.ylim(-bound, bound)
             else:
@@ -144,6 +145,9 @@ class GraphWidget(Widget):
 
         line_color = _MODE_COLORS.get(self._mode, _GREEN)
         plt.plot(x_indices, self._values, color=line_color, marker="braille")
+
+        # Explicitly set X limits to cover exactly the data range
+        plt.xlim(0, n - 1)
 
         # Spread x-tick labels to avoid overlap
         step = max(1, n // self._MAX_XTICKS)
@@ -160,11 +164,29 @@ class GraphWidget(Widget):
 
         # ── Clean Y-axis ticks ─────────────────────────────────────
         if nonzero:
-            if self._mode == "trajectory":
-                plt.yticks([lo, 0, hi])
+            if self._mode == "net":
+                bound = max(abs(lo - pad), abs(hi + pad), 1)
+                ticks = [round(-bound, 1), 0.0, round(bound, 1)]
             else:
-                plt.yticks([lo, hi])
+                ymin = min(0, lo - pad)
+                ymax = hi + pad
+                ticks = [round(ymin, 1), round(ymax, 1)]
+            
+            if self._avg is not None:
+                ticks.append(round(self._avg, 1))
+            
+            plt.yticks(ticks)
         else:
-            plt.yticks([0])
+            ticks = [0.0]
+            if self._avg is not None:
+                ticks.append(round(self._avg, 1))
+            plt.yticks(ticks)
 
-        return Text.from_ansi(plt.build())
+        ansi_str = plt.build()
+        if ansi_str.endswith("\n"):
+            ansi_str = ansi_str[:-1]
+        return Text.from_ansi(ansi_str, no_wrap=True)
+
+    def on_click(self, event) -> None:
+        """Focus the graph when clicked."""
+        self.focus()
