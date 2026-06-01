@@ -5,6 +5,8 @@ Extracted from ``tui.py`` to enable independent testing and reduce file size.
 
 from __future__ import annotations
 
+from datetime import date
+
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
@@ -13,6 +15,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, OptionList, Static
 
 from toggl.config import NEGATIVES, POSITIVES
+from toggl.widgets.date_stepper import DateStepper
 
 
 class BaseDialog(ModalScreen):
@@ -141,13 +144,21 @@ class ConfirmScreen(BaseDialog):
 
 
 class NegativeInputScreen(BaseDialog):
-    """Pick a negative action to log."""
+    """Pick a negative action to log with optional date selection."""
+
+    DEFAULT_CSS = """
+    NegativeInputScreen #dialog-box {
+        min-width: 60;
+        max-width: 80;
+    }
+    """
 
     def __init__(self) -> None:
         super().__init__("Log Negative")
 
     def body(self) -> ComposeResult:
-        yield Static("Select a negative action to log.", classes="dialog-body")
+        yield Static("Adjust date if needed, then select an action.", classes="dialog-body")
+        yield DateStepper(id="negative-date-stepper")
         yield OptionList(id="negative-list")
         yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 
@@ -160,7 +171,11 @@ class NegativeInputScreen(BaseDialog):
 
     @on(OptionList.OptionSelected, "#negative-list")
     def submit_negative(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(str(event.option.prompt))
+        stepper = self.query_one("#negative-date-stepper", DateStepper)
+        self.dismiss({
+            "name": str(event.option.prompt),
+            "date": stepper.selected_date.strftime("%Y-%m-%d"),
+        })
 
     @on(Click, "#btn-cancel")
     def on_cancel_click(self) -> None:
@@ -168,13 +183,21 @@ class NegativeInputScreen(BaseDialog):
 
 
 class PositiveInputScreen(BaseDialog):
-    """Pick a positive action to log."""
+    """Pick a positive action to log with optional date selection."""
+
+    DEFAULT_CSS = """
+    PositiveInputScreen #dialog-box {
+        min-width: 60;
+        max-width: 80;
+    }
+    """
 
     def __init__(self) -> None:
         super().__init__("Log Positive")
 
     def body(self) -> ComposeResult:
-        yield Static("Select a positive action to log.", classes="dialog-body")
+        yield Static("Adjust date if needed, then select an action.", classes="dialog-body")
+        yield DateStepper(id="positive-date-stepper")
         yield OptionList(id="positive-list")
         yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 
@@ -187,7 +210,11 @@ class PositiveInputScreen(BaseDialog):
 
     @on(OptionList.OptionSelected, "#positive-list")
     def submit_positive(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(str(event.option.prompt))
+        stepper = self.query_one("#positive-date-stepper", DateStepper)
+        self.dismiss({
+            "name": str(event.option.prompt),
+            "date": stepper.selected_date.strftime("%Y-%m-%d"),
+        })
 
     @on(Click, "#btn-cancel")
     def on_cancel_click(self) -> None:
