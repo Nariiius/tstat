@@ -173,7 +173,6 @@ class NegativeInputScreen(BaseDialog):
     def body(self) -> ComposeResult:
         yield Static("Adjust date if needed, then select an action.", classes="dialog-body")
         yield DateStepper(id="negative-date-stepper")
-        yield Static("[dim]\u2190 \u2192 adjust date[/]", classes="dialog-help")
         yield OptionList(id="negative-list")
         yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 
@@ -217,7 +216,6 @@ class PositiveInputScreen(BaseDialog):
     def body(self) -> ComposeResult:
         yield Static("Adjust date if needed, then select an action.", classes="dialog-body")
         yield DateStepper(id="positive-date-stepper")
-        yield Static("[dim]\u2190 \u2192 adjust date[/]", classes="dialog-help")
         yield OptionList(id="positive-list")
         yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
 

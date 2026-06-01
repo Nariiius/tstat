@@ -149,7 +149,9 @@ class ManageScreen(ModalScreen):
                         id="edit-bar-help",
                     )
                 yield Static(
-                    "[bold #63f3ff]d[/] delete  [bold #63f3ff]e[/] edit date  [bold #8d98a7]Esc[/] close",
+                    "[bold #63f3ff]d[/] [dim]delete[/]    "
+                    "[bold #63f3ff]e[/] [dim]edit date[/]    "
+                    "[bold #8d98a7]Esc[/] [dim]close[/]",
                     id="manage-help",
                 )
 
@@ -201,7 +203,7 @@ class ManageScreen(ModalScreen):
             rows = cache.get_negative_log_rows(limit=10000)
             for idx, r in enumerate(rows):
                 pts = -float(r["points"])
-                name_text = Text(f"[#ff5f5f]{r['name']}[/]")
+                name_text = Text.from_markup(f"[#ff5f5f]{r['name']}[/]")
                 key = f"neg|{r['date']}|{r['name']}|{idx}"
                 self._entry_data[key] = {
                     "mode": "negative",
@@ -219,7 +221,7 @@ class ManageScreen(ModalScreen):
             rows = cache.get_positive_log_rows(limit=10000)
             for idx, r in enumerate(rows):
                 pts = float(r["points"])
-                name_text = Text(f"[#37d994]{r['name']}[/]")
+                name_text = Text.from_markup(f"[#37d994]{r['name']}[/]")
                 key = f"pos|{r['date']}|{r['name']}|{idx}"
                 self._entry_data[key] = {
                     "mode": "positive",
