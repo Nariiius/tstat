@@ -165,6 +165,10 @@ class NegativeInputScreen(BaseDialog):
         min-width: 60;
         max-width: 80;
     }
+
+    NegativeInputScreen DateStepper {
+        margin-bottom: 1;
+    }
     """
 
     def __init__(self) -> None:
@@ -207,6 +211,10 @@ class PositiveInputScreen(BaseDialog):
     PositiveInputScreen #dialog-box {
         min-width: 60;
         max-width: 80;
+    }
+
+    PositiveInputScreen DateStepper {
+        margin-bottom: 1;
     }
     """
 

@@ -149,9 +149,9 @@ class ManageScreen(ModalScreen):
                         id="edit-bar-help",
                     )
                 yield Static(
-                    "[bold #63f3ff]d[/] [dim]delete[/]    "
-                    "[bold #63f3ff]e[/] [dim]edit date[/]    "
-                    "[bold #8d98a7]Esc[/] [dim]close[/]",
+                    "[bold #63f3ff]d[/] [dim]Delete[/]    "
+                    "[bold #63f3ff]e[/] [dim]Edit Date[/]    "
+                    "[bold #8d98a7]Esc[/] [dim]Close[/]",
                     id="manage-help",
                 )
 
