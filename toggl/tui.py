@@ -42,10 +42,7 @@ from toggl.config import (
 )
 from toggl.command import CommandTab
 from toggl.panels import LogNegRequested, LogPosRequested, OverviewPanel, SyncPanel
-from toggl.neg import (
-    log_negative_direct,
-    log_positive_direct,
-)
+from toggl.neg import log_activity_direct
 
 from toggl.screens.dialogs import (
     ConfirmScreen,
@@ -499,8 +496,8 @@ class TogglTUI(App):
     def action_add_negative(self) -> None:
         def after_input(value: str | None) -> None:
             if value:
-                ok, message = log_negative_direct(value)
-                self.load_data()  # reload cache → watch_data_cache refreshes views
+                ok, message = log_activity_direct(value, "negative")
+                self.load_data()
                 if ok:
                     self.notify(message)
                 else:
@@ -511,7 +508,7 @@ class TogglTUI(App):
     def action_add_positive(self) -> None:
         def after_input(value: str | None) -> None:
             if value:
-                ok, message = log_positive_direct(value)
+                ok, message = log_activity_direct(value, "positive")
                 self.load_data()  # reload cache → watch_data_cache refreshes views
                 if ok:
                     self.notify(message)

@@ -57,12 +57,5 @@ def log_activity_direct(name: str, mode: Literal["positive", "negative"]) -> tup
     return True, f"Logged {canonical} ({sign}{lookup[canonical]} pts)"
 
 
-def log_positive_direct(pos_name: str) -> tuple[bool, str]:
-    """Log a positive action. Convenience wrapper around ``log_activity_direct``."""
-    return log_activity_direct(pos_name, "positive")
 
-
-def log_negative_direct(neg_name: str) -> tuple[bool, str]:
-    """Log a negative action. Convenience wrapper around ``log_activity_direct``."""
-    return log_activity_direct(neg_name, "negative")
 

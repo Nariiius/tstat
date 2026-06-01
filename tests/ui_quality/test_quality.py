@@ -197,7 +197,7 @@ class TestErrorHandling:
             await pilot.pause()
 
             # Try to log invalid negative
-            ok, message = toggl.neg.log_negative_direct("InvalidAction")
+            ok, message = toggl.neg.log_activity_direct("InvalidAction", "negative")
 
             assert ok is False
             assert "not found" in message.lower()
@@ -216,7 +216,7 @@ class TestErrorHandling:
             await pilot.pause()
 
             # Try to log invalid positive
-            ok, message = toggl.neg.log_positive_direct("InvalidAction")
+            ok, message = toggl.neg.log_activity_direct("InvalidAction", "positive")
 
             assert ok is False
             assert "not found" in message.lower()

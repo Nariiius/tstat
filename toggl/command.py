@@ -9,28 +9,18 @@ CommandTab: unified analytics layout.
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any
 
-from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
+from textual.widgets import Button, Label
 
-from textual.widgets import Button, DataTable, Label, Static
-
-from toggl.cache import DataCache, get_week_str
-from toggl.widgets.graph import GraphWidget
+from toggl.cache import DataCache
 from toggl.state.period import PeriodController, PeriodMode
 from toggl.services.metrics import MetricsService
-
-
-# ── Color helpers ────────────────────────────────────────────────────
-
-from toggl.formatters import _net_color, _label_for_day, format_signed_rich, build_category_rows
-
-# ── CalendarWidget ───────────────────────────────────────────────────
-
 from toggl.widgets.calendar import CalendarWidget
+from toggl.widgets.graph import GraphWidget
+from toggl.widgets.tables import CategoryTable, DailyBreakdownTable
 
 
 # ── CommandTab ────────────────────────────────────────────────────────
@@ -190,15 +180,9 @@ class CommandTab(Container):
         # ── Bottom section: category + daily tables ──
         with Horizontal(id="cmd-bottom-section"):
             with Container(id="cmd-category-panel"):
-                yield DataTable(
-                    zebra_stripes=False, cursor_type="row",
-                    id="cmd-category-table",
-                )
+                yield CategoryTable(zebra_stripes=False, cursor_type="row")
             with Container(id="cmd-daily-panel"):
-                yield DataTable(
-                    zebra_stripes=False, cursor_type="row",
-                    id="cmd-daily-table",
-                )
+                yield DailyBreakdownTable(zebra_stripes=False, cursor_type="row")
 
     def _compose_graph_header(self) -> ComposeResult:
         """Yield graph panel header (L1.controls)."""
@@ -214,19 +198,6 @@ class CommandTab(Container):
                 yield Button("Range: 7d ↻", id="cmd-cycle-scale", classes="cycle-btn")
                 yield Label("|", classes="cmd-period-sep")
                 yield Button("Metric: Net ↻", id="cmd-cycle-metric", classes="cycle-btn")
-
-    # ── Mount ────────────────────────────────────────────────────────
-
-    def on_mount(self) -> None:
-        cat = self.query_one("#cmd-category-table", DataTable)
-        cat.add_columns("Category", "Hours", "Rate", "Points")
-        cat.styles.min_height = 1
-        cat.show_cursor = True
-
-        daily = self.query_one("#cmd-daily-table", DataTable)
-        daily.add_columns("Date", "Positive", "Negative", "Net")
-        daily.styles.min_height = 1
-        daily.show_cursor = True
 
     # ── Refresh ──────────────────────────────────────────────────────
 
@@ -257,84 +228,17 @@ class CommandTab(Container):
         cal.set_period_context(self.period.get_anchor_date(), self.period.mode)
         cal.rebuild()
 
-        # ── Category table (aggregated over base range) ──────────
-        self._refresh_category_table(cache, base_start, base_end)
-
-        # ── Daily breakdown table ───────────────────────────────────
-        self._refresh_daily_table(daily_data)
+        # ── Tables (delegated to widgets) ─────────────────────────
+        cat_table = self.query_one(CategoryTable)
+        cat_table.refresh_data(cache, self.period, base_start, base_end)
+        daily_table = self.query_one(DailyBreakdownTable)
+        daily_table.refresh_data(cache, self.period, daily_data)
 
         # ── Statistics ──────────────────────────────────────────────
         self._update_stats(raw_values, values, avg)
 
         # ── Controls (rebuild scale buttons on mode change) ──────────
         self._update_controls()
-
-    # ── Category table ───────────────────────────────────────────────
-
-    def _refresh_category_table(self, cache: DataCache, start: date, end: date) -> None:
-        agg = cache.get_range_aggregate(start, end)
-        table = self.query_one("#cmd-category-table", DataTable)
-        table.clear(columns=False)
-
-        mode = self.period.mode
-        if mode == "day":
-            suffix = start.strftime("%a %-d %b")
-        elif mode == "week":
-            wk = get_week_str(start)
-            suffix = f"W{int(wk.split('W')[1])} {start.year}"
-        else:
-            suffix = start.strftime("%b %Y")
-
-        table.border_title = f"[b][#63f3ff]{suffix}[/][/]"
-
-        svc = MetricsService(cache)
-        period_nets = svc.compute_period_nets(start, end, mode)
-        subtitle = period_nets.get("subtitle", "Insights coming soon")
-        table.border_subtitle = f"[#8d98a7]{subtitle}[/]"
-
-        rows = build_category_rows(agg)
-        table.add_rows(rows)
-
-    # ── Daily breakdown table ────────────────────────────────────────
-
-    def _refresh_daily_table(self, daily_data: list[dict[str, Any]]) -> None:
-        from rich.text import Text as RichText
-
-        table = self.query_one("#cmd-daily-table", DataTable)
-        table.clear(columns=False)
-        
-        title_map = {"day": "Daily", "week": "Weekly", "month": "Monthly"}
-        title_word = title_map.get(self.period.mode, "Daily")
-        table.border_title = f"[b][#63f3ff]{title_word} Breakdown[/][/]"
-
-        svc = MetricsService(self.data_cache)
-        aggregated = svc.get_daily_breakdown(daily_data, self.period.mode)
-
-        for i, item in enumerate(aggregated):
-            positive = item["positive"]
-            negative = item["negative"]
-            net = item["net"]
-            has_data = item["has_data"]
-            is_today = item["contains_today"]
-            label = item["label"]
-
-            if is_today:
-                date_cell = f"[bold #e2b714]{label} ◀[/]"
-            elif not has_data:
-                date_cell = f"[dim]{label}[/]"
-            else:
-                date_cell = label
-
-            pos_text = "—" if positive == 0 else f"[#37d994]+{positive:.1f}[/]"
-            neg_text = "—" if negative == 0 else f"[#ff5f5f]-{negative:.1f}[/]"
-
-            table.add_row(
-                RichText.from_markup(date_cell),
-                RichText.from_markup(pos_text),
-                RichText.from_markup(neg_text),
-                format_signed_rich(net),
-                key=str(i),
-            )
 
     # ── Statistics ────────────────────────────────────────────────────
 
@@ -420,7 +324,6 @@ class CommandTab(Container):
 
     def _update_cycle_labels(self) -> None:
         """Update cycle button labels based on the current state."""
-        from toggl.state.period import PeriodMode
         period_btn = self.query_one("#cmd-cycle-period", Button)
         period_btn.label = f"View: {PeriodMode.label(self.period.mode)} ↻"
 

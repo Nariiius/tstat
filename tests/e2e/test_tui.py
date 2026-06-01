@@ -256,7 +256,7 @@ async def test_log_negative_via_tui(tui_data, monkeypatch):
 
     # Verify the logging function itself works correctly
     # (this is the same code path triggered by the modal's after_input callback)
-    ok, msg = toggl.neg.log_negative_direct("Procrastination")
+    ok, msg = toggl.neg.log_activity_direct("Procrastination", "negative")
     assert ok
 
     with open(toggl.const.NEGATIVES_CSV_FILE) as f:
@@ -290,7 +290,7 @@ async def test_log_positive_via_tui(tui_data, monkeypatch):
         assert option_list.option_count > 0
 
     # Verify the logging function works (same code path as modal callback)
-    ok, msg = toggl.neg.log_positive_direct("Exercise")
+    ok, msg = toggl.neg.log_activity_direct("Exercise", "positive")
     assert ok
 
     with open(toggl.const.POSITIVES_CSV_FILE) as f:

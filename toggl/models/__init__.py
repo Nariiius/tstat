@@ -8,12 +8,28 @@ from toggl.models.metrics import (
     WeekDashboardRow,
     WeekDashboard,
 )
+from toggl.models.project import (
+    DailyDataPoint,
+    ProjectHours,
+    RangeAggregate,
+)
+from toggl.models.activity import (
+    ActivityEntry,
+    ActivityTotals,
+    MonthlyAggregate,
+)
 
 __all__ = [
+    "ActivityEntry",
+    "ActivityTotals",
+    "DailyDataPoint",
     "DayMetrics",
+    "MonthlyAggregate",
+    "ProjectHours",
     "ProjectResult",
+    "RangeAggregate",
     "ReportSections",
     "SyncStatus",
-    "WeekDashboardRow",
     "WeekDashboard",
+    "WeekDashboardRow",
 ]

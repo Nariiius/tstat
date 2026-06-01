@@ -5,11 +5,11 @@ import csv
 from datetime import date
 from unittest.mock import patch
 
-from toggl.neg import log_negative_direct, log_positive_direct
+from toggl.neg import log_activity_direct
 
 
 class TestLogNegativeDirect:
-    """Tests for log_negative_direct function."""
+    """Tests for log_activity_direct with mode='negative'."""
 
     def test_log_negative_success(self, tmp_data_dir, sample_config):
         """Successfully logs a negative action."""
@@ -19,16 +19,16 @@ class TestLogNegativeDirect:
         with open(toggl.const.NEGATIVES_CSV_FILE, 'w') as f:
             f.write('Date,Negative,Points\n')
         
-        ok, message = log_negative_direct('Procrastination')
-        
+        ok, message = log_activity_direct('Procrastination', 'negative')
+
         assert ok is True
         assert 'Procrastination' in message
         assert 'Logged' in message
-        
+
         # Verify CSV was updated
         with open(toggl.const.NEGATIVES_CSV_FILE, 'r') as f:
             rows = list(csv.DictReader(f))
-        
+
         assert len(rows) == 1
         assert rows[0]['Negative'] == 'Procrastination'
         assert float(rows[0]['Points']) == -3.0
@@ -36,11 +36,11 @@ class TestLogNegativeDirect:
     def test_log_negative_case_insensitive(self, tmp_data_dir, sample_config):
         """Negative name lookup is case-insensitive."""
         import toggl.const
-        
+
         with open(toggl.const.NEGATIVES_CSV_FILE, 'w') as f:
             f.write('Date,Negative,Points\n')
-        
-        ok, message = log_negative_direct('procrastination')
+
+        ok, message = log_activity_direct('procrastination', 'negative')
         
         assert ok is True
         assert 'Procrastination' in message
@@ -52,7 +52,7 @@ class TestLogNegativeDirect:
         with open(toggl.const.NEGATIVES_CSV_FILE, 'w') as f:
             f.write('Date,Negative,Points\n')
         
-        ok, message = log_negative_direct('NonExistent')
+        ok, message = log_activity_direct('NonExistent', 'negative')
         
         assert ok is False
         assert 'not found' in message
@@ -66,10 +66,10 @@ class TestLogNegativeDirect:
             f.write('Date,Negative,Points\n')
             f.write('2023-01-01,Junk Food,-2.0\n')
         
-        ok, message = log_negative_direct('Procrastination')
-        
+        ok, message = log_activity_direct('Procrastination', 'negative')
+
         assert ok is True
-        
+
         # Verify both entries exist
         with open(toggl.const.NEGATIVES_CSV_FILE, 'r') as f:
             rows = list(csv.DictReader(f))
@@ -87,14 +87,14 @@ class TestLogNegativeDirect:
         if os.path.exists(toggl.const.NEGATIVES_CSV_FILE):
             os.remove(toggl.const.NEGATIVES_CSV_FILE)
         
-        ok, message = log_negative_direct('Procrastination')
-        
+        ok, message = log_activity_direct('Procrastination', 'negative')
+
         assert ok is True
         assert os.path.exists(toggl.const.NEGATIVES_CSV_FILE)
 
 
 class TestLogPositiveDirect:
-    """Tests for log_positive_direct function."""
+    """Tests for log_activity_direct with mode='positive'."""
 
     def test_log_positive_success(self, tmp_data_dir, sample_config):
         """Successfully logs a positive action."""
@@ -103,16 +103,16 @@ class TestLogPositiveDirect:
         with open(toggl.const.POSITIVES_CSV_FILE, 'w') as f:
             f.write('Date,Positive,Points\n')
         
-        ok, message = log_positive_direct('Exercise')
-        
+        ok, message = log_activity_direct('Exercise', 'positive')
+
         assert ok is True
         assert 'Exercise' in message
         assert 'Logged' in message
-        
+
         # Verify CSV was updated
         with open(toggl.const.POSITIVES_CSV_FILE, 'r') as f:
             rows = list(csv.DictReader(f))
-        
+
         assert len(rows) == 1
         assert rows[0]['Positive'] == 'Exercise'
         assert float(rows[0]['Points']) == 3.0
@@ -124,7 +124,7 @@ class TestLogPositiveDirect:
         with open(toggl.const.POSITIVES_CSV_FILE, 'w') as f:
             f.write('Date,Positive,Points\n')
         
-        ok, message = log_positive_direct('exercise')
+        ok, message = log_activity_direct('exercise', 'positive')
         
         assert ok is True
         assert 'Exercise' in message
@@ -136,7 +136,7 @@ class TestLogPositiveDirect:
         with open(toggl.const.POSITIVES_CSV_FILE, 'w') as f:
             f.write('Date,Positive,Points\n')
         
-        ok, message = log_positive_direct('NonExistent')
+        ok, message = log_activity_direct('NonExistent', 'positive')
         
         assert ok is False
         assert 'not found' in message
@@ -149,10 +149,10 @@ class TestLogPositiveDirect:
             f.write('Date,Positive,Points\n')
             f.write('2023-01-01,Reading,2.0\n')
         
-        ok, message = log_positive_direct('Exercise')
-        
+        ok, message = log_activity_direct('Exercise', 'positive')
+
         assert ok is True
-        
+
         with open(toggl.const.POSITIVES_CSV_FILE, 'r') as f:
             rows = list(csv.DictReader(f))
         
@@ -167,8 +167,8 @@ class TestLogPositiveDirect:
         with open(toggl.const.POSITIVES_CSV_FILE, 'w') as f:
             f.write('Date,Positive,Points\n')
         
-        log_positive_direct('Exercise')
-        log_positive_direct('Reading')
+        log_activity_direct('Exercise', 'positive')
+        log_activity_direct('Reading', 'positive')
         
         with open(toggl.const.POSITIVES_CSV_FILE, 'r') as f:
             rows = list(csv.DictReader(f))
