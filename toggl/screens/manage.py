@@ -151,7 +151,7 @@ class ManageScreen(ModalScreen):
                 yield Static(
                     "[bold #63f3ff]d[/] [dim]Delete[/]    "
                     "[bold #63f3ff]e[/] [dim]Edit Date[/]    "
-                    "[bold #8d98a7]Esc[/] [dim]Close[/]",
+                    "[bold #63f3ff]Esc[/] [dim]Close[/]",
                     id="manage-help",
                 )
 
@@ -359,8 +359,17 @@ class ManageScreen(ModalScreen):
     # ── key handling for edit bar ──────────────────────────────────
 
     def on_key(self, event) -> None:
-        """Handle Enter and Escape while editing."""
+        """Handle left/right for tab switching, and Enter/Escape while editing."""
         if self._editing_entry is None:
+            tabs = self.query_one("#manage-tabs", Tabs)
+            if event.key == "left":
+                event.stop()
+                if self._active_tab != "negatives":
+                    tabs.active = "tab-negatives"
+            elif event.key == "right":
+                event.stop()
+                if self._active_tab != "positives":
+                    tabs.active = "tab-positives"
             return
 
         if event.key == "enter":
