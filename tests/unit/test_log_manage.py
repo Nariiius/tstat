@@ -262,25 +262,25 @@ class TestUpdateActivityDate:
 class TestParseOptionName:
     """Tests for the _parse_option_name helper."""
 
-    def test_parse_with_key_hint_and_points(self):
-        """Parses '[M]  Mistake  (+20 pts)' -> 'Mistake'."""
-        assert _parse_option_name("[M]  Mistake  (+20 pts)") == "Mistake"
+    def test_parse_with_points(self):
+        """Parses 'Mistake  (+20 pts)' -> 'Mistake'."""
+        assert _parse_option_name("Mistake  (+20 pts)") == "Mistake"
 
-    def test_parse_with_key_hint_and_negative_points(self):
-        """Parses '[P]  Procrastination  (-3 pts)' -> 'Procrastination'."""
-        assert _parse_option_name("[P]  Procrastination  (-3 pts)") == "Procrastination"
-
-    def test_parse_without_key_hint(self):
-        """Parses 'Exercise  (+3 pts)' -> 'Exercise'."""
-        assert _parse_option_name("Exercise  (+3 pts)") == "Exercise"
+    def test_parse_with_negative_points(self):
+        """Parses 'Procrastination  (-3 pts)' -> 'Procrastination'."""
+        assert _parse_option_name("Procrastination  (-3 pts)") == "Procrastination"
 
     def test_parse_no_points_suffix(self):
         """Returns full string if no points suffix."""
+        assert _parse_option_name("Exercise  (+3 pts)") == "Exercise"
+
+    def test_parse_plain_name(self):
+        """Returns full string if no points suffix at all."""
         assert _parse_option_name("JustAName") == "JustAName"
 
     def test_parse_decimal_points(self):
         """Handles decimal points format."""
-        assert _parse_option_name("[R]  Reading  (+2.5 pts)") == "Reading"
+        assert _parse_option_name("Reading  (+2.5 pts)") == "Reading"
 
 
 # ─────────────────────────────────────────────────────────────────
