@@ -178,7 +178,7 @@ class MetricsService:
                 current_group["positive"] += day["positive"]
                 current_group["negative"] += day["negative"]
                 current_group["net"] += day["net"]
-                if day["has_activity"]:
+                if day["has_data"]:
                     current_group["has_data"] = True
                 if d == date.today():
                     current_group["contains_today"] = True
@@ -205,7 +205,7 @@ class MetricsService:
                 current_group["positive"] += day["positive"]
                 current_group["negative"] += day["negative"]
                 current_group["net"] += day["net"]
-                if day["has_activity"]:
+                if day["has_data"]:
                     current_group["has_data"] = True
                 if d == date.today():
                     current_group["contains_today"] = True
@@ -221,7 +221,7 @@ class MetricsService:
                     "positive": day["positive"],
                     "negative": day["negative"],
                     "net": day["net"],
-                    "has_data": day["has_activity"],
+                    "has_data": day["has_data"],
                     "contains_today": d == date.today(),
                 })
 
