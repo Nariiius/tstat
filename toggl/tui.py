@@ -249,6 +249,8 @@ class TogglTUI(App):
 
     def _on_auto_refresh_done(self, ok: bool, message: str) -> None:
         load_runtime_settings()
+        reset_cache()
+        self.data_cache = get_cache()
         if ok:
             self.notify("Auto-refreshed stale data")
         else:

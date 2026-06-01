@@ -181,7 +181,9 @@ class OverviewPanel(Container):
     #overview-recovery-container:focus-within {
         border: round #63f3ff;
     }
-    #overview-recovery-table {
+    #overview-recovery-table,
+    #overview-recovery-table:focus,
+    #overview-recovery-table:focus-within {
         height: 1fr;
         border: none;
     }
@@ -237,7 +239,9 @@ class OverviewPanel(Container):
     #overview-recent-log-wrapper:focus-within {
         border: round #63f3ff;
     }
-    #overview-recent-log-table {
+    #overview-recent-log-table,
+    #overview-recent-log-table:focus,
+    #overview-recent-log-table:focus-within {
         height: 1fr;
         border: none;
     }
@@ -255,13 +259,13 @@ class OverviewPanel(Container):
                     yield DataTable(
                         zebra_stripes=False, cursor_type="row", id="overview-recovery-table"
                     )
+                    with Horizontal(id="recovery-button-bar"):
+                        yield Button("Log Neg", id="btn-neg-log", classes="recovery-btn")
+                        yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
                 with Vertical(id="overview-recent-log-wrapper"):
                     yield DataTable(
                         zebra_stripes=False, cursor_type="row", id="overview-recent-log-table"
                     )
-                    with Horizontal(id="recovery-button-bar"):
-                        yield Button("Log Neg", id="btn-neg-log", classes="recovery-btn")
-                        yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
 
     def on_mount(self) -> None:
         rec_table = self.query_one("#overview-recovery-table", DataTable)
