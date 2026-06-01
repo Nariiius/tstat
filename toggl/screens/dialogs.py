@@ -190,6 +190,14 @@ class NegativeInputScreen(BaseDialog):
                 option_list.add_option(f"{name}  ({pts:+.1f} pts)")
         option_list.focus()
 
+    def on_key(self, event) -> None:
+        if event.key == "left":
+            event.stop()
+            self.query_one("#negative-date-stepper", DateStepper).action_step_back()
+        elif event.key == "right":
+            event.stop()
+            self.query_one("#negative-date-stepper", DateStepper).action_step_forward()
+
     @on(OptionList.OptionSelected, "#negative-list")
     def submit_negative(self, event: OptionList.OptionSelected) -> None:
         stepper = self.query_one("#negative-date-stepper", DateStepper)
@@ -236,6 +244,14 @@ class PositiveInputScreen(BaseDialog):
             else:
                 option_list.add_option(f"{name}  (+{pts:.1f} pts)")
         option_list.focus()
+
+    def on_key(self, event) -> None:
+        if event.key == "left":
+            event.stop()
+            self.query_one("#positive-date-stepper", DateStepper).action_step_back()
+        elif event.key == "right":
+            event.stop()
+            self.query_one("#positive-date-stepper", DateStepper).action_step_forward()
 
     @on(OptionList.OptionSelected, "#positive-list")
     def submit_positive(self, event: OptionList.OptionSelected) -> None:
