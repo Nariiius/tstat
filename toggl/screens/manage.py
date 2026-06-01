@@ -198,10 +198,10 @@ class ManageScreen(ModalScreen):
         cache = self._load_cache()
         if mode == "negative":
             rows = cache.get_negative_log_rows(limit=10000)
-            for r in rows:
+            for idx, r in enumerate(rows):
                 pts = -float(r["points"])
                 name_text = Text(f"[#ff5f5f]{r['name']}[/]")
-                key = f"neg|{r['date']}|{r['name']}"
+                key = f"neg|{r['date']}|{r['name']}|{idx}"
                 self._entry_data[key] = {
                     "mode": "negative",
                     "date": r["date"],
@@ -216,10 +216,10 @@ class ManageScreen(ModalScreen):
                 )
         else:
             rows = cache.get_positive_log_rows(limit=10000)
-            for r in rows:
+            for idx, r in enumerate(rows):
                 pts = float(r["points"])
                 name_text = Text(f"[#37d994]{r['name']}[/]")
-                key = f"pos|{r['date']}|{r['name']}"
+                key = f"pos|{r['date']}|{r['name']}|{idx}"
                 self._entry_data[key] = {
                     "mode": "positive",
                     "date": r["date"],

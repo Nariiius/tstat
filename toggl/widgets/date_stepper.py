@@ -75,9 +75,9 @@ class DateStepper(Horizontal):
         self._max_date = max_date or date.today()
 
     def compose(self) -> ComposeResult:
-        yield Button("\u25c0", id="stepper-prev", classes="stepper-btn")
+        yield Button("\u2190", id="stepper-prev", classes="stepper-btn")
         yield Label(self._format_date(self._initial_date), id="stepper-date-label")
-        yield Button("\u25b6", id="stepper-next", classes="stepper-btn")
+        yield Button("\u2192", id="stepper-next", classes="stepper-btn")
 
     def on_mount(self) -> None:
         # Set reactives after children exist

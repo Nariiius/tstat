@@ -18,6 +18,18 @@ from toggl.config import NEGATIVES, POSITIVES
 from toggl.widgets.date_stepper import DateStepper
 
 
+def _parse_option_name(prompt: str) -> str:
+    """Extract the activity name from a formatted option prompt.
+
+    Prompts look like ``\"Exercise  (+3 pts)\"`` or ``\"Procrastination  (-5 pts)\"``.
+    Returns the name portion before the points annotation.
+    """
+    idx = prompt.rfind("  (")
+    if idx > 0:
+        return prompt[:idx]
+    return prompt
+
+
 class BaseDialog(ModalScreen):
     """Base modal dialog with consistent centered floating appearance.
 
@@ -165,15 +177,19 @@ class NegativeInputScreen(BaseDialog):
     def on_mount(self) -> None:
         super().on_mount()
         option_list = self.query_one("#negative-list", OptionList)
-        for name in NEGATIVES:
-            option_list.add_option(name)
+        for name, pts in NEGATIVES.items():
+            if pts == int(pts):
+                option_list.add_option(f"{name}  ({int(pts):+d} pts)")
+            else:
+                option_list.add_option(f"{name}  ({pts:+.1f} pts)")
         option_list.focus()
 
     @on(OptionList.OptionSelected, "#negative-list")
     def submit_negative(self, event: OptionList.OptionSelected) -> None:
         stepper = self.query_one("#negative-date-stepper", DateStepper)
+        name = _parse_option_name(str(event.option.prompt))
         self.dismiss({
-            "name": str(event.option.prompt),
+            "name": name,
             "date": stepper.selected_date.strftime("%Y-%m-%d"),
         })
 
@@ -204,15 +220,19 @@ class PositiveInputScreen(BaseDialog):
     def on_mount(self) -> None:
         super().on_mount()
         option_list = self.query_one("#positive-list", OptionList)
-        for name in POSITIVES:
-            option_list.add_option(name)
+        for name, pts in POSITIVES.items():
+            if pts == int(pts):
+                option_list.add_option(f"{name}  (+{int(pts)} pts)")
+            else:
+                option_list.add_option(f"{name}  (+{pts:.1f} pts)")
         option_list.focus()
 
     @on(OptionList.OptionSelected, "#positive-list")
     def submit_positive(self, event: OptionList.OptionSelected) -> None:
         stepper = self.query_one("#positive-date-stepper", DateStepper)
+        name = _parse_option_name(str(event.option.prompt))
         self.dismiss({
-            "name": str(event.option.prompt),
+            "name": name,
             "date": stepper.selected_date.strftime("%Y-%m-%d"),
         })
 
