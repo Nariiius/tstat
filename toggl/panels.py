@@ -194,12 +194,13 @@ class OverviewPanel(Container):
         margin: 0;
     }
     .recovery-btn {
-        background: transparent;
+        background: #0b1016;
         border: none;
-        padding: 0 1;
+        padding: 0;
         margin: 0;
-        min-width: 0;
+        min-width: 4;
         height: 1;
+        color: #8d98a7;
         text-style: bold;
     }
     #btn-neg-log {
@@ -208,6 +209,7 @@ class OverviewPanel(Container):
     #btn-neg-log:hover {
         color: #ff8080;
         background: #1e2a36;
+        border: none;
     }
     #btn-pos-log {
         color: #37d994;
@@ -215,6 +217,7 @@ class OverviewPanel(Container):
     #btn-pos-log:hover {
         color: #5be8ae;
         background: #1e2a36;
+        border: none;
     }
     #overview-insights {
         height: 1fr;
@@ -259,19 +262,20 @@ class OverviewPanel(Container):
                     yield DataTable(
                         zebra_stripes=False, cursor_type="row", id="overview-recovery-table"
                     )
-                    with Horizontal(id="recovery-button-bar"):
-                        yield Button("Log Neg", id="btn-neg-log", classes="recovery-btn")
-                        yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
                 with Vertical(id="overview-recent-log-wrapper"):
                     yield DataTable(
                         zebra_stripes=False, cursor_type="row", id="overview-recent-log-table"
                     )
+                    with Horizontal(id="recovery-button-bar"):
+                        yield Button("Log Neg", id="btn-neg-log", classes="recovery-btn")
+                        yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
 
     def on_mount(self) -> None:
         rec_table = self.query_one("#overview-recovery-table", DataTable)
         rec_table.add_columns("Category", "Rate", "Amount")
         for col in rec_table.columns.values():
             col.text_align = "center"
+        rec_table.styles.border = ("none", None)
 
         cat_table = self.query_one("#overview-categories-table", DataTable)
         cat_table.add_columns("Category", "Hours", "Rate", "Points")
@@ -284,6 +288,7 @@ class OverviewPanel(Container):
         log_table.cursor_type = "row"
         for col in log_table.columns.values():
             col.text_align = "center"
+        log_table.styles.border = ("none", None)
 
         self.query_one("#overview-insights", Static).can_focus = True
 

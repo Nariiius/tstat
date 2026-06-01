@@ -4,8 +4,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any, Callable
 
-from toggl.cache import DataCache, get_week_dates, get_current_week, get_week_str
-from toggl.calc import calculate
+from toggl.cache import DataCache, get_week_dates, get_current_week, get_week_str, get_sunday_of_week
+from toggl.calc import calculate, format_signed
 from toggl.config import get_daily_target as _get_daily_target
 
 
@@ -178,7 +178,7 @@ class MetricsService:
                 current_group["positive"] += day["positive"]
                 current_group["negative"] += day["negative"]
                 current_group["net"] += day["net"]
-                if day["has_data"]:
+                if day.get("has_data", day.get("has_activity", False)):
                     current_group["has_data"] = True
                 if d == date.today():
                     current_group["contains_today"] = True
@@ -205,7 +205,7 @@ class MetricsService:
                 current_group["positive"] += day["positive"]
                 current_group["negative"] += day["negative"]
                 current_group["net"] += day["net"]
-                if day["has_data"]:
+                if day.get("has_data", day.get("has_activity", False)):
                     current_group["has_data"] = True
                 if d == date.today():
                     current_group["contains_today"] = True
@@ -221,7 +221,7 @@ class MetricsService:
                     "positive": day["positive"],
                     "negative": day["negative"],
                     "net": day["net"],
-                    "has_data": day["has_data"],
+                    "has_data": day.get("has_data", day.get("has_activity", False)),
                     "contains_today": d == date.today(),
                 })
 
@@ -240,12 +240,15 @@ class MetricsService:
 
         if mode == "day":
             daily_net = _compute_net(start, start)
-            monday = start - timedelta(days=start.weekday())
-            sunday = monday + timedelta(days=6)
-            weekly_net = _compute_net(monday, sunday)
+            week_sunday = get_sunday_of_week(start)
+            week_saturday = week_sunday + timedelta(days=6)
+            weekly_net = _compute_net(week_sunday, week_saturday)
+            wk = get_week_str(start)
+            week_label = f"W{int(wk.split('W')[1])}"
             return {
                 "daily_net": daily_net,
                 "weekly_net": weekly_net,
+                "subtitle": f"Daily: {format_signed(daily_net)} | Weekly ({week_label}): {format_signed(weekly_net)}",
             }
         elif mode == "week":
             weekly_net = _compute_net(start, end)
@@ -253,8 +256,10 @@ class MetricsService:
             next_month = first_day.replace(day=28) + timedelta(days=4)
             last_day = next_month - timedelta(days=next_month.day)
             monthly_net = _compute_net(first_day, last_day)
+            month_label = start.strftime("%b")
             return {
                 "weekly_net": weekly_net,
                 "monthly_net": monthly_net,
+                "subtitle": f"Weekly: {format_signed(weekly_net)} | Monthly ({month_label}): {format_signed(monthly_net)}",
             }
         return {}
