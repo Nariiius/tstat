@@ -5,6 +5,20 @@ from datetime import date
 from unittest.mock import patch, mock_open
 
 from toggl.cache import DataCache, get_week_dates, get_week_str
+from toggl.services.metrics import MetricsService
+
+
+def _make_metrics(cache: DataCache) -> MetricsService:
+    """Helper: create MetricsService from cache using config globals."""
+    import toggl.config
+    return MetricsService(
+        cache,
+        dict(toggl.config.POINTS),
+        dict(toggl.config.NEGATIVES),
+        dict(toggl.config.POSITIVES),
+        list(toggl.config.RECOVERY_IGNORE or []),
+        toggl.config.get_daily_target,
+    )
 
 
 class TestDataCacheLoading:
@@ -100,12 +114,13 @@ class TestDataCacheQueries:
 
 
 class TestDataCacheMetrics:
-    """Tests for DataCache metric calculations."""
+    """Tests for MetricsService computations (formerly on DataCache)."""
 
     def test_get_day_metrics(self, tmp_data_dir, sample_daily_csv, sample_config):
         """get_day_metrics returns complete day metrics."""
         cache = DataCache.load()
-        metrics = cache.get_day_metrics('2023-01-02')
+        svc = _make_metrics(cache)
+        metrics = svc.get_day_metrics('2023-01-02')
         
         assert metrics['label'] == '2023-01-02'
         assert 'projects' in metrics
@@ -121,7 +136,8 @@ class TestDataCacheMetrics:
     def test_get_day_metrics_empty_day(self, tmp_data_dir, sample_config):
         """get_day_metrics handles empty day."""
         cache = DataCache.load()
-        metrics = cache.get_day_metrics('2099-01-01')
+        svc = _make_metrics(cache)
+        metrics = svc.get_day_metrics('2099-01-01')
         
         assert metrics['total_hours'] == 0.0
         assert metrics['net'] == 0.0
@@ -129,7 +145,8 @@ class TestDataCacheMetrics:
     def test_get_week_dashboard_rows(self, tmp_data_dir, sample_daily_csv, sample_config):
         """get_week_dashboard_rows returns 7 days of data."""
         cache = DataCache.load()
-        result = cache.get_week_dashboard_rows('2023-W01')
+        svc = _make_metrics(cache)
+        result = svc.get_week_dashboard_rows('2023-W01')
         
         assert 'rows' in result
         assert 'summary' in result
@@ -145,7 +162,8 @@ class TestDataCacheMetrics:
     def test_get_report_sections(self, tmp_data_dir, sample_weekly_csv, sample_config):
         """get_report_sections returns categorized results."""
         cache = DataCache.load()
-        report = cache.get_report_sections('2023-W01', 'WEEK')
+        svc = _make_metrics(cache)
+        report = svc.get_report_sections('2023-W01', 'WEEK')
         
         assert 'results' in report
         assert 'positive' in report
@@ -234,23 +252,13 @@ class TestDataCacheNegativesPositives:
 
 
 class TestDataCacheAggregates:
-    """Tests for aggregate calculations."""
-
-    def test_get_monthly_aggregates(self, tmp_data_dir, sample_daily_csv, sample_config):
-        """get_monthly_aggregates returns monthly summaries."""
-        cache = DataCache.load()
-        aggregates = cache.get_monthly_aggregates(last_n_months=3)
-        
-        assert len(aggregates) == 3
-        for agg in aggregates:
-            assert 'month' in agg
-            assert 'hours' in agg
-            assert 'net' in agg
+    """Tests for aggregate calculations (via MetricsService)."""
 
     def test_get_recovery_rows_positive(self, tmp_data_dir, sample_weekly_csv, sample_config):
         """get_recovery_rows returns empty when points are positive."""
         cache = DataCache.load()
-        result = cache.get_recovery_rows('ALL', 'ALL')
+        svc = _make_metrics(cache)
+        result = svc.get_recovery_rows('ALL', 'ALL')
         
         assert 'total_points' in result
         assert 'rows' in result
@@ -267,7 +275,8 @@ class TestDataCacheAggregates:
             f.write('2023-01-02,Bad,100.0\n')
         
         cache = DataCache.load()
-        result = cache.get_recovery_rows('ALL', 'ALL')
+        svc = _make_metrics(cache)
+        result = svc.get_recovery_rows('ALL', 'ALL')
         
         # Should have recovery rows
         if result['total_points'] < 0:

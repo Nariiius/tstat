@@ -303,18 +303,18 @@ class OverviewPanel(Container):
             except Exception:
                 pass
 
-    def refresh_data(self, cache: DataCache, active_week: str) -> None:
+    def refresh_data(self, cache: DataCache, active_week: str, metrics: MetricsService) -> None:
         """Reload all overview panels from the given DataCache."""
         try:
-            self._refresh_categories(cache, active_week)
-            self._refresh_recovery(cache)
+            self._refresh_categories(cache, active_week, metrics)
+            self._refresh_recovery(metrics)
             self._refresh_recent_log(cache)
-            self._refresh_insights(cache, active_week)
+            self._refresh_insights(cache, active_week, metrics)
         except Exception:
             logger.exception("OverviewPanel.refresh_data failed")
 
-    def _refresh_categories(self, cache: DataCache, active_week: str) -> None:
-        report = MetricsService(cache).get_report_sections("ALL_TIME", "ALL")
+    def _refresh_categories(self, cache: DataCache, active_week: str, metrics: MetricsService) -> None:
+        report = metrics.get_report_sections("ALL_TIME", "ALL")
         cat_table = self.query_one("#overview-categories-table", DataTable)
         cat_table.clear(columns=False)
         rows = build_category_rows(report)
@@ -325,8 +325,8 @@ class OverviewPanel(Container):
         cat_table.border_title = f"[b][#63f3ff]Lifetime[/][/]   [#8d98a7]{th_h}hrs {th_m:02d}min[/]"
         cat_table.border_subtitle = f"[#8d98a7]Total {format_signed_rich(report['total_points'])} pts[/]"
 
-    def _refresh_recovery(self, cache: DataCache) -> None:
-        recovery_data = cache.get_recovery_rows("ALL_TIME", "ALL")
+    def _refresh_recovery(self, metrics: MetricsService) -> None:
+        recovery_data = metrics.get_recovery_rows("ALL_TIME", "ALL")
         rec_table = self.query_one("#overview-recovery-table", DataTable)
         rec_table.clear(columns=False)
         if recovery_data["rows"]:
@@ -363,9 +363,9 @@ class OverviewPanel(Container):
         log_table.move_cursor(row=0)
         self.query_one("#overview-recent-log-wrapper").border_title = "[b][#63f3ff]Recent Activity[/][/]"
 
-    def _refresh_insights(self, cache: DataCache, active_week: str) -> None:
+    def _refresh_insights(self, cache: DataCache, active_week: str, metrics: MetricsService) -> None:
         insights = self.query_one("#overview-insights", Static)
-        week_report = MetricsService(cache).get_report_sections(active_week, "WEEK")
+        week_report = metrics.get_report_sections(active_week, "WEEK")
         net = week_report["total_points"]
         insights.update(
             "[#8d98a7]Coming soon™[/]\n\n"

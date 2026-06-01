@@ -14,12 +14,25 @@ from toggl.cache import DataCache
 from toggl.services.metrics import MetricsService
 
 
+def _make_svc() -> MetricsService:
+    """Create MetricsService with loaded cache using current config globals."""
+    import toggl.config
+    return MetricsService(
+        DataCache.load(),
+        dict(toggl.config.POINTS),
+        dict(toggl.config.NEGATIVES),
+        dict(toggl.config.POSITIVES),
+        list(toggl.config.RECOVERY_IGNORE or []),
+        toggl.config.get_daily_target,
+    )
+
+
 class TestMetricsServiceDayMetrics:
     """Tests for MetricsService.get_day_metrics."""
 
     def test_get_day_metrics(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Returns complete day metrics dict with expected structure."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         metrics = svc.get_day_metrics("2023-01-02")
 
         assert metrics["label"] == "2023-01-02"
@@ -37,7 +50,7 @@ class TestMetricsServiceDayMetrics:
 
     def test_get_day_metrics_empty(self, tmp_data_dir, sample_config):
         """Handles day with no data gracefully."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         metrics = svc.get_day_metrics("2099-01-01")
 
         assert metrics["total_hours"] == 0.0
@@ -54,7 +67,7 @@ class TestMetricsServiceDayMetrics:
             f.write("Date,Negative,Points\n")
             f.write("2023-01-02,Bad Habit,5.0\n")
 
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         metrics = svc.get_day_metrics("2023-01-02")
 
         assert metrics["logged_negative"] == 5.0
@@ -67,7 +80,7 @@ class TestMetricsServiceDayMetrics:
             f.write("Date,Positive,Points\n")
             f.write("2023-01-02,Exercise,3.0\n")
 
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         metrics = svc.get_day_metrics("2023-01-02")
 
         assert metrics["logged_positive"] == 3.0
@@ -78,7 +91,7 @@ class TestMetricsServiceWeekDashboard:
 
     def test_get_week_dashboard_structure(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Returns 7 rows plus summary dict."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         result = svc.get_week_dashboard_rows("2023-W01")
 
         assert "rows" in result
@@ -103,7 +116,7 @@ class TestMetricsServiceWeekDashboard:
 
     def test_get_week_dashboard_values(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Net values are reasonable for sample project data."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         result = svc.get_week_dashboard_rows("2023-W01")
 
         for row in result["rows"]:
@@ -116,7 +129,7 @@ class TestMetricsServiceReportSections:
 
     def test_report_sections_week(self, tmp_data_dir, sample_weekly_csv, sample_config):
         """Returns categorized sections for a week."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         report = svc.get_report_sections("2023-W01", "WEEK")
 
         assert "positive" in report
@@ -131,7 +144,7 @@ class TestMetricsServiceReportSections:
 
     def test_report_sections_all(self, tmp_data_dir, sample_weekly_csv, sample_config):
         """Returns all-time sections across weeks."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         report = svc.get_report_sections("ALL_TIME", "ALL")
 
         assert report["total_hours"] > 0
@@ -139,21 +152,21 @@ class TestMetricsServiceReportSections:
 
     def test_report_sections_day(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Returns sections for a specific day."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         report = svc.get_report_sections("2023-01-02", "DAY")
 
         assert report["total_hours"] > 0
 
     def test_report_sections_cache(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Same key returns cached result (identity check)."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         r1 = svc.get_report_sections("2023-W01", "WEEK")
         r2 = svc.get_report_sections("2023-W01", "WEEK")
         assert r1 is r2, "Second call should return cached object"
 
     def test_report_sections_cache_key_differentiates(self, tmp_data_dir, sample_weekly_csv, sample_config):
         """Different keys produce different cached entries."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         r1 = svc.get_report_sections("2023-W01", "WEEK")
         r2 = svc.get_report_sections("2023-W02", "WEEK")
         assert r1 is not r2
@@ -165,7 +178,7 @@ class TestMetricsServiceGraphData:
 
     def test_get_graph_data_net_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Computes cumulative net (each value >= previous)."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         dates, values, raw, avg = svc.get_graph_data(dashboard["rows"], "net")
 
@@ -177,7 +190,7 @@ class TestMetricsServiceGraphData:
 
     def test_get_graph_data_negative_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Returns inverted negative values (all <= 0)."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         dates, values, raw, avg = svc.get_graph_data(dashboard["rows"], "negative")
 
@@ -187,7 +200,7 @@ class TestMetricsServiceGraphData:
 
     def test_get_graph_data_hours_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Hours mode returns positive values."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         dates, values, raw, avg = svc.get_graph_data(dashboard["rows"], "hours")
 
@@ -201,7 +214,7 @@ class TestMetricsServiceDailyBreakdown:
 
     def test_daily_breakdown_day(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Day mode returns individual day entries."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         breakdown = svc.get_daily_breakdown(dashboard["rows"], "day")
 
@@ -214,7 +227,7 @@ class TestMetricsServiceDailyBreakdown:
 
     def test_daily_breakdown_week(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Week mode groups entries by week."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         breakdown = svc.get_daily_breakdown(dashboard["rows"], "week")
 
@@ -225,7 +238,7 @@ class TestMetricsServiceDailyBreakdown:
 
     def test_daily_breakdown_month(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Month mode groups by month."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         breakdown = svc.get_daily_breakdown(dashboard["rows"], "month")
 
@@ -239,7 +252,7 @@ class TestMetricsServicePeriodNets:
 
     def test_compute_period_nets_day(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Day mode returns daily_net and weekly_net."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         result = svc.compute_period_nets(date(2023, 1, 2), date(2023, 1, 2), "day")
 
         assert "daily_net" in result
@@ -247,7 +260,7 @@ class TestMetricsServicePeriodNets:
 
     def test_compute_period_nets_week(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Week mode returns weekly_net and monthly_net."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         result = svc.compute_period_nets(date(2023, 1, 1), date(2023, 1, 7), "week")
 
         assert "weekly_net" in result
@@ -255,7 +268,7 @@ class TestMetricsServicePeriodNets:
 
     def test_compute_period_nets_unknown(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Unknown mode returns empty dict."""
-        svc = MetricsService(DataCache.load())
+        svc = _make_svc()
         result = svc.compute_period_nets(date(2023, 1, 1), date(2023, 1, 7), "unknown")
 
         assert result == {}

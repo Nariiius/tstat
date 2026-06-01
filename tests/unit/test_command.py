@@ -161,13 +161,26 @@ class TestPeriodController:
 
 
 class TestDailyDataForRange:
-    """Tests for DataCache.get_daily_data_for_range()."""
+    """Tests for MetricsService.get_daily_data_for_range()."""
+
+    def _make_svc(self, cache):
+        import toggl.config
+        from toggl.services.metrics import MetricsService
+        return MetricsService(
+            cache,
+            dict(toggl.config.POINTS),
+            dict(toggl.config.NEGATIVES),
+            dict(toggl.config.POSITIVES),
+            list(toggl.config.RECOVERY_IGNORE or []),
+            toggl.config.get_daily_target,
+        )
 
     def test_empty_range(self, tmp_data_dir, sample_config):
         from toggl.cache import DataCache
         cache = DataCache.load()
+        svc = self._make_svc(cache)
         today = date.today()
-        data = cache.get_daily_data_for_range(today, today)
+        data = svc.get_daily_data_for_range(today, today)
         assert len(data) == 1
         assert data[0]["date"] == today.strftime("%Y-%m-%d")
         assert data[0]["has_data"] is False
@@ -176,10 +189,11 @@ class TestDailyDataForRange:
     def test_with_daily_data(self, tmp_data_dir, sample_daily_csv, sample_config):
         from toggl.cache import DataCache
         cache = DataCache.load()
+        svc = self._make_svc(cache)
         # 2023-W01 dates from fixture
         from toggl.cache import get_week_dates
         start, end = get_week_dates("2023-W01")
-        data = cache.get_daily_data_for_range(start, end)
+        data = svc.get_daily_data_for_range(start, end)
         # Should have 7 entries
         assert len(data) == 7
         # Each should have all fields
@@ -197,9 +211,10 @@ class TestDailyDataForRange:
     def test_future_days_zero(self, tmp_data_dir, sample_config):
         from toggl.cache import DataCache
         cache = DataCache.load()
+        svc = self._make_svc(cache)
         today = date.today()
         future = today + timedelta(days=5)
-        data = cache.get_daily_data_for_range(today, future)
+        data = svc.get_daily_data_for_range(today, future)
         assert len(data) == 6
         for d in data:
             assert d["has_data"] is False
@@ -215,7 +230,8 @@ class TestDailyDataForRange:
             f.write("2023-01-02,Exercise,3.0\n")
             f.write("2023-01-02,Reading,2.0\n")
         cache = DataCache.load()
-        data = cache.get_daily_data_for_range(
+        svc = self._make_svc(cache)
+        data = svc.get_daily_data_for_range(
             date(2023, 1, 1), date(2023, 1, 3)
         )
         assert data[1]["logged_pos"] == 5.0  # 3.0 + 2.0
@@ -224,8 +240,9 @@ class TestDailyDataForRange:
     def test_net_computation(self, tmp_data_dir, sample_daily_csv, sample_config):
         from toggl.cache import DataCache
         cache = DataCache.load()
+        svc = self._make_svc(cache)
         # Get a single day with known data
-        data = cache.get_daily_data_for_range(
+        data = svc.get_daily_data_for_range(
             date(2023, 1, 1), date(2023, 1, 1)
         )
         d = data[0]

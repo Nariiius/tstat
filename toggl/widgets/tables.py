@@ -11,7 +11,7 @@ from typing import Any
 from rich.text import Text as RichText
 from textual.widgets import DataTable
 
-from toggl.cache import DataCache, get_week_str
+from toggl.cache import get_week_str
 from toggl.formatters import format_signed_rich, build_category_rows
 from toggl.services.metrics import MetricsService
 from toggl.state.period import PeriodController
@@ -25,9 +25,9 @@ class CategoryTable(DataTable):
         self.styles.min_height = 1
         self.show_cursor = True
 
-    def refresh_data(self, cache: DataCache, period: PeriodController, start: date, end: date) -> None:
+    def refresh_data(self, metrics: MetricsService, period: PeriodController, start: date, end: date) -> None:
         self.clear(columns=False)
-        agg = cache.get_range_aggregate(start, end)
+        agg = metrics.get_range_aggregate(start, end)
 
         mode = period.mode
         if mode == "day":
@@ -40,8 +40,7 @@ class CategoryTable(DataTable):
 
         self.border_title = f"[b][#63f3ff]{suffix}[/][/]"
 
-        svc = MetricsService(cache)
-        period_nets = svc.compute_period_nets(start, end, mode)
+        period_nets = metrics.compute_period_nets(start, end, mode)
         subtitle = period_nets.get("subtitle", "Insights coming soon")
         self.border_subtitle = f"[#8d98a7]<- [/]{subtitle}[#8d98a7] ->[/]"
 
@@ -57,15 +56,14 @@ class DailyBreakdownTable(DataTable):
         self.styles.min_height = 1
         self.show_cursor = True
 
-    def refresh_data(self, cache: DataCache, period: PeriodController, daily_data: list[dict[str, Any]]) -> None:
+    def refresh_data(self, metrics: MetricsService, period: PeriodController, daily_data: list[dict[str, Any]]) -> None:
         self.clear(columns=False)
 
         title_map = {"day": "Daily", "week": "Weekly", "month": "Monthly"}
         title_word = title_map.get(period.mode, "Daily")
         self.border_title = f"[b][#63f3ff]{title_word} Breakdown[/][/]"
 
-        svc = MetricsService(cache)
-        aggregated = svc.get_daily_breakdown(daily_data, period.mode)
+        aggregated = metrics.get_daily_breakdown(daily_data, period.mode)
 
         for i, item in enumerate(aggregated):
             positive = item["positive"]

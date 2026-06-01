@@ -1,12 +1,12 @@
 """Service layer — business logic composed from data sources."""
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 from typing import Any, Callable
 
 from toggl.cache import DataCache, get_week_dates, get_current_week, get_week_str, get_sunday_of_week
-from toggl.calc import calculate, format_signed
-from toggl.config import get_daily_target as _get_daily_target
+from toggl.calc import calculate, calculate_logged_activity_totals
 
 
 class MetricsService:
@@ -19,10 +19,18 @@ class MetricsService:
     def __init__(
         self,
         cache: DataCache,
-        get_daily_target: Callable[[], float] = _get_daily_target,
+        points: dict[str, int | float],
+        negatives: dict[str, int | float],
+        positives: dict[str, int | float],
+        recovery_ignore: list[str],
+        get_daily_target: Callable[[], float] | None = None,
     ):
         self._cache = cache
-        self._get_daily_target = get_daily_target
+        self._points = points
+        self._negatives = negatives
+        self._positives = positives
+        self._recovery_ignore = recovery_ignore
+        self._get_daily_target = get_daily_target or (lambda: 13.0)
         self._report_sections_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
     def get_day_metrics(self, day_str: str) -> dict[str, Any]:
@@ -236,12 +244,160 @@ class MetricsService:
         else:
             return "0.0"
 
+    # ── Ported from DataCache ─────────────────────────────────────────
+
+    def get_daily_data_for_range(
+        self, start_date: date, end_date: date
+    ) -> list[dict[str, Any]]:
+        """Return daily aggregates for every day in [start_date, end_date].
+
+        Each dict has these fields (all exist for every day in the range;
+        no-data and future days get all numeric fields = 0.0):
+
+            date (str):      "YYYY-MM-DD"
+            net (float):     earned - abs(tracked_neg) - logged_neg + logged_pos
+            positive (float): earned + logged_pos  (always >= 0)
+            negative (float): abs(tracked_neg) + logged_neg  (always >= 0)
+            logged_pos (float): sum of positive-log points (NOT count)
+            logged_neg (float): sum of negative-log points (NOT count)
+            has_data (bool): True if projects, negatives, or positives exist
+        """
+        results = []
+        d = start_date
+        while d <= end_date:
+            d_str = d.strftime("%Y-%m-%d")
+            projs = self._cache.daily_data.get(d_str, {})
+            neg_entries = self._cache.negatives_raw.get(d_str, [])
+            pos_entries = self._cache.positives_raw.get(d_str, [])
+            has_data = bool(projs or neg_entries or pos_entries)
+
+            if projs:
+                res = calculate(projs)
+                earned = sum(r[3] for r in res if r[3] is not None and r[3] > 0)
+                tracked_neg = sum(abs(r[3]) for r in res if r[3] is not None and r[3] < 0)
+            else:
+                earned = 0.0
+                tracked_neg = 0.0
+
+            logged_neg = sum(e["points"] for e in neg_entries)
+            logged_pos = sum(e["points"] for e in pos_entries)
+
+            net = round(earned - tracked_neg - logged_neg + logged_pos, 1)
+            positive = round(earned + logged_pos, 1)
+            negative = round(tracked_neg + logged_neg, 1)
+
+            results.append({
+                "date": d_str,
+                "net": net if has_data else 0.0,
+                "positive": positive,
+                "negative": negative,
+                "earned": round(earned, 1),
+                "tracked_neg": round(tracked_neg, 1),
+                "logged_pos": round(logged_pos, 1),
+                "logged_neg": round(logged_neg, 1),
+                "total_hours": round(sum(projs.values()), 1) if projs else 0.0,
+                "has_data": has_data,
+            })
+            d += timedelta(days=1)
+
+        return results
+
+    def get_range_aggregate(
+        self, start_date: date, end_date: date
+    ) -> dict[str, Any]:
+        """Aggregate projects and logged activities across a date range.
+
+        Returns (project_results, negative_results, positive_results)
+        where each is structured identically to get_report_sections output.
+        """
+        # Aggregate project hours
+        projects: dict[str, float] = {}
+        d = start_date
+        while d <= end_date:
+            d_str = d.strftime("%Y-%m-%d")
+            for proj, hrs in self._cache.daily_data.get(d_str, {}).items():
+                projects[proj] = projects.get(proj, 0.0) + hrs
+            d += timedelta(days=1)
+
+        results = calculate(projects)
+
+        # Aggregate logged negatives
+        neg_entries = []
+        for d_str, entries in self._cache.negatives_raw.items():
+            try:
+                dd = date.fromisoformat(d_str)
+            except (ValueError, TypeError):
+                continue
+            if start_date <= dd <= end_date:
+                neg_entries.extend(entries)
+        negative_results = calculate_logged_activity_totals(neg_entries, self._negatives, sign=-1)
+
+        # Aggregate logged positives
+        pos_entries = []
+        for d_str, entries in self._cache.positives_raw.items():
+            try:
+                dd = date.fromisoformat(d_str)
+            except (ValueError, TypeError):
+                continue
+            if start_date <= dd <= end_date:
+                pos_entries.extend(entries)
+        positive_results = calculate_logged_activity_totals(pos_entries, self._positives)
+
+        return {
+            "results": results,
+            "positive": [r for r in results if r[3] is not None and r[3] >= 0],
+            "negative": [r for r in results if r[3] is not None and r[3] < 0],
+            "unscored": [r for r in results if r[3] is None],
+            "positive_results": positive_results,
+            "negative_results": negative_results,
+        }
+
+    def get_recovery_rows(self, label: str, context_type: str) -> dict[str, Any]:
+        report = self.get_report_sections(label, context_type)
+        total_pts = report["total_points"]
+        if total_pts >= 0:
+            return {"total_points": total_pts, "rows": []}
+        deficit = abs(total_pts)
+        rows = []
+
+        # Tracked projects with positive rates (hourly)
+        for name, rate in sorted(
+            [(name, rate) for name, rate in self._points.items() if rate > 0],
+            key=lambda item: -item[1],
+        ):
+            hours_needed = deficit / rate
+            h = int(hours_needed)
+            m = int((hours_needed - h) * 60)
+            if h >= 1:
+                formatted_amount = f"{round(hours_needed)}h"
+            else:
+                formatted_amount = f"{m}m"
+            rows.append({"category": name, "rate": rate, "hours_needed": formatted_amount})
+
+        # Logged positive actions (one-time bonuses)
+        if self._positives:
+            for name, points in sorted(
+                [(name, v) for name, v in self._positives.items()
+                 if v > 0 and name not in self._recovery_ignore],
+                key=lambda item: -item[1],
+            ):
+                occurrences_needed = math.ceil(deficit / points)
+                rows.append({
+                    "category": name,
+                    "rate": points,
+                    "hours_needed": f"\u00d7{occurrences_needed}",
+                })
+
+        return {"total_points": total_pts, "rows": rows}
+
+    # ── Existing methods ────────────────────────────────────────────
+
     def compute_period_nets(
         self, start: date, end: date, mode: str
     ) -> dict[str, Any]:
         def _compute_net(start_d: date, end_d: date) -> float:
             total = 0.0
-            for d in self._cache.get_daily_data_for_range(start_d, end_d):
+            for d in self.get_daily_data_for_range(start_d, end_d):
                 if d["has_data"]:
                     total += d["net"]
             return total

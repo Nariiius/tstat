@@ -39,7 +39,13 @@ from toggl.cache import (
 )
 from toggl.config import (
     load_runtime_settings,
+    POINTS,
+    NEGATIVES,
+    POSITIVES,
+    RECOVERY_IGNORE,
+    get_daily_target,
 )
+from toggl.services.metrics import MetricsService
 from toggl.command import CommandTab
 from toggl.panels import LogNegRequested, LogPosRequested, OverviewPanel, SyncPanel
 from toggl.neg import log_activity_direct
@@ -180,6 +186,7 @@ class TogglTUI(App):
         self._table_resize_timer = None
         self._active_week = get_current_week()
         self._sync_in_progress = False
+        self._metrics: MetricsService | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -220,6 +227,17 @@ class TogglTUI(App):
             self.call_later(self.check_auto_sync)
             self.set_interval(60, self.check_auto_sync)
 
+    def _build_metrics(self, cache: DataCache) -> MetricsService:
+        """Create MetricsService from a DataCache instance using current config globals."""
+        return MetricsService(
+            cache,
+            dict(POINTS),
+            dict(NEGATIVES),
+            dict(POSITIVES),
+            list(RECOVERY_IGNORE),
+            get_daily_target,
+        )
+
     def watch_data_cache(self, cache: DataCache | None) -> None:
         """Reactively refresh all views when data_cache changes."""
         if cache is not None:
@@ -230,7 +248,9 @@ class TogglTUI(App):
         """Load cache data asynchronously (I/O runs in thread pool)."""
         import asyncio
 
-        self.data_cache = await asyncio.to_thread(DataCache.load)
+        cache = await asyncio.to_thread(DataCache.load)
+        self._metrics = self._build_metrics(cache)
+        self.data_cache = cache
         # watch_data_cache handles refresh_all_views automatically
 
     def check_auto_sync(self) -> None:
@@ -268,7 +288,9 @@ class TogglTUI(App):
         self._sync_in_progress = False
         load_runtime_settings()
         reset_cache()
-        self.data_cache = get_cache()
+        cache = get_cache()
+        self._metrics = self._build_metrics(cache)
+        self.data_cache = cache
         if ok:
             self.notify("Auto-refreshed stale data")
         else:
@@ -346,7 +368,7 @@ class TogglTUI(App):
         """Refresh the Overview dashboard panel."""
         try:
             panel = self.query_one(OverviewPanel)
-            panel.refresh_data(self.data_cache, self._active_week)
+            panel.refresh_data(self.data_cache, self._active_week, self._metrics)
         except Exception:
             pass  # Panel may not be mounted yet
 
@@ -355,6 +377,7 @@ class TogglTUI(App):
         try:
             cmd_tab = self.query_one(CommandTab)
             cmd_tab.data_cache = self.data_cache
+            cmd_tab.metrics = self._metrics
             cmd_tab.refresh_all()
         except Exception:
             pass  # Container may not be mounted yet
@@ -486,7 +509,9 @@ class TogglTUI(App):
         self._sync_in_progress = False
         load_runtime_settings()
         reset_cache()
-        self.data_cache = get_cache()
+        cache = get_cache()
+        self._metrics = self._build_metrics(cache)
+        self.data_cache = cache
         # watch_data_cache handles refresh_all_views automatically
         if ok:
             self.notify(success_msg)

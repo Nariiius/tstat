@@ -1,6 +1,6 @@
 """Dataclass models for project data structures.
 
-These replace raw ``dict[str, Any]`` returns from ``DataCache`` query methods.
+These replace raw ``dict[str, Any]`` returns from ``MetricsService`` methods.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 class ProjectHours:
     """A single project's accumulated hours within a date range.
 
-    Returned by ``DataCache.get_range_aggregate()`` and used in category tables.
+    Returned by ``MetricsService.get_range_aggregate()`` and used in category tables.
     """
 
     name: str
@@ -26,7 +26,7 @@ class ProjectHours:
 class RangeAggregate:
     """Aggregated data across a date range.
 
-    Replaces the raw dict returned by ``DataCache.get_range_aggregate()``.
+    Replaces the raw dict returned by ``MetricsService.get_range_aggregate()``.
     """
 
     results: list[ProjectHours]
@@ -50,7 +50,7 @@ class RangeAggregate:
 
 @dataclass
 class DailyDataPoint:
-    """A single day's aggregate metrics from ``DataCache.get_daily_data_for_range()``."""
+    """A single day's aggregate metrics from ``MetricsService.get_daily_data_for_range()``."""
 
     date: str
     net: float

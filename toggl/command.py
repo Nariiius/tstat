@@ -16,9 +16,8 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Button, Label
 
-from toggl.cache import DataCache
+
 from toggl.state.period import PeriodController, PeriodMode
-from toggl.services.metrics import MetricsService
 from toggl.widgets.calendar import CalendarWidget
 from toggl.widgets.graph import GraphWidget
 from toggl.widgets.tables import CategoryTable, DailyBreakdownTable
@@ -171,6 +170,7 @@ class CommandTab(Container):
         self.period = PeriodController()
         self._current_graph_mode = "net"
         self.data_cache = None
+        self.metrics = None
 
     # ── Compose ──────────────────────────────────────────────────────
 
@@ -213,10 +213,9 @@ class CommandTab(Container):
         base_start, base_end = self.period.get_base_range()
 
         cache = self.data_cache
-        daily_data = cache.get_daily_data_for_range(start, end)
-        base_daily_data = cache.get_daily_data_for_range(base_start, base_end)
-
-        svc = MetricsService(cache)
+        svc = self.metrics
+        daily_data = svc.get_daily_data_for_range(start, end)
+        base_daily_data = svc.get_daily_data_for_range(base_start, base_end)
 
         # ── Graph data ──────────────────────────────────────────────
         dates, raw_values, values, avg = svc.get_graph_data(
@@ -236,9 +235,9 @@ class CommandTab(Container):
 
         # ── Tables (delegated to widgets) ─────────────────────────
         cat_table = self.query_one(CategoryTable)
-        cat_table.refresh_data(cache, self.period, base_start, base_end)
+        cat_table.refresh_data(svc, self.period, base_start, base_end)
         daily_table = self.query_one(DailyBreakdownTable)
-        daily_table.refresh_data(cache, self.period, daily_data)
+        daily_table.refresh_data(svc, self.period, daily_data)
 
         # ── Statistics ──────────────────────────────────────────────
         self._update_stats(raw_values, values, avg)
