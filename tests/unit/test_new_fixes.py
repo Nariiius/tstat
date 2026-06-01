@@ -137,3 +137,43 @@ def test_sync_lock_and_auto_sync_check(monkeypatch):
     app.check_auto_sync()
     assert called_refresh is True
 
+
+def test_negative_mode_graph_limits_below_zero(monkeypatch):
+    """Verify that in negative mode, GraphWidget receives negative values and Y-limits are set below zero."""
+    from toggl.widgets.graph import GraphWidget
+    import plotext as plt
+    
+    captured_ylim = None
+    
+    def mock_ylim(ymin, ymax):
+        nonlocal captured_ylim
+        captured_ylim = (ymin, ymax)
+        
+    monkeypatch.setattr(plt, "ylim", mock_ylim)
+    
+    # Instantiate graph widget
+    graph = GraphWidget()
+    graph.set_mode("negative")
+    
+    # Provide actual negative values (which are correct after the command.py unpacking fix)
+    dates = ["2023-01-01", "2023-01-02", "2023-01-03"]
+    values = [-10.0, -20.0, -30.0]
+    
+    graph.set_data(dates, values, avg=-20.0)
+    
+    # We must mock size to have positive width/height so render() doesn't fail
+    class SizeMock:
+        width = 40
+        height = 10
+    monkeypatch.setattr(GraphWidget, "size", property(lambda self: SizeMock()))
+    
+    # Trigger render
+    graph.render()
+    
+    assert captured_ylim is not None
+    ymin, ymax = captured_ylim
+    # ymin must be below zero (e.g. around -30) and ymax must be 0.0 (or slightly rounded nice bounds <= 0)
+    assert ymin < 0
+    assert ymax <= 0
+
+

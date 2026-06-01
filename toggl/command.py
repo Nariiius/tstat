@@ -218,7 +218,7 @@ class CommandTab(Container):
         base_daily_data = svc.get_daily_data_for_range(base_start, base_end)
 
         # ── Graph data ──────────────────────────────────────────────
-        dates, raw_values, values, avg = svc.get_graph_data(
+        dates, values, raw_values, avg = svc.get_graph_data(
             daily_data, self._current_graph_mode
         )
         graph = self.query_one("#cmd-graph", GraphWidget)
