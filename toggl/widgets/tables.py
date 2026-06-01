@@ -43,7 +43,7 @@ class CategoryTable(DataTable):
         svc = MetricsService(cache)
         period_nets = svc.compute_period_nets(start, end, mode)
         subtitle = period_nets.get("subtitle", "Insights coming soon")
-        self.border_subtitle = f"[#8d98a7]{subtitle}[/]"
+        self.border_subtitle = f"[#8d98a7]<- [/]{subtitle}[#8d98a7] ->[/]"
 
         rows = build_category_rows(agg)
         self.add_rows(rows)

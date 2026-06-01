@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 from textual import on
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Button, Label
 
@@ -42,6 +43,11 @@ class CommandTab(Container):
       │ Category Summary (35%)  │ Daily Breakdown (65%)  │
       └─────────────────────────────────┴────────────────┘
     """
+
+    BINDINGS = [
+        Binding("left", "cmd_previous", "Previous", show=False),
+        Binding("right", "cmd_next", "Next", show=False),
+    ]
 
     DEFAULT_CSS = """
     CommandTab {
@@ -336,6 +342,12 @@ class CommandTab(Container):
 
 
     # ── Event handlers ───────────────────────────────────────────────
+
+    def action_cmd_previous(self) -> None:
+        self._on_prev()
+
+    def action_cmd_next(self) -> None:
+        self._on_next()
 
     @on(Button.Pressed, "#cmd-prev")
     def _on_prev(self) -> None:

@@ -175,7 +175,7 @@ class TogglTUI(App):
     def __init__(self) -> None:
         super().__init__()
         self._initialized = False
-        self.active_view_index = 0  # Overview view is the default landing view
+        self.active_view_index = 1  # Command tab is the default landing view
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self._table_resize_timer = None
         self._active_week = get_current_week()

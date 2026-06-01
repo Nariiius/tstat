@@ -1,6 +1,6 @@
 """Color helper functions for TUI display cells and calendar widgets."""
 
-from datetime import date
+from datetime import date, timedelta
 
 
 def _net_color(value: float) -> str:
@@ -37,7 +37,8 @@ def _label_for_day(
     if mode == "day":
         is_current_period = (d == today)
     elif mode == "week":
-        is_current_period = (d.isocalendar()[:2] == today.isocalendar()[:2])
+        _sund = lambda x: x - timedelta(days=(x.weekday() + 1) % 7)
+        is_current_period = (_sund(d) == _sund(today))
     elif mode == "month":
         is_current_period = (d.month == today.month and d.year == today.year)
 

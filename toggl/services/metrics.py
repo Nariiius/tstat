@@ -228,6 +228,14 @@ class MetricsService:
         aggregated.reverse()
         return aggregated
 
+    def _fmt_net(self, value: float) -> str:
+        if value > 0:
+            return f"[#37d994]+{value:.1f}[/]"
+        elif value < 0:
+            return f"[#ff5f5f]{value:.1f}[/]"
+        else:
+            return "0.0"
+
     def compute_period_nets(
         self, start: date, end: date, mode: str
     ) -> dict[str, Any]:
@@ -248,7 +256,7 @@ class MetricsService:
             return {
                 "daily_net": daily_net,
                 "weekly_net": weekly_net,
-                "subtitle": f"Daily: {format_signed(daily_net)} | Weekly ({week_label}): {format_signed(weekly_net)}",
+                "subtitle": f"Daily: {self._fmt_net(daily_net)}  |  Weekly ({week_label}): {self._fmt_net(weekly_net)}",
             }
         elif mode == "week":
             weekly_net = _compute_net(start, end)
@@ -260,6 +268,6 @@ class MetricsService:
             return {
                 "weekly_net": weekly_net,
                 "monthly_net": monthly_net,
-                "subtitle": f"Weekly: {format_signed(weekly_net)} | Monthly ({month_label}): {format_signed(monthly_net)}",
+                "subtitle": f"Weekly: {self._fmt_net(weekly_net)}  |  Monthly ({month_label}): {self._fmt_net(monthly_net)}",
             }
         return {}
