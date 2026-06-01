@@ -29,7 +29,7 @@ class ManageScreen(ModalScreen):
 
     DEFAULT_CSS = """
     ManageScreen {
-        background: $background 60%;
+        background: #0b1016 60%;
     }
 
     #manage-dialog {
@@ -45,6 +45,7 @@ class ManageScreen(ModalScreen):
         border: round #3d4f63;
         padding: 1 2;
         background: #0b1016;
+        color: #d7dde8;
     }
 
     #manage-box:focus,
@@ -144,11 +145,11 @@ class ManageScreen(ModalScreen):
                 with Container(id="edit-bar"):
                     yield DateStepper(id="edit-date-stepper")
                     yield Static(
-                        "[Enter] confirm  [Esc] cancel",
+                        "[bold #63f3ff]Enter[/] confirm  [bold #8d98a7]Esc[/] cancel",
                         id="edit-bar-help",
                     )
                 yield Static(
-                    "[d] delete  [e] edit date  [Esc] close",
+                    "[bold #63f3ff]d[/] delete  [bold #63f3ff]e[/] edit date  [bold #8d98a7]Esc[/] close",
                     id="manage-help",
                 )
 
@@ -242,7 +243,7 @@ class ManageScreen(ModalScreen):
         if table is None or table.cursor_row < 0:
             return None
         try:
-            row_key = str(table.rows.keys()[table.cursor_row].value)
+            row_key = str(list(table.rows.keys())[table.cursor_row].value)
             return self._entry_data.get(row_key)
         except (IndexError, AttributeError):
             return None

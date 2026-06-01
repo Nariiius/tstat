@@ -73,17 +73,19 @@ class DateStepper(Horizontal):
         super().__init__(*args, **kwargs)
         self._initial_date = initial_date or date.today()
         self._max_date = max_date or date.today()
+        # Set reactives eagerly so they are available before on_mount
+        self.max_date = self._max_date
+        self.selected_date = self._initial_date
 
     def compose(self) -> ComposeResult:
-        yield Button("\u2190", id="stepper-prev", classes="stepper-btn")
+        yield Button("\u25c0", id="stepper-prev", classes="stepper-btn")
         yield Label(self._format_date(self._initial_date), id="stepper-date-label")
-        yield Button("\u2192", id="stepper-next", classes="stepper-btn")
+        yield Button("\u25b6", id="stepper-next", classes="stepper-btn")
 
     def on_mount(self) -> None:
-        # Set reactives after children exist
-        self.max_date = self._max_date
-        # Defer so that compose children can query properly
-        self.selected_date = self._initial_date
+        # Re-clamp in case max_date changed between __init__ and mount
+        if self.selected_date > self._max_date:
+            self.selected_date = self._max_date
 
     # ── reactive watchers ──────────────────────────────────────────
 

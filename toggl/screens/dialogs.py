@@ -21,13 +21,18 @@ from toggl.widgets.date_stepper import DateStepper
 def _parse_option_name(prompt: str) -> str:
     """Extract the activity name from a formatted option prompt.
 
-    Prompts look like ``\"Exercise  (+3 pts)\"`` or ``\"Procrastination  (-5 pts)\"``.
-    Returns the name portion before the points annotation.
+    Prompts look like ``\"[E]  Exercise  (+3 pts)\"`` or ``\"[P]  Procrastination  (-5 pts)\"``.
+    Returns the name portion between the key hint and the points annotation.
     """
-    idx = prompt.rfind("  (")
+    # Strip leading key hint "[X]  "
+    s = prompt
+    if s.startswith("[") and "]  " in s[:6]:
+        s = s.split("]  ", 1)[1]
+    # Strip trailing points annotation "  (+N pts)" or "  (-N pts)"
+    idx = s.rfind("  (")
     if idx > 0:
-        return prompt[:idx]
-    return prompt
+        return s[:idx]
+    return s
 
 
 class BaseDialog(ModalScreen):
@@ -47,7 +52,7 @@ class BaseDialog(ModalScreen):
     $accent: #63f3ff;
 
     BaseDialog {
-        background: $background 60%;
+        background: #0b1016 60%;
     }
 
     #dialog {
@@ -64,6 +69,7 @@ class BaseDialog(ModalScreen):
         border: round #3d4f63;
         padding: 1 2;
         background: #0b1016;
+        color: #d7dde8;
     }
 
     #dialog-box:focus,
@@ -75,6 +81,7 @@ class BaseDialog(ModalScreen):
 
     .dialog-body {
         margin-bottom: 1;
+        color: #d7dde8;
     }
 
     .dialog-help {
@@ -178,10 +185,11 @@ class NegativeInputScreen(BaseDialog):
         super().on_mount()
         option_list = self.query_one("#negative-list", OptionList)
         for name, pts in NEGATIVES.items():
+            first = name.strip()[0].upper() if name.strip() else "?"
             if pts == int(pts):
-                option_list.add_option(f"{name}  ({int(pts):+d} pts)")
+                option_list.add_option(f"[{first}]  {name}  ({int(pts):+d} pts)")
             else:
-                option_list.add_option(f"{name}  ({pts:+.1f} pts)")
+                option_list.add_option(f"[{first}]  {name}  ({pts:+.1f} pts)")
         option_list.focus()
 
     @on(OptionList.OptionSelected, "#negative-list")
@@ -221,10 +229,11 @@ class PositiveInputScreen(BaseDialog):
         super().on_mount()
         option_list = self.query_one("#positive-list", OptionList)
         for name, pts in POSITIVES.items():
+            first = name.strip()[0].upper() if name.strip() else "?"
             if pts == int(pts):
-                option_list.add_option(f"{name}  (+{int(pts)} pts)")
+                option_list.add_option(f"[{first}]  {name}  (+{int(pts)} pts)")
             else:
-                option_list.add_option(f"{name}  (+{pts:.1f} pts)")
+                option_list.add_option(f"[{first}]  {name}  (+{pts:.1f} pts)")
         option_list.focus()
 
     @on(OptionList.OptionSelected, "#positive-list")
