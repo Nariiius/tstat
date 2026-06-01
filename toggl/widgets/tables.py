@@ -9,15 +9,15 @@ from datetime import date
 from typing import Any
 
 from rich.text import Text as RichText
-from textual.widgets import DataTable
 
 from toggl.cache import get_week_str
+from toggl.widgets.auto_width_table import AutoWidthDataTable
 from toggl.formatters import format_signed_rich, build_category_rows
 from toggl.services.metrics import MetricsService
 from toggl.state.period import PeriodController
 
 
-class CategoryTable(DataTable):
+class CategoryTable(AutoWidthDataTable):
     """Category summary table showing project breakdown."""
 
     def on_mount(self) -> None:
@@ -48,7 +48,7 @@ class CategoryTable(DataTable):
         self.add_rows(rows)
 
 
-class DailyBreakdownTable(DataTable):
+class DailyBreakdownTable(AutoWidthDataTable):
     """Daily/weekly/monthly breakdown table."""
 
     def on_mount(self) -> None:

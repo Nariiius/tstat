@@ -12,6 +12,8 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Button, DataTable, Static
 
+from toggl.widgets.auto_width_table import AutoWidthDataTable
+
 from toggl.cache import DataCache
 from toggl.api import API_RUN_STATS, _format_reset_window
 from toggl.formatters import (
@@ -93,12 +95,12 @@ class SyncPanel(Container):
     """
 
     def compose(self) -> ComposeResult:
-        yield DataTable(
+        yield AutoWidthDataTable(
             zebra_stripes=False, cursor_type="row", id="sync-table"
         )
 
     def on_mount(self) -> None:
-        table = self.query_one("#sync-table", DataTable)
+        table = self.query_one("#sync-table", AutoWidthDataTable)
         table.add_columns("Metric", "Value")
         table.styles.min_height = 1
         table.show_cursor = True
@@ -106,7 +108,7 @@ class SyncPanel(Container):
     def refresh_data(self) -> None:
         """Reload sync status data and repopulate the table."""
         status = get_sync_status_data()
-        table = self.query_one("#sync-table", DataTable)
+        table = self.query_one("#sync-table", AutoWidthDataTable)
         table.clear(columns=False)
         cache_age = status["projects_cache_age_days"]
         remaining = (
@@ -253,17 +255,17 @@ class OverviewPanel(Container):
     def compose(self) -> ComposeResult:
         with Horizontal(id="overview-dashboard"):
             with Vertical(id="overview-left"):
-                yield DataTable(
+                yield AutoWidthDataTable(
                     zebra_stripes=False, cursor_type="row", id="overview-categories-table"
                 )
                 yield Static(id="overview-insights")
             with Vertical(id="overview-right"):
                 with Vertical(id="overview-recovery-container"):
-                    yield DataTable(
+                    yield AutoWidthDataTable(
                         zebra_stripes=False, cursor_type="row", id="overview-recovery-table"
                     )
                 with Vertical(id="overview-recent-log-wrapper"):
-                    yield DataTable(
+                    yield AutoWidthDataTable(
                         zebra_stripes=False, cursor_type="row", id="overview-recent-log-table"
                     )
                     with Horizontal(id="recovery-button-bar"):

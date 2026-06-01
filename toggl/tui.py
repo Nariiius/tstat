@@ -306,6 +306,7 @@ class TogglTUI(App):
         for idx in self._VIEW_REFRESH_MAP:
             self._refresh_view_by_index(idx)
         self.update_view_visibility()
+        self.focus_active_view()
         self._schedule_resize()
         logger.debug("[SYNC] refresh_all_views: done")
 
@@ -354,7 +355,7 @@ class TogglTUI(App):
     def focus_active_view(self) -> None:
         focus_targets = {
             0: "#overview-categories-table",
-            1: "#command-container",
+            1: "#cmd-graph",
             2: "#sync-table",
         }
         selector = focus_targets.get(self.active_view_index)
