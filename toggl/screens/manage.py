@@ -65,7 +65,6 @@ class ManageScreen(ModalScreen):
     }
 
     #manage-neg-table, #manage-pos-table {
-        width: 1fr;
         height: 1fr;
         border: round #3d4f63;
         background: #0b1016;
@@ -105,6 +104,12 @@ class ManageScreen(ModalScreen):
         margin-top: 1;
         text-align: center;
     }
+
+    #manage-help {
+        color: #8d98a7;
+        margin-top: 1;
+        text-align: center;
+    }
     """
 
     BINDINGS = [
@@ -124,8 +129,8 @@ class ManageScreen(ModalScreen):
         with Container(id="manage-dialog"):
             with Container(id="manage-box"):
                 yield Tabs(
-                    Tab("NEGATIVES", id="tab-negatives"),
-                    Tab("POSITIVES", id="tab-positives"),
+                    Tab("Negatives", id="tab-negatives"),
+                    Tab("Positives", id="tab-positives"),
                     id="manage-tabs",
                 )
                 # Negative table (visible by default)
@@ -143,6 +148,10 @@ class ManageScreen(ModalScreen):
                         "[bold #63f3ff]Enter[/] confirm  [bold #8d98a7]Esc[/] cancel",
                         id="edit-bar-help",
                     )
+                yield Static(
+                    "[bold #63f3ff]d[/] delete  [bold #63f3ff]e[/] edit date  [bold #8d98a7]Esc[/] close",
+                    id="manage-help",
+                )
 
     def on_mount(self) -> None:
         self.query_one("#manage-box").border_title = (
@@ -192,7 +201,7 @@ class ManageScreen(ModalScreen):
             rows = cache.get_negative_log_rows(limit=10000)
             for idx, r in enumerate(rows):
                 pts = -float(r["points"])
-                name_text = Text.from_markup(f"[#ff5f5f]{r['name']}[/]")
+                name_text = Text(f"[#ff5f5f]{r['name']}[/]")
                 key = f"neg|{r['date']}|{r['name']}|{idx}"
                 self._entry_data[key] = {
                     "mode": "negative",
@@ -210,7 +219,7 @@ class ManageScreen(ModalScreen):
             rows = cache.get_positive_log_rows(limit=10000)
             for idx, r in enumerate(rows):
                 pts = float(r["points"])
-                name_text = Text.from_markup(f"[#37d994]{r['name']}[/]")
+                name_text = Text(f"[#37d994]{r['name']}[/]")
                 key = f"pos|{r['date']}|{r['name']}|{idx}"
                 self._entry_data[key] = {
                     "mode": "positive",
