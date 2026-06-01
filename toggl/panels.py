@@ -150,6 +150,10 @@ class LogPosRequested(Message):
     """User clicked Log Pos button in OverviewPanel."""
 
 
+class ManageRequested(Message):
+    """User clicked Manage button in OverviewPanel."""
+
+
 class OverviewPanel(Container):
     """Overview dashboard panel — categories, recovery, recent log, insights.
 
@@ -221,6 +225,14 @@ class OverviewPanel(Container):
         background: #1e2a36;
         border: none;
     }
+    #btn-manage {
+        color: #63f3ff;
+    }
+    #btn-manage:hover {
+        color: #8de8ff;
+        background: #1e2a36;
+        border: none;
+    }
     #overview-insights {
         height: 1fr;
         min-height: 5;
@@ -271,6 +283,7 @@ class OverviewPanel(Container):
                     with Horizontal(id="recovery-button-bar"):
                         yield Button("Log Neg", id="btn-neg-log", classes="recovery-btn")
                         yield Button("Log Pos", id="btn-pos-log", classes="recovery-btn")
+                        yield Button("Manage", id="btn-manage", classes="recovery-btn")
 
     def on_mount(self) -> None:
         rec_table = self.query_one("#overview-recovery-table", DataTable)
@@ -414,3 +427,7 @@ class OverviewPanel(Container):
     @on(Button.Pressed, "#btn-pos-log")
     def _on_pos_log(self) -> None:
         self.post_message(LogPosRequested())
+
+    @on(Button.Pressed, "#btn-manage")
+    def _on_manage(self) -> None:
+        self.post_message(ManageRequested())

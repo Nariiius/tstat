@@ -47,7 +47,7 @@ from toggl.config import (
 )
 from toggl.services.metrics import MetricsService
 from toggl.command import CommandTab
-from toggl.panels import LogNegRequested, LogPosRequested, OverviewPanel, SyncPanel
+from toggl.panels import LogNegRequested, LogPosRequested, ManageRequested, OverviewPanel, SyncPanel
 from toggl.neg import log_activity_direct
 
 from toggl.screens.dialogs import (
@@ -55,6 +55,7 @@ from toggl.screens.dialogs import (
     NegativeInputScreen,
     PositiveInputScreen,
 )
+from toggl.screens.manage import ManageScreen
 
 
 def time_left_in_week() -> str:
@@ -165,6 +166,7 @@ class TogglTUI(App):
         Binding("U", "sync_full", "Full Sync"),
         Binding("n", "add_negative", "Neg"),
         Binding("p", "add_positive", "Pos"),
+        Binding("m", "manage_logs", "Manage"),
         Binding("z", "cmd_zoom_in", "Zoom+", show=False),
         Binding("Z", "cmd_zoom_out", "Zoom-", show=False),
     ]
@@ -520,9 +522,9 @@ class TogglTUI(App):
             self.notify(message or "Sync skipped", severity="warning")
 
     def action_add_negative(self) -> None:
-        def after_input(value: str | None) -> None:
+        def after_input(value: dict | None) -> None:
             if value:
-                ok, message = log_activity_direct(value, "negative")
+                ok, message = log_activity_direct(value["name"], "negative", value["date"])
                 self.load_data()
                 if ok:
                     self.notify(message)
@@ -532,9 +534,9 @@ class TogglTUI(App):
         self.push_screen(NegativeInputScreen(), after_input)
 
     def action_add_positive(self) -> None:
-        def after_input(value: str | None) -> None:
+        def after_input(value: dict | None) -> None:
             if value:
-                ok, message = log_activity_direct(value, "positive")
+                ok, message = log_activity_direct(value["name"], "positive", value["date"])
                 self.load_data()  # reload cache → watch_data_cache refreshes views
                 if ok:
                     self.notify(message)
@@ -542,6 +544,13 @@ class TogglTUI(App):
                     self.notify(message, severity="error")
 
         self.push_screen(PositiveInputScreen(), after_input)
+
+    def action_manage_logs(self) -> None:
+        """Open the log management modal."""
+        def after_manage(dismissed: bool | None) -> None:
+            self.load_data()  # Reload cache in case entries were changed
+
+        self.push_screen(ManageScreen(), after_manage)
 
     def action_cmd_zoom_in(self) -> None:
         if self.active_view_index == 1:
@@ -559,6 +568,10 @@ class TogglTUI(App):
     @on(LogPosRequested)
     def on_log_pos_requested(self) -> None:
         self.action_add_positive()
+
+    @on(ManageRequested)
+    def on_manage_requested(self) -> None:
+        self.action_manage_logs()
 
     def on_resize(self, event: Resize) -> None:
         new_size = event.size
