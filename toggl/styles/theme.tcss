@@ -107,17 +107,6 @@ DataTable > .datatable--header {
     text-style: bold;
 }
 
-#overview-recovery-table,
-#overview-recovery-table:focus,
-#overview-recovery-table:focus-within {
-    border: none;
-}
-#overview-recent-log-table,
-#overview-recent-log-table:focus,
-#overview-recent-log-table:focus-within {
-    border: none;
-}
-
 #spark-rail {
     width: 34;
     min-width: 34;

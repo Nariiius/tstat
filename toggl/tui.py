@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 import os
 from datetime import date, datetime, timedelta
-from typing import Any
-
 logger = logging.getLogger("TStat")
 logger.setLevel(logging.DEBUG)
 if not logger.handlers:
@@ -16,7 +14,6 @@ if not logger.handlers:
     fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     logger.addHandler(fh)
 
-from rich.text import Text
 from textual import on
 from textual._work_decorator import work
 from textual.app import App, ComposeResult
@@ -24,14 +21,11 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import MouseScrollDown, MouseScrollUp, Resize
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Label, Static, Tab, Tabs
-from textual.worker import Worker, get_current_worker
+from textual.widgets import Footer, Label, Static, Tab, Tabs
 
 from toggl.api import (
     TogglAPIError,
     TogglRateLimitError,
-    _reset_api_stats,
-    get_api_token,
 )
 from toggl.cache import (
     DataCache,
@@ -211,7 +205,6 @@ class TogglTUI(App):
         yield ScrollableFooter(show_command_palette=False)
 
     def on_mount(self) -> None:
-        self._setup_tables()
         load_runtime_settings()
         # Set initial tab silently (prevent auto-activation of tab-0)
         tabs = self.query_one("#view-tabs", Tabs)
@@ -255,10 +248,6 @@ class TogglTUI(App):
             self.notify("Auto-refreshed stale data")
         else:
             self.notify(message or "Auto-refresh failed", severity="warning")
-
-    def _setup_tables(self) -> None:
-        # All view tables are now managed by their respective widget panels.
-        pass
 
     def refresh_all_views(self) -> None:
         if self.data_cache is None:
