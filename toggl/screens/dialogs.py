@@ -185,7 +185,8 @@ class NegativeInputScreen(BaseDialog):
                 option_list.add_option(f"{name}  ({int(pts):+d} pts)")
             else:
                 option_list.add_option(f"{name}  ({pts:+.1f} pts)")
-        option_list.focus()
+        # Focus stepper first so ← → work without clicking
+        self.query_one("#negative-date-stepper", DateStepper).focus()
 
     @on(OptionList.OptionSelected, "#negative-list")
     def submit_negative(self, event: OptionList.OptionSelected) -> None:
@@ -229,7 +230,8 @@ class PositiveInputScreen(BaseDialog):
                 option_list.add_option(f"{name}  (+{int(pts)} pts)")
             else:
                 option_list.add_option(f"{name}  (+{pts:.1f} pts)")
-        option_list.focus()
+        # Focus stepper first so ← → work without clicking
+        self.query_one("#positive-date-stepper", DateStepper).focus()
 
     @on(OptionList.OptionSelected, "#positive-list")
     def submit_positive(self, event: OptionList.OptionSelected) -> None:
