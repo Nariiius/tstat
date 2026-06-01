@@ -105,3 +105,35 @@ def test_patch_weekly_csv_replaces_synced_week(tmp_data_dir):
     # 3. W02 data preserved
     assert by_week_proj[("2023-W02", "Learning to Code")] == 8.0
 
+
+def test_sync_lock_and_auto_sync_check(monkeypatch):
+    """Test that check_auto_sync obeys _sync_in_progress lock and needs_auto_update."""
+    from toggl.tui import TogglTUI
+    import toggl.tui
+    
+    app = TogglTUI()
+    assert app._sync_in_progress is False
+    
+    # 1. If sync is already in progress, check_auto_sync must skip and not trigger auto refresh
+    app._sync_in_progress = True
+    called_refresh = False
+    
+    def mock_do_auto_refresh():
+        nonlocal called_refresh
+        called_refresh = True
+        
+    monkeypatch.setattr(app, "_do_auto_refresh", mock_do_auto_refresh)
+    app.check_auto_sync()
+    assert called_refresh is False
+    
+    # 2. If sync is not in progress, but needs_auto_update() is False, it should not trigger
+    app._sync_in_progress = False
+    monkeypatch.setattr(toggl.tui, "needs_auto_update", lambda: False)
+    app.check_auto_sync()
+    assert called_refresh is False
+    
+    # 3. If sync is not in progress, and needs_auto_update() is True, it should trigger
+    monkeypatch.setattr(toggl.tui, "needs_auto_update", lambda: True)
+    app.check_auto_sync()
+    assert called_refresh is True
+

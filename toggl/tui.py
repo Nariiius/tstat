@@ -182,6 +182,7 @@ class TogglTUI(App):
         self.selected_day = date.today().strftime("%Y-%m-%d")
         self._table_resize_timer = None
         self._active_week = get_current_week()
+        self._sync_in_progress = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -210,12 +211,17 @@ class TogglTUI(App):
         tabs = self.query_one("#view-tabs", Tabs)
         with tabs.prevent(Tabs.TabActivated):
             tabs.active = f"tab-{self.active_view_index}"
-        if needs_auto_update():
-            self._do_auto_refresh()
         # Defer data loading to ensure child widget on_mount() has run
         # so their DataTables have columns set up before refresh.
         self.call_later(self.load_data)
         self.query_one(ScrollableFooter).refresh_bindings()
+
+        # Check for auto-sync immediately after mounting and then every 60 seconds
+        # (Skip in testing environments to prevent visual test notifications)
+        import sys
+        if "pytest" not in sys.modules:
+            self.call_later(self.check_auto_sync)
+            self.set_interval(60, self.check_auto_sync)
 
     def watch_data_cache(self, cache: DataCache | None) -> None:
         """Reactively refresh all views when data_cache changes."""
@@ -230,17 +236,39 @@ class TogglTUI(App):
         self.data_cache = await asyncio.to_thread(DataCache.load)
         # watch_data_cache handles refresh_all_views automatically
 
+    def check_auto_sync(self) -> None:
+        """Periodic auto-sync check running in background."""
+        if self._sync_in_progress:
+            logger.debug("[SYNC] check_auto_sync: sync already in progress, skipping auto-refresh check")
+            return
+        try:
+            if needs_auto_update():
+                logger.debug("[SYNC] check_auto_sync: auto-refresh is needed, starting background job")
+                self._do_auto_refresh()
+            else:
+                logger.debug("[SYNC] check_auto_sync: cache is up-to-date")
+        except Exception as e:
+            logger.exception("[SYNC] Exception during check_auto_sync")
+
     @work(thread=True)
     def _do_auto_refresh(self) -> None:
+        logger.debug("[SYNC] _do_auto_refresh: starting background auto-refresh thread")
+        self._sync_in_progress = True
         try:
             result = sync_current_week_light(auto_refresh=True, prompt_on_warning=False)
-        except (TogglRateLimitError, TogglAPIError):
-            result = {"success": False, "message": "API error during auto-refresh"}
-        ok = result["success"]
-        message = result.get("message", "")
-        self.call_from_thread(self._on_auto_refresh_done, ok, message)
+            logger.debug("[SYNC] _do_auto_refresh: result = %s", result)
+            ok = result.get("success", False)
+            message = result.get("message", "")
+            self.call_from_thread(self._on_auto_refresh_done, ok, message)
+        except (TogglRateLimitError, TogglAPIError) as e:
+            logger.exception("[SYNC] Toggl API error during auto-refresh")
+            self.call_from_thread(self._on_auto_refresh_done, False, f"API error: {e}")
+        except Exception as e:
+            logger.exception("[SYNC] Unexpected exception during auto-refresh")
+            self.call_from_thread(self._on_auto_refresh_done, False, f"Unexpected error: {e}")
 
     def _on_auto_refresh_done(self, ok: bool, message: str) -> None:
+        self._sync_in_progress = False
         load_runtime_settings()
         reset_cache()
         self.data_cache = get_cache()
@@ -389,7 +417,13 @@ class TogglTUI(App):
             "q quit"
         )
 
+    def _set_sync_inactive(self) -> None:
+        self._sync_in_progress = False
+
     def action_sync_current_week(self) -> None:
+        if self._sync_in_progress:
+            self.notify("Sync already in progress...", severity="warning")
+            return
         logger.debug("[SYNC] action_sync_current_week: user pressed 'u'")
         def after_confirm(confirmed: bool) -> None:
             if confirmed:
@@ -404,23 +438,27 @@ class TogglTUI(App):
     @work(thread=True)
     def _do_sync_current_week(self) -> None:
         logger.debug("[SYNC] _do_sync_current_week: starting")
+        self._sync_in_progress = True
         try:
             result = sync_current_week_light(prompt_on_warning=False)
             logger.debug("[SYNC] sync_current_week_light returned: %s", result)
+            ok = result["success"]
+            message = result.get("message", "")
+            logger.debug("[SYNC] calling _on_sync_done: ok=%s, message=%s", ok, message)
+            self.call_from_thread(self._on_sync_done, ok, message, "Synced current week")
         except (TogglRateLimitError, TogglAPIError) as e:
             logger.exception("[SYNC] Toggl API error during sync")
             self.call_from_thread(self.notify, str(e), severity="error")
-            return
+            self.call_from_thread(self._set_sync_inactive)
         except Exception as e:
             logger.exception("[SYNC] Unexpected error in sync worker")
             self.call_from_thread(self.notify, f"Sync error: {e}", severity="error")
-            return
-        ok = result["success"]
-        message = result.get("message", "")
-        logger.debug("[SYNC] calling _on_sync_done: ok=%s, message=%s", ok, message)
-        self.call_from_thread(self._on_sync_done, ok, message, "Synced current week")
+            self.call_from_thread(self._set_sync_inactive)
 
     def action_sync_full(self) -> None:
+        if self._sync_in_progress:
+            self.notify("Sync already in progress...", severity="warning")
+            return
         def after_confirm(confirmed: bool) -> None:
             if confirmed:
                 self.notify("Syncing last 4 weeks...")
@@ -433,17 +471,22 @@ class TogglTUI(App):
 
     @work(thread=True)
     def _do_sync_full(self) -> None:
+        self._sync_in_progress = True
         try:
             result = sync_api_to_csv(4, prompt_on_warning=False)
+            ok = result["success"]
+            message = result.get("message", "")
+            self.call_from_thread(self._on_sync_done, ok, message, "Synced last 4 weeks")
         except (TogglRateLimitError, TogglAPIError) as e:
             self.call_from_thread(self.notify, str(e), severity="error")
-            return
-        ok = result["success"]
-        message = result.get("message", "")
-        self.call_from_thread(self._on_sync_done, ok, message, "Synced last 4 weeks")
+            self.call_from_thread(self._set_sync_inactive)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Sync error: {e}", severity="error")
+            self.call_from_thread(self._set_sync_inactive)
 
     def _on_sync_done(self, ok: bool, message: str, success_msg: str) -> None:
         logger.debug("[SYNC] _on_sync_done: ok=%s, message=%s", ok, message)
+        self._sync_in_progress = False
         load_runtime_settings()
         reset_cache()
         self.data_cache = get_cache()
