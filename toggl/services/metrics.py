@@ -134,28 +134,72 @@ class MetricsService:
         self._report_sections_cache[key] = result
         return result
 
+    def _earliest_data_date(self) -> date | None:
+        """First calendar day with any projects, negatives, or positives."""
+        dates: list[date] = []
+        for d_str in (
+            *self._cache.daily_data.keys(),
+            *self._cache.negatives_raw.keys(),
+            *self._cache.positives_raw.keys(),
+        ):
+            try:
+                dates.append(date.fromisoformat(d_str))
+            except ValueError:
+                continue
+        return min(dates) if dates else None
+
+    def get_lifetime_net(self) -> float:
+        """All-time net — matches Overview ``Total … pts`` (weekly project rollup)."""
+        return self.get_report_sections("ALL_TIME", "ALL")["total_points"]
+
+    def _daily_net_sum(self, start: date, end: date) -> float:
+        """Sum of per-day net values across [start, end] (daily CSV basis)."""
+        if start > end:
+            return 0.0
+        daily = self.get_daily_data_for_range(start, end)
+        return round(sum(float(d["net"]) for d in daily), 1)
+
+    def get_net_graph_adjustment(self) -> float:
+        """Offset so daily cumulative net at today equals :meth:`get_lifetime_net`."""
+        earliest = self._earliest_data_date()
+        if earliest is None:
+            return 0.0
+        daily_through_today = self._daily_net_sum(earliest, date.today())
+        return round(self.get_lifetime_net() - daily_through_today, 2)
+
+    def get_cumulative_before(self, before: date, mode: str) -> float:
+        """Lifetime total for *mode* through the day before *before*."""
+        earliest = self._earliest_data_date()
+        if earliest is None or before <= earliest:
+            base = 0.0
+        else:
+            end = before - timedelta(days=1)
+            daily = self.get_daily_data_for_range(earliest, end)
+            base = sum(float(d[mode]) for d in daily)
+        if mode == "net":
+            base += self.get_net_graph_adjustment()
+        return round(base, 1)
+
     def get_graph_data(
-        self, daily_data: list[dict[str, Any]], mode: str
+        self,
+        daily_data: list[dict[str, Any]],
+        mode: str,
+        *,
+        baseline: float = 0.0,
     ) -> tuple[list[str], list[float], list[float], float | None]:
         dates = [d["date"] for d in daily_data]
         raw_values = [float(d[mode]) for d in daily_data]
 
-        if mode == "net":
-            values: list[float] = []
-            cum = 0.0
-            for v in raw_values:
-                cum += v
+        values: list[float] = []
+        cum = baseline
+        for v in raw_values:
+            cum += v
+            if mode == "negative":
+                values.append(round(-cum, 1))
+            else:
                 values.append(round(cum, 1))
-            avg = round(sum(values) / len(values), 1) if values else None
-        elif mode == "negative":
-            values = [-v for v in raw_values]
-            nonzero = [v for v in raw_values if v != 0]
-            avg = round(-sum(nonzero) / len(nonzero), 1) if nonzero else None
-        else:
-            values = raw_values
-            nonzero = [v for v in raw_values if v != 0]
-            avg = round(sum(nonzero) / len(nonzero), 1) if nonzero else None
 
+        avg = round(sum(raw_values) / len(raw_values), 1) if raw_values else None
         return dates, values, raw_values, avg
 
     def get_daily_breakdown(

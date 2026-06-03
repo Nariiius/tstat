@@ -6,7 +6,7 @@ These tests verify each method independently using CSV fixtures.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -177,7 +177,7 @@ class TestMetricsServiceGraphData:
     """Tests for MetricsService.get_graph_data."""
 
     def test_get_graph_data_net_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
-        """Computes cumulative net (each value >= previous)."""
+        """Computes lifetime cumulative net within the slice."""
         svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         dates, values, raw, avg = svc.get_graph_data(dashboard["rows"], "net")
@@ -185,11 +185,53 @@ class TestMetricsServiceGraphData:
         assert len(dates) == 7
         assert len(values) == 7
         assert len(raw) == 7
-        for i in range(1, len(values)):
-            assert values[i] >= values[i - 1]
+        assert values[-1] == round(sum(raw), 1)
+
+    def test_get_graph_data_net_lifetime_baseline(self, tmp_data_dir, sample_daily_csv, sample_config):
+        """Baseline seeds cumulative net from prior days plus report alignment."""
+        from toggl.cache import get_week_dates
+
+        svc = _make_svc()
+        w1_start, w1_end = get_week_dates("2023-W01")
+        w2_start, _ = get_week_dates("2023-W02")
+        w1_net = svc._daily_net_sum(w1_start, w1_end)
+        baseline = svc.get_cumulative_before(w2_start, "net")
+        assert baseline == round(w1_net + svc.get_net_graph_adjustment(), 1)
+
+        w2_data = svc.get_daily_data_for_range(w2_start, w2_start + timedelta(days=6))
+        _, values, _, _ = svc.get_graph_data(w2_data, "net", baseline=baseline)
+        assert values[0] == round(baseline + float(w2_data[0]["net"]), 1)
+
+    def test_get_cumulative_before_empty(self, tmp_data_dir, sample_config):
+        """No data yields zero baseline."""
+        svc = _make_svc()
+        assert svc.get_cumulative_before(date(2023, 1, 1), "net") == 0.0
+
+    def test_lifetime_net_matches_report(self, tmp_data_dir, sample_daily_csv, sample_config):
+        """Lifetime net uses the same total as ALL_TIME report sections."""
+        svc = _make_svc()
+        report = svc.get_report_sections("ALL_TIME", "ALL")
+        assert svc.get_lifetime_net() == report["total_points"]
+
+    def test_net_graph_adjustment_aligns_today(
+        self, tmp_data_dir, sample_daily_csv, sample_config
+    ):
+        """Adjusted cumulative net at today equals lifetime report total."""
+        from toggl.cache import get_week_dates
+
+        svc = _make_svc()
+        earliest = svc._earliest_data_date()
+        assert earliest is not None
+        today = date.today()
+        if today < earliest:
+            pytest.skip("fixture dates are in the past relative to today")
+        daily = svc.get_daily_data_for_range(earliest, today)
+        baseline = svc.get_cumulative_before(earliest, "net")
+        _, values, _, _ = svc.get_graph_data(daily, "net", baseline=baseline)
+        assert values[-1] == pytest.approx(svc.get_lifetime_net(), abs=0.05)
 
     def test_get_graph_data_negative_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
-        """Returns inverted negative values (all <= 0)."""
+        """Returns lifetime cumulative negative (all <= 0)."""
         svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
         dates, values, raw, avg = svc.get_graph_data(dashboard["rows"], "negative")
@@ -198,11 +240,11 @@ class TestMetricsServiceGraphData:
         for v in values:
             assert v <= 0
 
-    def test_get_graph_data_hours_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
-        """Hours mode returns positive values."""
+    def test_get_graph_data_positive_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
+        """Positive mode returns lifetime cumulative positive."""
         svc = _make_svc()
         dashboard = svc.get_week_dashboard_rows("2023-W01")
-        dates, values, raw, avg = svc.get_graph_data(dashboard["rows"], "hours")
+        dates, values, raw, avg = svc.get_graph_data(dashboard["rows"], "positive")
 
         assert len(values) == 7
         for v in values:
