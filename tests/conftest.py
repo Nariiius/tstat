@@ -20,6 +20,7 @@ def tmp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(toggl.const, "POSITIVES_CSV_FILE", str(d / "toggl_positives.csv"))
     monkeypatch.setattr(toggl.const, "HISTORY_FILE", str(d / "toggl_sync_history.json"))
     monkeypatch.setattr(toggl.const, "PROJECTS_FILE", str(d / "toggl_projects.json"))
+    monkeypatch.setattr(toggl.const, "PLAYBOOK_CACHE_FILE", str(d / "toggl_insights_bundle.json"))
     # Also patch cache and neg module-level references
     monkeypatch.setattr(toggl.cache, "CSV_FILE", toggl.const.CSV_FILE)
     monkeypatch.setattr(toggl.cache, "DAILY_CSV_FILE", toggl.const.DAILY_CSV_FILE)
@@ -128,3 +129,4 @@ def sample_config(tmp_data_dir, monkeypatch):
     monkeypatch.setattr(toggl.config, "RATE_COLORS", RateColors())
     monkeypatch.setattr(toggl.config, "CATEGORY_REGISTRY", CategoryRegistry())
     monkeypatch.setattr(toggl.config, "RECOVERY_IGNORE", [])
+    monkeypatch.setattr(toggl.config, "PLAYBOOK_IGNORE", ["One", "Two", "Three"])

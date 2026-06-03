@@ -76,12 +76,12 @@ async def test_mount_shows_overview_with_data(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # Overview view is the default (index 0)
-        assert app.active_view_index == 0
+        # Command view is the default landing (index 1)
+        assert app.active_view_index == 1
 
         # Tab indicator matches
         tabs = app.query_one("#view-tabs")
-        assert tabs.active == "tab-0"
+        assert tabs.active == "tab-1"
 
         # Overview categories table has data
         cat_table = app.query_one("#overview-categories-table")
@@ -99,16 +99,11 @@ async def test_app_launches_and_shows_default_view(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # Default active view is Overview (index 0)
-        assert app.active_view_index == 0
+        # Default active view is Command (index 1)
+        assert app.active_view_index == 1
 
-        # Overview categories table renders data
-        table = app.query_one("#overview-categories-table")
-        assert table.row_count > 0
-
-        # Ensure no exceptions in the overview
-        overview_view = app.query_one("#overview-view")
-        assert "-active" in overview_view.classes
+        command_view = app.query_one("#command-view")
+        assert "-active" in command_view.classes
 
 
 @pytest.mark.asyncio
@@ -118,35 +113,33 @@ async def test_view_switching(tui_data):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        assert app.active_view_index == 0
+        assert app.active_view_index == 1
 
         app.action_next_view()
         await pilot.pause()
-        assert app.active_view_index == 1
+        assert app.active_view_index == 2  # Insights
         tabs = app.query_one("#view-tabs")
-        assert tabs.active == "tab-1"
+        assert tabs.active == "tab-2"
 
         app.action_prev_view()
         await pilot.pause()
-        assert app.active_view_index == 0
-        assert tabs.active == "tab-0"
+        assert app.active_view_index == 1  # Command
+        assert tabs.active == "tab-1"
 
 
 @pytest.mark.asyncio
 async def test_view_navigation_wraps_around(tui_data):
-    """Pressing right through all 3 views wraps back to Overview."""
+    """Pressing right through all 3 views wraps back to the starting view."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
+        start = app.active_view_index
         for _ in range(3):
             app.action_next_view()
             await pilot.pause()
 
-        # Back at Overview after wrap-around
-        assert app.active_view_index == 0
-        overview_view = app.query_one("#overview-view")
-        assert "-active" in overview_view.classes
+        assert app.active_view_index == start
 
 
 @pytest.mark.asyncio
@@ -207,20 +200,22 @@ async def test_all_views_render_without_error(tui_data):
 
 
 @pytest.mark.asyncio
-async def test_sync_view_shows_status(tui_data):
-    """Sync / Quota view renders status rows."""
+async def test_insights_sync_line_shows_status(tui_data):
+    """Insights tab footer shows compact sync/quota summary."""
+    from textual.widgets import Static
+
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        # Navigate to Sync/Quota view (index 2)
-        for _ in range(2):
-            app.action_next_view()
-            await pilot.pause()
+        app.action_next_view()
+        await pilot.pause()
         assert app.active_view_index == 2
 
-        sync_table = app.query_one("#sync-table")
-        assert sync_table.row_count > 0
+        sync_line = app.query_one("#insights-sync-line", Static)
+        text = str(sync_line.render())
+        assert "sync" in text.lower()
+        assert "cached" in text.lower()
 
 
 @pytest.mark.asyncio

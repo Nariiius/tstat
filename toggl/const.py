@@ -92,3 +92,18 @@ PROJECTS_FILE = os.path.join(DATA_DIR, "toggl_projects.json")
 DEFAULT_DAILY_TARGET = 13.0
 LOW_QUOTA_WARNING = 5
 PROJECTS_CACHE_MAX_AGE_DAYS = 7
+
+PLAYBOOK_CACHE_FILE = os.path.join(DATA_DIR, "toggl_insights_bundle.json")
+
+# Logged positives that can only be counted once per calendar day in the playbook.
+ONCE_PER_DAY_POSITIVES = frozenset({
+    "Care",
+    "Meditation",
+    "GI Dailies",
+    "Sleep 8+ Hours",
+    "Socialising",
+})
+
+DEFAULT_PLAYBOOK_IGNORE = (
+    "One", "Two", "Three", "Four", "Five", "Six", "Seven",
+)

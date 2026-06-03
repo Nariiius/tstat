@@ -1,6 +1,7 @@
 {
   "api_token": "YOUR_TOGGL_API_TOKEN",
   "daily_target": 13,
+  "playbook_ignore": ["One", "Two", "Three", "Four", "Five", "Six", "Seven"],
   "categories": {
     "Learning": {
       "color": "#63f3ff",
