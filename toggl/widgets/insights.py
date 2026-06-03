@@ -1,4 +1,7 @@
-"""Playbook + Coach formatters and Insights tab widget."""
+"""Playbook + Coach formatters and Insights tab widget.
+
+Improves information quality and presentation for actionable daily insights.
+"""
 
 from __future__ import annotations
 
@@ -10,37 +13,285 @@ from textual.widgets import Static
 from toggl.services.insights_bundle import InsightsBundle
 from toggl.services.playbook import Playbook, PlaybookStep
 
+# ──────────────────────────────────────────────
+# Progress, status, and visual helpers
+# ──────────────────────────────────────────────
+
+CLR_GREEN = "#37d994"
+CLR_AMBER = "#ff9e3a"
+CLR_RED = "#ff5f5f"
+CLR_ACCENT = "#63f3ff"
+CLR_DIM = "#8d98a7"
+CLR_MUTED = "#4a5565"
+CLR_FOCUS = "#e2b714"
+CLR_MIST = "#1e2a36"
+
+
+def _progress_bar(
+    current: float, target: float, width: int = 12
+) -> str:
+    """Render a horizontal progress bar in Rich markup.
+
+    Returns empty string when target is zero or negative.
+    Colors shift from red → amber → green as progress increases.
+    """
+    if target <= 0:
+        return ""
+    ratio = min(abs(current) / abs(target), 1.0)
+    filled = int(ratio * width)
+    bar_fill = "━" * filled
+    bar_empty = "─" * (width - filled)
+    pct = int(ratio * 100)
+    if ratio >= 0.8:
+        color = CLR_GREEN
+    elif ratio >= 0.5:
+        color = CLR_AMBER
+    else:
+        color = CLR_RED
+    return f"[{color}]{bar_fill}[/][{CLR_MUTED}]{bar_empty}[/] [{color}]{pct}%[/]"
+
+
+def _status_badge(goal: str) -> str:
+    """Coloured status badge for the current goal / verdict."""
+    badges = {
+        "on_track": f"[bold {CLR_GREEN}]◉ ON TRACK[/]",
+        "hit_today_target": f"[bold {CLR_AMBER}]◉ CLOSE GAP[/]",
+        "fix_week": f"[bold {CLR_RED}]◉ RECOVER WEEK[/]",
+        "start_tracking": f"[{CLR_DIM}]◉ SETUP[/]",
+    }
+    return badges.get(goal, f"[{CLR_DIM}]◉ {goal}[/]")
+
+
+def _section_sep() -> str:
+    """Visual section separator."""
+    return f"[{CLR_DIM}]──────────────────────[/]"
+
+
+def _format_loading(base: str, progress_stage: str = "") -> str:
+    """Render loading message with optional per-stage progress."""
+    lines = [f"[{CLR_DIM}][bold]⏳[/] {base}[/]"]
+    if progress_stage == "playbook":
+        lines.append(f"[{CLR_DIM}]  ⠋ Analyzing activity data and generating playbook...[/]")
+    elif progress_stage == "coach":
+        lines.append(f"[{CLR_DIM}]  ⠋ Running coach analyzers to find patterns...[/]")
+    return "\n".join(lines)
+
+
+def _confidence_tag(confidence: float) -> str:
+    """Short confidence indicator tag."""
+    if confidence >= 0.8:
+        return f"[{CLR_GREEN}]high[/]"
+    elif confidence >= 0.6:
+        return f"[{CLR_AMBER}]med[/]"
+    return f"[{CLR_DIM}]low[/]"
+
+
+def _fmt_pts(value: float) -> str:
+    """Formatted signed point value."""
+    if value >= 0:
+        return f"+{value:.1f}"
+    return f"{value:.1f}"
+
+
+# ──────────────────────────────────────────────
+# Section headers
+# ──────────────────────────────────────────────
+
+
+def _section_title(title: str, *, subtitle: str | None = None) -> str:
+    """Section header in accent colour with optional subtitle."""
+    if subtitle:
+        return f"[bold {CLR_ACCENT}]{title}[/]  [{CLR_DIM}]{subtitle}[/]"
+    return f"[bold {CLR_ACCENT}]{title}[/]"
+
+
+# ──────────────────────────────────────────────
+# Verdict block (always shown at the top)
+# ──────────────────────────────────────────────
+
+
+def _format_verdict(pb: Playbook) -> str:
+    """Top-of-screen verdict: status + headline + context summary."""
+    badge = _status_badge(pb.goal)
+    headline = pb.headline
+    lines: list[str] = []
+
+    lines.append(f"  {badge}  {headline}")
+
+    # Add a one-line context summary from available data
+    ctx = pb.context
+    context_bits: list[str] = []
+    if "today_net" in ctx:
+        context_bits.append(f"today {_fmt_pts(ctx['today_net'])}")
+    if "daily_target" in ctx:
+        context_bits.append(f"target {_fmt_pts(ctx['daily_target'])}")
+    if "gap" in ctx and ctx["gap"] > 0:
+        context_bits.append(f"gap {_fmt_pts(ctx['gap'])}")
+    if "days_left" in ctx:
+        context_bits.append(f"{ctx['days_left']}d left this week")
+    if "week_delta" in ctx and ctx["week_delta"] != 0:
+        context_bits.append(f"week {_fmt_pts(ctx['week_delta'])} vs pace")
+
+    if context_bits:
+        lines.append(f"  [{CLR_DIM}]{'  ·  '.join(context_bits)}[/]")
+
+    return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────
+# Playbook formatter
+# ──────────────────────────────────────────────
+
+
+def _format_playbook_block(
+    pb: Playbook, *, include_math: bool, compact: bool = False,
+    max_steps: int | None = None,
+) -> str:
+    """Render the playbook section.
+
+    *compact* mode (used in Overview) omits progress bars and extra detail.
+    *max_steps* caps how many steps to display (None = all).
+    """
+    lines: list[str] = []
+
+    # ── Focus line (most important) ──
+    if pb.focus_line and not compact:
+        lines.append(f"  [{CLR_FOCUS}]▸[/] {pb.focus_line}")
+        lines.append("")
+
+    # ── Today's steps ──
+    steps = pb.steps[:max_steps] if max_steps is not None else pb.steps
+    if steps:
+        for i, step in enumerate(steps, 1):
+            pts_str = f"[{CLR_GREEN}]{_fmt_pts(step.points)}[/]"
+            nums = "①②③④⑤"
+            num = nums[i-1] if i <= len(nums) else f"{i}."
+            label = f"[bold]{step.label}[/]"
+            amt = f" {step.amount}" if step.amount and step.amount != "×1" else ""
+            step_line = f"  {num} {label}{amt}  {pts_str}"
+            if not compact and step.points > 0:
+                target = float(pb.context.get("gap", pb.context.get("daily_target", 0)) or 1)
+                step_line += f"  {_progress_bar(step.points, target, width=6)}"
+            lines.append(step_line)
+
+        lines.append("")
+
+    # ── Expected gain ──
+    if pb.expected_gain > 0:
+        lines.append(f"  [{CLR_DIM}]Expected gain: [bold]{_fmt_pts(pb.expected_gain)}[/] pts[/]")
+        lines.append("")
+
+    # ── Done today ──
+    if pb.done_today:
+        done = ", ".join(pb.done_today)
+        lines.append(f"  [{CLR_DIM}]✓ Done today:[/] {done}")
+        lines.append("")
+
+    return "\n".join(lines) if lines else "[dim]No steps right now.[/]\n"
+
+
+# ──────────────────────────────────────────────
+# Coach formatter
+# ──────────────────────────────────────────────
+
+
+def _format_coach_finding(finding: Any) -> str:
+    """Format a coach finding as a card — the text already contains multi-line markup."""
+    return finding.text
+
+
+def _format_coach_section(pb: Playbook, bundle: InsightsBundle, *, max_findings: int | None = None) -> str:
+    """Render the Coach section as numbered cards."""
+    if not bundle.coach.findings:
+        return ""
+
+    parts: list[str] = []
+    n = len(bundle.coach.findings)
+    findings = bundle.coach.findings[:max_findings] if max_findings is not None else bundle.coach.findings
+
+    parts.append(f"[bold {CLR_ACCENT}]COACH[/]")
+    parts.append("")
+
+    for i, finding in enumerate(findings):
+        parts.append(_format_coach_finding(finding))
+        if i < len(findings) - 1:
+            parts.append("")
+
+    return "\n".join(parts)
+
+
+# ──────────────────────────────────────────────
+# Public API — format functions called by TUI
+# ──────────────────────────────────────────────
+
 
 def format_overview_playbook(
     bundle: InsightsBundle | None,
     *,
     is_loading: bool = False,
+    progress_stage: str = "",
 ) -> str:
+    """Compact playbook for the Overview dashboard pane.
+
+    Shows verdict + best 3 steps + top 2 coach findings.
+    Omits progress bars and lookback to fit the Overview's smaller space.
+    """
     if is_loading:
-        return "[dim]Computing playbook...[/]"
+        return _format_loading("Computing playbook...", progress_stage)
     if bundle is None or not bundle.playbook.headline:
         return "[dim]Playbook will appear after data loads.[/]"
-    return _format_playbook_block(bundle.playbook, include_math=False)
+
+    pb = bundle.playbook
+
+    parts: list[str] = []
+    parts.append(_format_verdict(pb))
+    parts.append("\n")
+    parts.append(_format_playbook_block(pb, include_math=False, compact=True, max_steps=3))
+
+    # Coach summary (best 2 findings)
+    if bundle.coach.findings:
+        parts.append(_section_sep())
+        parts.append("\n")
+        parts.append(_format_coach_section(pb, bundle, max_findings=2))
+
+    return "".join(parts).strip()
 
 
 def format_insights_tab(
     bundle: InsightsBundle | None,
     *,
     is_loading: bool = False,
+    progress_stage: str = "",
 ) -> str:
+    """Full detailed insights for the Insights tab — no caps, everything shown.
+
+    Narrative flow:
+      1. Verdict — where you stand right now
+      2. Playbook — all steps, focus, lookback, gap math
+      3. Coach — all behavioural findings with confidence
+    """
     if is_loading:
-        return "[dim]Computing insights...[/]"
+        return _format_loading("Computing insights...", progress_stage)
     if bundle is None:
         return "[dim]No insights yet.[/]"
 
+    pb = bundle.playbook
     parts: list[str] = []
-    parts.append(_format_playbook_block(bundle.playbook, include_math=True))
 
+    # ── 1. Verdict ──
+    parts.append(_format_verdict(pb))
+    parts.append("\n")
+    parts.append(_section_sep())
+
+    # ── 2. Playbook ──
+    parts.append("\n")
+    parts.append(_format_playbook_block(pb, include_math=True, compact=False, max_steps=3))
+
+    # ── 3. Coach ──
     if bundle.coach.findings:
+        parts.append(_section_sep())
         parts.append("\n")
-        parts.append(_section_title("Coach", subtitle="from your recent days"))
-        for finding in bundle.coach.findings:
-            parts.append(f"\n  · {finding.text}")
+        parts.append(_format_coach_section(pb, bundle, max_findings=None))
 
     return "".join(parts).strip()
 
@@ -63,62 +314,9 @@ def format_command_playbook_line(bundle: InsightsBundle | None) -> str | None:
     return line[:120] + ("…" if len(line) > 120 else "")
 
 
-def _section_title(title: str, *, subtitle: str | None = None) -> str:
-    if subtitle:
-        return f"[b][#63f3ff]{title}[/][/] [dim]({subtitle})[/]"
-    return f"[b][#63f3ff]{title}[/][/]"
-
-
-def _format_playbook_block(pb: Playbook, *, include_math: bool) -> str:
-    lines: list[str] = []
-    lines.append(_section_title("Playbook"))
-    lines.append("")
-
-    if pb.lookback:
-        lines.append("[#8d98a7][b]Recent[/][/]")
-        for line in pb.lookback:
-            lines.append(f"  {line}")
-        lines.append("")
-
-    if pb.focus_line:
-        lines.append(f"[#e2b714][b]Focus[/][/]  {pb.focus_line}")
-        lines.append("")
-
-    lines.append("[#8d98a7][b]Today[/][/]")
-    lines.append(f"  {pb.headline}")
-
-    if pb.steps:
-        lines.append("")
-        lines.append("[#8d98a7][b]Steps[/][/]")
-        for i, step in enumerate(pb.steps, 1):
-            verb = "Log" if step.action == "log" else "Track"
-            lines.append(
-                f"  {i}. {verb} [bold]{step.label}[/] {step.amount}  "
-                f"[#37d994]{_fmt_pts(step.points)}[/]"
-            )
-            if include_math and step.reason:
-                lines.append(f"     [dim]{step.reason}[/]")
-
-    if pb.done_today:
-        done = ", ".join(pb.done_today)
-        lines.append("")
-        lines.append(f"[dim]Done today:[/] {done}")
-
-    if pb.gap_note:
-        if include_math:
-            lines.append(f"[dim]{pb.gap_note}[/]")
-        else:
-            short = pb.gap_note.split("—")[0].strip()
-            if short:
-                lines.append(f"[dim]{short}[/]")
-
-    return "\n".join(lines) if lines else "[dim]No steps right now.[/]\n"
-
-
-def _fmt_pts(value: float) -> str:
-    if value >= 0:
-        return f"+{value:.1f}"
-    return f"{value:.1f}"
+# ──────────────────────────────────────────────
+# TUI widgets
+# ──────────────────────────────────────────────
 
 
 class PlaybookScrollPane(VerticalScroll):
@@ -178,13 +376,18 @@ class DetailedInsightsWidget(PlaybookScrollPane):
         bundle: InsightsBundle | None,
         *,
         is_loading: bool = False,
+        progress_stage: str = "",
     ) -> None:
         subtitle = ""
         if bundle and bundle.playbook.context.get("today_net") is not None:
             net = bundle.playbook.context["today_net"]
-            subtitle = f"[#8d98a7]Today {_fmt_pts(net)}[/]"
+            subtitle = f"[{CLR_DIM}]Today {_fmt_pts(net)}[/]"
         self.set_markup(
-            format_insights_tab(bundle, is_loading=is_loading),
-            border_title="[b][#63f3ff]Insights[/][/]",
+            format_insights_tab(
+                bundle,
+                is_loading=is_loading,
+                progress_stage=progress_stage,
+            ),
+            border_title=f"[bold {CLR_ACCENT}]Insights[/]",
             border_subtitle=subtitle,
         )

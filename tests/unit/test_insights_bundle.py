@@ -29,7 +29,7 @@ def test_cache_roundtrip(tmp_data_dir, sample_daily_csv, sample_config, monkeypa
         cfg_mod.RATE_COLORS,
         cfg_mod.CATEGORY_REGISTRY,
         [],
-        list(cfg_mod.PLAYBOOK_IGNORE),
+        cfg_mod.ACTIVITY_RULES,
     )
     svc = InsightsBundleService(metrics, cache, cfg, lambda: 13.0, cache_path=cache_path)
     bundle = svc.compute()

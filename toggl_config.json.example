@@ -1,7 +1,6 @@
 {
   "api_token": "YOUR_TOGGL_API_TOKEN",
   "daily_target": 13,
-  "playbook_ignore": ["One", "Two", "Three", "Four", "Five", "Six", "Seven"],
   "categories": {
     "Learning": {
       "color": "#63f3ff",
@@ -71,5 +70,46 @@
     "Journaling": 2,
     "Restraint": 3,
     "Existence Extrovert": 8
+  },
+
+  "category_natures": {
+    "Learning":     { "nature": "pursue" },
+    "Finance":      { "nature": "pursue" },
+    "Fitness":      { "nature": "pursue" },
+    "Productivity": { "nature": "pursue" },
+    "Misc":         { "nature": "neutral" },
+    "Entertainment": { "nature": "avoid" }
+  },
+
+  "activity_rules": {
+    "Abs Cinema": {
+      "category": "Entertainment",
+      "limits": { "max_per_day": 1 }
+    },
+    "Care": {
+      "limits": { "max_per_day": 1 },
+      "streak": { "remind_after_gap_days": 3 }
+    },
+    "Meditation": {
+      "limits": { "max_per_day": 1 },
+      "streak": { "remind_after_gap_days": 2 }
+    },
+    "GI Dailies": {
+      "limits": { "max_per_day": 1 }
+    },
+    "Sleep 8+ Hours": {
+      "limits": { "max_per_day": 1 }
+    },
+    "Socialising": {
+      "limits": { "max_per_day": 1 }
+    },
+    "Fitness": {
+      "category": "Fitness",
+      "combos": { "pairs_with": ["ProteinShake/Fit"], "boost": 0.3 }
+    },
+    "ProteinShake/Fit": {
+      "category": "Fitness",
+      "combos": { "pairs_with": ["Fitness"] }
+    }
   }
 }

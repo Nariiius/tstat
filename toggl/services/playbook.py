@@ -1,4 +1,8 @@
-"""Playbook engine — concrete daily/weekly action plans."""
+"""Playbook engine — concrete daily/weekly action plans.
+
+Uses the ActivityRules system for configurable behaviour instead of
+hardcoded constants like ONCE_PER_DAY_POSITIVES or abs_cinema_mode.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +10,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
+from toggl.activity_rules import ActivityRules
 from toggl.cache import DataCache, get_current_week, get_week_dates
-from toggl.const import ONCE_PER_DAY_POSITIVES
 from toggl.services.metrics import MetricsService
 from toggl.services.recent_context import (
     RecentContext,
@@ -30,6 +34,7 @@ class Playbook:
     goal: str
     headline: str
     steps: list[PlaybookStep] = field(default_factory=list)
+    expected_gain: float = 0.0          # sum of top-3 step points
     done_today: list[str] = field(default_factory=list)
     gap_note: str = ""
     lookback: list[str] = field(default_factory=list)
@@ -37,9 +42,19 @@ class Playbook:
     context: dict[str, Any] = field(default_factory=dict)
     generated_at: str = ""
 
+    @property
+    def verdict(self) -> str:
+        """Short label for the current verdict / goal state."""
+        return {
+            "on_track": "on_track",
+            "hit_today_target": "hit_today_target",
+            "fix_week": "fix_week",
+            "start_tracking": "start_tracking",
+        }.get(self.goal, self.goal)
+
 
 class PlaybookService:
-    """Builds actionable playbooks from metrics + config."""
+    """Builds actionable playbooks from metrics + config + activity rules."""
 
     def __init__(
         self,
@@ -47,15 +62,19 @@ class PlaybookService:
         cache: DataCache,
         points: dict[str, int | float],
         positives: dict[str, int | float],
-        playbook_ignore: list[str],
+        activity_rules: ActivityRules,
         get_daily_target: Callable[[], float],
     ) -> None:
         self._metrics = metrics
         self._cache = cache
         self._points = points
         self._positives = positives
-        self._ignore = set(playbook_ignore)
+        self._rules = activity_rules
         self._get_daily_target = get_daily_target
+
+    # ────────────────────────────────────────
+    # Main entry point
+    # ────────────────────────────────────────
 
     def compute(self) -> Playbook:
         today = date.today()
@@ -69,12 +88,13 @@ class PlaybookService:
                 steps=[
                     PlaybookStep(
                         action="log",
-                        label="any project or positive",
+                        label="a project or positive habit",
                         amount="×1",
                         points=0.0,
                         reason="No activity data yet",
                     )
                 ],
+                expected_gain=0.0,
                 generated_at=generated_at,
             )
 
@@ -86,7 +106,9 @@ class PlaybookService:
         target = float(self._get_daily_target())
         gap = round(target - today_net, 1)
         logged_today = self._positives_logged_today(today_str)
-        done_once = [n for n in logged_today if n in ONCE_PER_DAY_POSITIVES]
+        once_per_day_logged = {
+            n for n in logged_today if self._rules.is_once_per_day(n)
+        }
 
         week = get_current_week()
         dashboard = self._metrics.get_week_dashboard_rows(week)
@@ -103,14 +125,15 @@ class PlaybookService:
 
         if gap > 0.5:
             steps, gap_note = self._build_steps_for_gap(
-                gap, today_str, logged_today, recent, max_steps=4
+                gap, today_str, logged_today, recent
             )
             headline = f"Need {self._fmt_pts(gap)} today (at {self._fmt_pts(today_net)})"
             return Playbook(
                 goal="hit_today_target",
                 headline=headline,
                 steps=steps,
-                done_today=done_once,
+                expected_gain=round(sum(s.points for s in steps), 1),
+                done_today=sorted(once_per_day_logged),
                 gap_note=gap_note,
                 lookback=lookback,
                 focus_line=focus_line,
@@ -134,7 +157,8 @@ class PlaybookService:
                 goal="fix_week",
                 headline=headline,
                 steps=steps,
-                done_today=done_once,
+                expected_gain=round(sum(s.points for s in steps), 1),
+                done_today=sorted(once_per_day_logged),
                 gap_note=gap_note,
                 lookback=lookback,
                 focus_line=focus_line,
@@ -149,35 +173,42 @@ class PlaybookService:
             goal="on_track",
             headline=headline,
             steps=steps,
-            done_today=done_once,
+            expected_gain=round(sum(s.points for s in steps), 1),
+            done_today=sorted(once_per_day_logged),
             lookback=lookback,
             focus_line=focus_line,
             context=context,
             generated_at=generated_at,
         )
 
-    def _build_lookback(self, recent: RecentContext, today: date) -> tuple[list[str], str]:
+    # ────────────────────────────────────────
+    # Lookback
+    # ────────────────────────────────────────
+
+    def _build_lookback(
+        self, recent: RecentContext, today: date
+    ) -> tuple[list[str], str]:
         lines: list[str] = []
         focus = ""
 
         if recent.yesterday:
             y = recent.yesterday
-            lines.append(
-                f"[#8d98a7]Yesterday ({y.label}):[/] net {format_day_net(y.net)}"
-            )
+            y_str = f"[#8d98a7]Yesterday ({y.label}):[/] net {format_day_net(y.net)}"
             tags: list[str] = []
             if y.negatives:
                 tags.append(f"[#ff5f5f]{', '.join(y.negatives)}[/]")
             if y.positives:
                 tags.append(f"[#37d994]{', '.join(y.positives)}[/]")
             if tags:
-                lines.append(f"  {' · '.join(tags)}")
+                y_str += f"  {' · '.join(tags)}"
             if y.top_project and y.top_project_hours >= 0.5:
-                lines.append(f"  {y.top_project} {y.top_project_hours:.1f}h")
+                y_str += f"  ({y.top_project} {y.top_project_hours:.1f}h)"
+            lines.append(y_str)
 
         if recent.worst_recent and recent.best_recent:
             if recent.worst_recent.date_str != recent.best_recent.date_str:
                 w, b = recent.worst_recent, recent.best_recent
+                span_days = (date.fromisoformat(b.date_str) - date.fromisoformat(w.date_str)).days
                 lines.append(
                     f"[#8d98a7]Last 14d low:[/] {w.label} {format_day_net(w.net)}"
                     + (f" ({', '.join(w.negatives)})" if w.negatives else "")
@@ -187,14 +218,13 @@ class PlaybookService:
                     + (f" ({', '.join(b.positives)})" if b.positives else "")
                 )
 
-        repeat_negs = [
-            (n, c) for n, c in recent.neg_counts_7d.items() if c >= 2
-        ]
+        repeat_negs = [(n, c) for n, c in recent.neg_counts_7d.items() if c >= 2]
         if repeat_negs:
             repeat_negs.sort(key=lambda x: -x[1])
             n, c = repeat_negs[0]
             lines.append(
-                f"[#ff5f5f]Mistake pattern:[/] {n} logged {c}× in the last 7 days"
+                f"[#ff5f5f]Mistake pattern:[/] {n} logged {c}× in the last 7 days "
+                f"— cut it completely today to break the cycle."
             )
             focus = f"Don't repeat {n} today — it keeps showing up on bad days."
 
@@ -210,7 +240,7 @@ class PlaybookService:
         if not focus and recent.yesterday and recent.yesterday.net < 0:
             focus = (
                 f"Yesterday was {format_day_net(recent.yesterday.net)} — "
-                f"front-load one high-value log before distractions."
+                f"front-load one high-value log before you get distracted."
             )
 
         return lines[:4], focus
@@ -222,11 +252,21 @@ class PlaybookService:
             or self._cache.positives_raw
         )
 
+    # ────────────────────────────────────────
+    # Logging / date helpers
+    # ────────────────────────────────────────
+
     def _positives_logged_today(self, today_str: str) -> set[str]:
         names: set[str] = set()
         for entry in self._cache.positives_raw.get(today_str, []):
             names.add(entry["name"])
         return names
+
+    def _positives_log_count_today(self, today_str: str, name: str) -> int:
+        return sum(
+            1 for e in self._cache.positives_raw.get(today_str, [])
+            if e["name"] == name
+        )
 
     def _days_left_in_week(self, today: date, week: str) -> int:
         _, end = get_week_dates(week)
@@ -234,20 +274,36 @@ class PlaybookService:
             return 0
         return (end - today).days + 1
 
+    def _consecutive_days_with(self, name: str, lookback_days: int = 14) -> int:
+        """How many consecutive recent days have *name* been logged?"""
+        count = 0
+        today = date.today()
+        for d in range(1, lookback_days + 1):
+            d_str = (today - timedelta(days=d)).strftime("%Y-%m-%d")
+            if any(e["name"] == name for e in self._cache.positives_raw.get(d_str, [])):
+                count += 1
+            else:
+                break
+        return count
+
+    # ────────────────────────────────────────
+    # Candidate gathering — no cap
+    # ────────────────────────────────────────
+
     def _build_steps_for_gap(
         self,
         gap: float,
         today_str: str,
         logged_today: set[str],
         recent: RecentContext,
-        max_steps: int = 4,
     ) -> tuple[list[PlaybookStep], str]:
         candidates = self._gather_candidates(gap, today_str, logged_today, recent)
         candidates.sort(
             key=lambda c: (
-                -c.get("history_score", 0),
-                -c["efficiency"],
-                c["effort"],
+                self._rules.get_priority_mod(c["label"]),
+                -float(c.get("history_score", 0)),
+                -float(c["efficiency"]),
+                float(c.get("effort", 999)),
             )
         )
         steps: list[PlaybookStep] = []
@@ -255,36 +311,27 @@ class PlaybookService:
         used_labels: set[str] = set()
 
         for c in candidates:
-            if len(steps) >= max_steps:
-                break
             if c["label"] in used_labels:
                 continue
-            pts = c["points"]
+            pts = float(c["points"])
             if pts <= 0:
                 continue
             steps.append(
                 PlaybookStep(
-                    action=c["action"],
-                    label=c["label"],
-                    amount=c["amount"],
+                    action=str(c["action"]),
+                    label=str(c["label"]),
+                    amount=str(c["amount"]),
                     points=pts,
-                    reason=c.get("reason", ""),
+                    reason=str(c.get("reason", "")),
                 )
             )
-            used_labels.add(c["label"])
+            used_labels.add(str(c["label"]))
             covered += pts
-            if covered >= gap * 0.95:
+            if len(steps) >= 3:
                 break
 
-        gap_note = ""
-        if steps and covered < gap * 0.8:
-            short = round(gap - covered, 1)
-            gap_note = (
-                f"{self._fmt_pts(covered)} of {self._fmt_pts(gap)} from steps "
-                f"— still need {self._fmt_pts(short)}"
-            )
-        elif steps:
-            gap_note = f"Steps total {self._fmt_pts(covered)} toward {self._fmt_pts(gap)}"
+        expected_gain = round(sum(s.points for s in steps), 1)
+        gap_note = f"Expected gain [bold]{expected_gain:+.1f}[/] pts"
 
         return steps, gap_note
 
@@ -298,20 +345,23 @@ class PlaybookService:
     ) -> tuple[list[PlaybookStep], str]:
         steps: list[PlaybookStep] = []
         rows = recovery.get("rows", [])
-        for row in rows[:3]:
-            cat = row.get("category", "")
-            if cat in self._ignore:
+        for row in rows:
+            if len(steps) >= 3:
+                break
+            cat = str(row.get("category", ""))
+            if not self._rules.should_suggest(cat):
                 continue
             amt = str(row.get("hours_needed", ""))
             if amt.startswith("×"):
                 if cat in logged_today:
                     continue
-                if cat in ONCE_PER_DAY_POSITIVES and cat in logged_today:
-                    continue
                 pts = self._positives.get(cat, 0)
                 if pts <= 0:
                     continue
-                reason = self._history_reason_for_label(cat, recent) or "Closes week deficit"
+                reason = (
+                    self._history_reason_for_label(cat, recent)
+                    or f"Closes {float(pts):.1f} pts of week deficit"
+                )
                 steps.append(
                     PlaybookStep(
                         action="log",
@@ -322,7 +372,7 @@ class PlaybookService:
                     )
                 )
             else:
-                rate = row.get("rate", 0)
+                rate = float(row.get("rate", 0) or 0)
                 if not rate:
                     continue
                 hours = max(per_day / rate, 0.25)
@@ -336,21 +386,31 @@ class PlaybookService:
                         label=cat,
                         amount=amount,
                         points=pts,
-                        reason=f"~{per_day:.1f} pts/day pace",
+                        reason=f"~{per_day:.1f} pts/day pace needed",
                     )
                 )
-        gap_note = f"Aim for ~{per_day:.1f} net per day remaining this week"
-        return steps[:5], gap_note
+        expected_gain = round(sum(s.points for s in steps), 1)
+        gap_note = f"Expected gain [bold]{expected_gain:+.1f}[/] pts per day"
+        return steps, gap_note
+
+    # ────────────────────────────────────────
+    # History / reason helpers
+    # ────────────────────────────────────────
 
     def _history_reason_for_label(self, label: str, recent: RecentContext) -> str:
         if recent.best_recent and label in recent.best_recent.positives:
             b = recent.best_recent
-            return f"On {b.label} ({format_day_net(b.net)}) this helped"
+            return f"On your best recent day ({b.label}, {format_day_net(b.net)}) this was key"
         lift = recent.positive_lift.get(label)
+        if lift is not None and lift >= 5:
+            return (
+                f"Days you log {label} average {lift:+.0f} more pts "
+                f"— highest-impact habit in your data"
+            )
         if lift is not None and lift >= 3:
             return f"Your last 7d average +{lift:.0f} pts higher on days you log this"
         if label in recent.neg_counts_7d and recent.neg_counts_7d[label] >= 2:
-            return "Break the recent mistake streak"
+            return "Break the recent mistake streak and log something productive"
         return ""
 
     def _history_score(self, label: str, recent: RecentContext) -> float:
@@ -364,7 +424,34 @@ class PlaybookService:
             score += 4
         if recent.best_recent and label == recent.best_recent.top_project:
             score += 6
+        # Streak reminder boost
+        remind = self._rules.get_remind_after_gap_days(label)
+        if remind is not None:
+            gap_days = self._days_since_last(label)
+            if gap_days >= remind:
+                score += 6 * min(gap_days / remind, 2.0)
+        # Throttle for over-logging
+        throttle = self._rules.get_throttle_after_days(label)
+        if throttle is not None:
+            consecutive = self._consecutive_days_with(label)
+            if consecutive >= throttle:
+                score -= 10
         return score
+
+    def _days_since_last(self, name: str) -> int:
+        """Days since *name* was last logged as a positive."""
+        today = date.today()
+        for d in range(1, 31):
+            d_str = (today - timedelta(days=d)).strftime("%Y-%m-%d")
+            if any(
+                e["name"] == name for e in self._cache.positives_raw.get(d_str, [])
+            ):
+                return d
+        return 999
+
+    # ────────────────────────────────────────
+    # Candidate gatherer
+    # ────────────────────────────────────────
 
     def _gather_candidates(
         self,
@@ -374,18 +461,22 @@ class PlaybookService:
         recent: RecentContext,
     ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
+        logged_combo_root: dict[str, str | None] = {}  # label → pair logged
 
+        # ── Positives (habits) ──
         for name, pts in sorted(
             self._positives.items(), key=lambda x: -float(x[1])
         ):
-            if name in self._ignore or pts <= 0:
+            if not self._rules.should_suggest(name):
                 continue
-            if name in logged_today:
+            if pts <= 0:
                 continue
-            if name in ONCE_PER_DAY_POSITIVES and name in logged_today:
+            if name in logged_today and self._rules.is_once_per_day(name):
                 continue
-            reason = self._history_reason_for_label(name, recent) or "Fast points"
-            out.append({
+            reason = self._history_reason_for_label(name, recent) or (
+                f"Quick {float(pts):.1f} pts — fast way to close the gap"
+            )
+            entry: dict[str, Any] = {
                 "action": "log",
                 "label": name,
                 "amount": "×1",
@@ -394,17 +485,21 @@ class PlaybookService:
                 "effort": 1,
                 "reason": reason,
                 "history_score": self._history_score(name, recent),
-            })
+            }
+            out.append(entry)
+            # Track for combo detection
+            logged_combo_root[name] = None
 
+        # ── Recovery rows ──
         week = get_current_week()
         recovery = self._metrics.get_recovery_rows(week, "WEEK")
-        for row in recovery.get("rows", [])[:5]:
-            cat = row.get("category", "")
-            if cat in self._ignore:
+        for row in recovery.get("rows", []):  # all rows, no cap
+            cat = str(row.get("category", ""))
+            if not self._rules.should_suggest(cat):
                 continue
             amt = str(row.get("hours_needed", ""))
             if amt.startswith("×"):
-                if cat in logged_today:
+                if cat in logged_today and self._rules.is_once_per_day(cat):
                     continue
                 p = self._positives.get(cat, 0)
                 if p > 0:
@@ -419,6 +514,7 @@ class PlaybookService:
                         "reason": reason,
                         "history_score": self._history_score(cat, recent),
                     })
+                    logged_combo_root.setdefault(cat)
             else:
                 rate = float(row.get("rate", 0) or 0)
                 if rate <= 0:
@@ -429,7 +525,7 @@ class PlaybookService:
                 m = int((hours - h) * 60)
                 amount = f"{h}h" if h >= 1 else f"{m}m"
                 pts = round(hours * rate, 1)
-                reason = self._history_reason_for_label(cat, recent) or "High rate"
+                reason = self._history_reason_for_label(cat, recent) or "High recovery rate"
                 out.append({
                     "action": "track",
                     "label": cat,
@@ -440,38 +536,78 @@ class PlaybookService:
                     "reason": reason,
                     "history_score": self._history_score(cat, recent),
                 })
+                logged_combo_root.setdefault(cat)
 
+        # ── Combo pair injection ──
+        added_combo: set[str] = set()
+        for entry in out:
+            label = str(entry["label"])
+            if label in added_combo:
+                continue
+            for pair_name in self._rules.get_combo_pairs(label):
+                if pair_name in added_combo:
+                    continue
+                if pair_name in logged_today:
+                    continue
+                p = self._positives.get(pair_name, 0)
+                if p <= 0:
+                    continue
+                if not self._rules.should_suggest(pair_name):
+                    continue
+                boost = self._rules.get_combo_boost(label)
+                reason = (
+                    f"Pairs well with {label}"
+                    + (f" ({boost:+.1f} combo bonus)" if boost else "")
+                )
+                hist = self._history_score(pair_name, recent) + (boost * 10)
+                out.append({
+                    "action": "log",
+                    "label": pair_name,
+                    "amount": "×1",
+                    "points": float(p) + boost,
+                    "efficiency": float(p) + boost,
+                    "effort": 1,
+                    "reason": reason,
+                    "history_score": hist,
+                })
+                added_combo.add(pair_name)
+
+        # ── Projects (tracked work) ──
         projs = self._cache.get_day_projects(today_str) or {}
         for name, rate in sorted(
-            [(n, r) for n, r in self._points.items() if r and r > 0],
-            key=lambda x: -x[1],
+            [(n, r) for n, r in self._points.items() if r and float(r) > 0],
+            key=lambda x: -float(x[1]),
         ):
-            if name in self._ignore:
+            if not self._rules.should_suggest(name):
                 continue
             already = projs.get(name, 0)
             if already >= 0.25:
                 continue
-            hours = min(gap / rate, 1.5)
+            hours = min(gap / float(rate), 1.5)
             hours = max(hours, 0.25)
             h = int(hours)
             m = int((hours - h) * 60)
             amount = f"{h}h" if h >= 1 else f"{m}m"
-            pts = round(hours * rate, 1)
+            pts = round(hours * float(rate), 1)
             reason = self._history_reason_for_label(name, recent)
             if not reason and recent.yesterday and recent.yesterday.net < 0:
-                reason = "Yesterday slipped — start with tracked work"
+                reason = "Yesterday slipped — front-load tracked work to recover momentum"
             out.append({
                 "action": "track",
                 "label": name,
                 "amount": amount,
                 "points": pts,
-                "efficiency": rate,
+                "efficiency": float(rate),
                 "effort": hours,
-                "reason": reason or "Not tracked today",
+                "reason": reason or "Not tracked yet today",
                 "history_score": self._history_score(name, recent),
             })
 
         return out
+
+    # ────────────────────────────────────────
+    # Stretch step (on-track days)
+    # ────────────────────────────────────────
 
     def _stretch_step(
         self, today_str: str, logged_today: set[str], recent: RecentContext
@@ -479,16 +615,18 @@ class PlaybookService:
         best_name = None
         best_pts = 0.0
         for name, pts in self._positives.items():
-            if name in self._ignore or pts <= best_pts:
+            if not self._rules.should_suggest(name):
                 continue
-            if name in logged_today:
+            if float(pts) <= best_pts:
                 continue
-            if name in ONCE_PER_DAY_POSITIVES and name in logged_today:
+            if name in logged_today and self._rules.is_once_per_day(name):
                 continue
             best_pts = float(pts)
             best_name = name
         if best_name:
-            reason = self._history_reason_for_label(best_name, recent) or "Bank extra points"
+            reason = self._history_reason_for_label(best_name, recent) or (
+                f"Bank {best_pts:.1f} extra points while you're ahead"
+            )
             return PlaybookStep(
                 action="log",
                 label=best_name,
@@ -499,13 +637,13 @@ class PlaybookService:
         for name, rate in sorted(
             self._points.items(), key=lambda x: -float(x[1] or 0)
         ):
-            if rate and rate > 0 and name not in self._ignore:
+            if rate and float(rate) > 0 and self._rules.should_suggest(name):
                 return PlaybookStep(
                     action="track",
                     label=name,
                     amount="30m",
-                    points=round(0.5 * rate, 1),
-                    reason="Stretch — top-rate project",
+                    points=round(0.5 * float(rate), 1),
+                    reason="Stretch — top-rate project, easy way to pad the day",
                 )
         return None
 

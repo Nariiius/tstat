@@ -349,13 +349,18 @@ class OverviewPanel(Container):
         insights_bundle: InsightsBundle | None = None,
         *,
         insights_loading: bool = False,
+        progress_stage: str = "",
     ) -> None:
         """Reload all overview panels from the given DataCache."""
         try:
             self._refresh_categories(cache, active_week, metrics)
             self._refresh_recovery(metrics)
             self._refresh_recent_log(cache)
-            self._refresh_insights(insights_bundle, insights_loading=insights_loading)
+            self._refresh_insights(
+                insights_bundle,
+                insights_loading=insights_loading,
+                progress_stage=progress_stage,
+            )
         except Exception:
             logger.exception("OverviewPanel.refresh_data failed")
 
@@ -414,6 +419,7 @@ class OverviewPanel(Container):
         insights_bundle: InsightsBundle | None,
         *,
         insights_loading: bool = False,
+        progress_stage: str = "",
     ) -> None:
         insights = self.query_one("#overview-insights", PlaybookScrollPane)
         subtitle = ""
@@ -422,7 +428,9 @@ class OverviewPanel(Container):
             subtitle = f"[#8d98a7]Today {format_signed_rich(net)}[/]"
         insights.set_markup(
             format_overview_playbook(
-                insights_bundle, is_loading=insights_loading
+                insights_bundle,
+                is_loading=insights_loading,
+                progress_stage=progress_stage,
             ),
             border_title="[b][#63f3ff]Playbook[/][/]",
             border_subtitle=subtitle,
@@ -504,9 +512,14 @@ class InsightsPanel(Container):
         insights_bundle: InsightsBundle | None = None,
         *,
         is_loading: bool = False,
+        progress_stage: str = "",
         sync_summary: str | None = None,
     ) -> None:
         widget = self.query_one(DetailedInsightsWidget)
-        widget.set_bundle(insights_bundle, is_loading=is_loading)
+        widget.set_bundle(
+            insights_bundle,
+            is_loading=is_loading,
+            progress_stage=progress_stage,
+        )
         sync_line = self.query_one("#insights-sync-line", Static)
         sync_line.update(sync_summary or compact_sync_status())

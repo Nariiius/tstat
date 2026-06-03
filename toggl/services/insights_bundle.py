@@ -41,7 +41,6 @@ def _stable_config_hash(
     positives: dict[str, int | float],
     negatives: dict[str, int | float],
     daily_target: float,
-    playbook_ignore: list[str],
     recovery_ignore: list[str],
 ) -> str:
     payload = json.dumps(
@@ -50,7 +49,6 @@ def _stable_config_hash(
             "positives": sorted(positives.items()),
             "negatives": sorted(negatives.items()),
             "daily_target": daily_target,
-            "playbook_ignore": sorted(playbook_ignore),
             "recovery_ignore": sorted(recovery_ignore),
         },
         sort_keys=True,
@@ -88,7 +86,7 @@ class InsightsBundleService:
             cache,
             dict(config.points),
             dict(config.positives),
-            list(config.playbook_ignore),
+            config.activity_rules,
             get_daily_target,
         )
         self._coach_svc = CoachService(
@@ -97,6 +95,7 @@ class InsightsBundleService:
             dict(config.points),
             dict(config.positives),
             config.category_registry,
+            config.activity_rules,
         )
 
     def compute_fingerprint(self) -> dict[str, Any]:
@@ -106,7 +105,6 @@ class InsightsBundleService:
                 self._config.positives,
                 self._config.negatives,
                 float(self._config.daily_target),
-                self._config.playbook_ignore,
                 self._config.recovery_ignore,
             ),
             "files": _file_fingerprint([
@@ -119,8 +117,15 @@ class InsightsBundleService:
             ]),
         }
 
-    def compute(self) -> InsightsBundle:
+    def compute(
+        self,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> InsightsBundle:
+        if on_progress:
+            on_progress("playbook")
         playbook = self._playbook_svc.compute()
+        if on_progress:
+            on_progress("coach")
         coach = self._coach_svc.compute()
         return InsightsBundle(
             playbook=playbook,

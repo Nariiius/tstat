@@ -129,4 +129,5 @@ def sample_config(tmp_data_dir, monkeypatch):
     monkeypatch.setattr(toggl.config, "RATE_COLORS", RateColors())
     monkeypatch.setattr(toggl.config, "CATEGORY_REGISTRY", CategoryRegistry())
     monkeypatch.setattr(toggl.config, "RECOVERY_IGNORE", [])
-    monkeypatch.setattr(toggl.config, "PLAYBOOK_IGNORE", ["One", "Two", "Three"])
+    from toggl.activity_rules import ActivityRules
+    monkeypatch.setattr(toggl.config, "ACTIVITY_RULES", ActivityRules.empty())

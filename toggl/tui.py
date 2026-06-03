@@ -190,6 +190,7 @@ class TogglTUI(App):
     # Reactive state: triggers watch_data_cache on every assignment
     data_cache: reactive[DataCache | None] = reactive[DataCache | None](None)
     insights_bundle: reactive[InsightsBundle | None] = reactive[InsightsBundle | None](None)
+    _progress_stage: reactive[str] = reactive("")
 
     def __init__(self) -> None:
         super().__init__()
@@ -271,6 +272,13 @@ class TogglTUI(App):
                 self.refresh_insights_view()
             except Exception:
                 pass
+
+    def watch__progress_stage(self, stage: str) -> None:
+        """Refresh Insights tab whenever compute progress stage changes."""
+        try:
+            self.refresh_insights_view()
+        except Exception:
+            pass
 
     @work(thread=False, exclusive=True)
     async def load_data(self) -> None:
@@ -365,10 +373,17 @@ class TogglTUI(App):
             svc = self._insights_service
             if svc is None:
                 return
-            bundle = svc.compute()
+            bundle = svc.compute(
+                on_progress=lambda stage: self.call_from_thread(
+                    self._set_progress_stage, stage
+                )
+            )
             self.call_from_thread(self._on_insights_computed, bundle, gen_id)
         except Exception:
             logger.exception("Insights bundle computation failed")
+
+    def _set_progress_stage(self, stage: str) -> None:
+        self._progress_stage = stage
 
     def _on_insights_computed(self, bundle: InsightsBundle, gen_id: int) -> None:
         if gen_id < self._insights_generation_id:
@@ -441,6 +456,7 @@ class TogglTUI(App):
                 self._metrics,
                 bundle,
                 insights_loading=loading and bundle is None,
+                progress_stage=self._progress_stage if loading else "",
             )
         except Exception:
             pass  # Panel may not be mounted yet
@@ -473,7 +489,11 @@ class TogglTUI(App):
             panel = self.query_one(InsightsPanel)
             bundle = self.insights_bundle
             loading = self._insights_generation_id > 0 and bundle is None
-            panel.refresh_data(bundle, is_loading=loading)
+            panel.refresh_data(
+                bundle,
+                is_loading=loading,
+                progress_stage=self._progress_stage if loading else "",
+            )
         except Exception:
             pass
 

@@ -5,10 +5,10 @@ import os
 import json
 from typing import Any
 
+from toggl.activity_rules import ActivityRules
 from toggl.const import (
     CONFIG_FILE,
     DEFAULT_DAILY_TARGET,
-    DEFAULT_PLAYBOOK_IGNORE,
     RED,
     RESET,
 )
@@ -25,7 +25,7 @@ class Config:
     __slots__ = (
         "points", "negatives", "positives", "daily_target",
         "rate_colors", "category_registry", "recovery_ignore",
-        "playbook_ignore",
+        "activity_rules",
     )
 
     def __init__(
@@ -37,7 +37,7 @@ class Config:
         rate_colors: RateColors,
         category_registry: CategoryRegistry,
         recovery_ignore: list[str],
-        playbook_ignore: list[str],
+        activity_rules: ActivityRules,
     ) -> None:
         self.points = points
         self.negatives = negatives
@@ -46,7 +46,7 @@ class Config:
         self.rate_colors = rate_colors
         self.category_registry = category_registry
         self.recovery_ignore = recovery_ignore
-        self.playbook_ignore = playbook_ignore
+        self.activity_rules = activity_rules
 
     @classmethod
     def load(cls) -> "Config":
@@ -77,18 +77,12 @@ class Config:
                 f"Error: 'recovery_ignore' in {CONFIG_FILE} must be a JSON array of strings."
             )
         recovery_ignore = [str(x) for x in (recovery_ignore_raw or [])]
-        playbook_ignore_raw = config.get("playbook_ignore")
-        if playbook_ignore_raw is not None and not isinstance(playbook_ignore_raw, list):
-            _exit_config_error(
-                f"Error: 'playbook_ignore' in {CONFIG_FILE} must be a JSON array of strings."
-            )
-        playbook_ignore = (
-            [str(x) for x in playbook_ignore_raw]
-            if playbook_ignore_raw is not None
-            else list(DEFAULT_PLAYBOOK_IGNORE)
+        activity_rules = ActivityRules.from_config(
+            config.get("category_natures"),
+            config.get("activity_rules"),
         )
         return cls(points, negatives, positives, daily_target,
-                   rate_colors, category_registry, recovery_ignore, playbook_ignore)
+                   rate_colors, category_registry, recovery_ignore, activity_rules)
 
 
 def _config_setup_hint() -> str:
@@ -153,15 +147,15 @@ POINTS: dict[str, int | float] = {}
 NEGATIVES: dict[str, int | float] = {}
 POSITIVES: dict[str, int | float] = {}
 RECOVERY_IGNORE: list[str] = []
-PLAYBOOK_IGNORE: list[str] = list(DEFAULT_PLAYBOOK_IGNORE)
 DAILY_TARGET: int | float = DEFAULT_DAILY_TARGET
 RATE_COLORS: RateColors = RateColors()
 CATEGORY_REGISTRY: CategoryRegistry = CategoryRegistry()
+ACTIVITY_RULES: ActivityRules = ActivityRules.empty()
 
 
 def load_runtime_settings() -> None:
-    global POINTS, NEGATIVES, POSITIVES, RECOVERY_IGNORE, PLAYBOOK_IGNORE
-    global DAILY_TARGET, RATE_COLORS, CATEGORY_REGISTRY
+    global POINTS, NEGATIVES, POSITIVES, RECOVERY_IGNORE
+    global DAILY_TARGET, RATE_COLORS, CATEGORY_REGISTRY, ACTIVITY_RULES
     cfg = Config.load()
     POINTS.clear()
     POINTS.update(cfg.points)
@@ -171,11 +165,10 @@ def load_runtime_settings() -> None:
     POSITIVES.update(cfg.positives)
     RECOVERY_IGNORE.clear()
     RECOVERY_IGNORE.extend(cfg.recovery_ignore)
-    PLAYBOOK_IGNORE.clear()
-    PLAYBOOK_IGNORE.extend(cfg.playbook_ignore)
     DAILY_TARGET = cfg.daily_target
     RATE_COLORS.update(cfg.rate_colors)
     CATEGORY_REGISTRY.update(cfg.category_registry)
+    ACTIVITY_RULES = cfg.activity_rules
 
 def get_daily_target() -> int | float:
     return DAILY_TARGET

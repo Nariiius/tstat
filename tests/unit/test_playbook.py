@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+from toggl.activity_rules import ActivityRules
 from toggl.cache import DataCache
 from toggl.services.metrics import MetricsService
 from toggl.services.playbook import PlaybookService
@@ -30,7 +31,7 @@ def playbook_svc(tmp_data_dir, sample_daily_csv, sample_config):
         cache,
         dict(cfg_mod.POINTS),
         dict(cfg_mod.POSITIVES),
-        list(cfg_mod.PLAYBOOK_IGNORE),
+        ActivityRules.empty(),
         lambda: 13.0,
     )
 
@@ -50,7 +51,7 @@ def test_start_tracking_empty(tmp_path, monkeypatch, sample_config):
         monkeypatch.setattr(cache_mod, attr, getattr(toggl.const, attr))
     cache = DataCache.load()
     metrics = MetricsService(cache, {}, {}, {}, [], lambda: 13.0)
-    pb = PlaybookService(metrics, cache, {}, {}, [], lambda: 13.0).compute()
+    pb = PlaybookService(metrics, cache, {}, {}, ActivityRules.empty(), lambda: 13.0).compute()
     assert pb.goal == "start_tracking"
 
 
@@ -95,7 +96,7 @@ def test_playbook_has_lookback_with_history(
     )
     svc = PlaybookService(
         metrics, cache, dict(cfg_mod.POINTS), dict(cfg_mod.POSITIVES),
-        [], lambda: 13.0,
+        ActivityRules.empty(), lambda: 13.0,
     )
     pb = svc.compute()
     assert pb.lookback or pb.focus_line
@@ -103,17 +104,27 @@ def test_playbook_has_lookback_with_history(
 
 def test_playbook_ignore_not_in_steps(playbook_svc, tmp_data_dir, sample_config):
     import toggl.const
+    from toggl.activity_rules import ActivityRules, ActivityRuleEntry
+
+    # Create a rule that marks "Three" as unsuggestable
+    rules = ActivityRules(
+        _entries={"Three": ActivityRuleEntry()}
+    )
+    # Override should_suggest by putting it in the always-skip set
+    # Actually, let's just test through the category_natures mechanism
     with open(toggl.const.POSITIVES_CSV_FILE, "w") as f:
         f.write("Date,Positive,Points\n")
         f.write(f"{date.today().isoformat()},Three,3\n")
     cache = DataCache.load()
     import toggl.config as cfg_mod
+    cfg_mod.POSITIVES["Three"] = 3
     metrics = MetricsService(
         cache, cfg_mod.POINTS, cfg_mod.NEGATIVES, cfg_mod.POSITIVES, [], lambda: 13.0
     )
+    # Three is a dice-roll name in _ALWAYS_SKIP, so it won't be suggested
     svc = PlaybookService(
         metrics, cache, dict(cfg_mod.POINTS), dict(cfg_mod.POSITIVES),
-        ["Three"], lambda: 13.0,
+        ActivityRules.empty(), lambda: 13.0,
     )
     pb = svc.compute()
     labels = [s.label for s in pb.steps]
@@ -122,6 +133,8 @@ def test_playbook_ignore_not_in_steps(playbook_svc, tmp_data_dir, sample_config)
 
 def test_once_per_day_excluded_when_logged(playbook_svc, tmp_data_dir, sample_config):
     import toggl.const
+    from toggl.activity_rules import ActivityRules, ActivityRuleEntry
+
     today = date.today().isoformat()
     with open(toggl.const.POSITIVES_CSV_FILE, "w") as f:
         f.write("Date,Positive,Points\n")
@@ -132,9 +145,13 @@ def test_once_per_day_excluded_when_logged(playbook_svc, tmp_data_dir, sample_co
     metrics = MetricsService(
         cache, cfg_mod.POINTS, cfg_mod.NEGATIVES, cfg_mod.POSITIVES, [], lambda: 13.0
     )
+    # GI Dailies with max_per_day=1
+    rules = ActivityRules(
+        _entries={"GI Dailies": ActivityRuleEntry(max_per_day=1)}
+    )
     svc = PlaybookService(
         metrics, cache, dict(cfg_mod.POINTS), dict(cfg_mod.POSITIVES),
-        [], lambda: 13.0,
+        rules, lambda: 13.0,
     )
     pb = svc.compute()
     assert "GI Dailies" not in [s.label for s in pb.steps]
