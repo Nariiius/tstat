@@ -240,6 +240,34 @@ class TestMetricsServiceGraphData:
         for v in values:
             assert v <= 0
 
+    def test_graph_x_labels_week(self, tmp_data_dir, sample_daily_csv, sample_config):
+        """Week view labels are Wk N per day without reducing points."""
+        from toggl.cache import get_week_dates
+
+        svc = _make_svc()
+        start, end = get_week_dates("2023-W01")
+        end = start + timedelta(days=13)
+        daily = svc.get_daily_data_for_range(start, end)
+        dates, values, _, _ = svc.get_graph_data(daily, "net")
+        labels = svc.graph_x_labels(dates, "week")
+
+        assert len(labels) == len(dates) == len(values)
+        assert all(lbl.startswith("Wk ") for lbl in labels)
+        assert labels[0] != labels[-1]
+
+    def test_graph_x_labels_month(self, tmp_data_dir, sample_daily_csv, sample_config):
+        """Month view labels are Mon YYYY per day without reducing points."""
+        svc = _make_svc()
+        start = date(2023, 1, 1)
+        end = date(2023, 2, 5)
+        daily = svc.get_daily_data_for_range(start, end)
+        dates, values, _, _ = svc.get_graph_data(daily, "net")
+        labels = svc.graph_x_labels(dates, "month")
+
+        assert len(labels) == len(dates) == len(values)
+        assert labels[0] == "Jan 2023"
+        assert labels[-1] == "Feb 2023"
+
     def test_get_graph_data_positive_mode(self, tmp_data_dir, sample_daily_csv, sample_config):
         """Positive mode returns lifetime cumulative positive."""
         svc = _make_svc()

@@ -202,6 +202,22 @@ class MetricsService:
         avg = round(sum(raw_values) / len(raw_values), 1) if raw_values else None
         return dates, values, raw_values, avg
 
+    def graph_x_labels(self, dates: list[str], period_mode: str) -> list[str] | None:
+        """Per-day x-axis labels for week/month views (data stays daily)."""
+        if not dates:
+            return None
+        if period_mode == "week":
+            labels: list[str] = []
+            for iso in dates:
+                d = date.fromisoformat(iso)
+                sunday = d - timedelta(days=(d.weekday() + 1) % 7)
+                wk_num = int(get_week_str(sunday).split("W")[1])
+                labels.append(f"Wk {wk_num}")
+            return labels
+        if period_mode == "month":
+            return [date.fromisoformat(iso).strftime("%b %Y") for iso in dates]
+        return None
+
     def get_daily_breakdown(
         self, daily_data: list[dict[str, Any]], mode: str
     ) -> list[dict[str, Any]]:

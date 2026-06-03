@@ -115,6 +115,7 @@ class GraphWidget(Widget):
         super().__init__(*args, **kwargs)
         self._dates: list[str] = []
         self._values: list[float] = []
+        self._x_labels: list[str] | None = None
         self._mode: str = "net"
         self._avg: float | None = None
 
@@ -122,6 +123,10 @@ class GraphWidget(Widget):
         self._dates = dates
         self._values = values
         self._avg = avg
+
+    def set_x_labels(self, labels: list[str] | None) -> None:
+        """Optional per-point x-axis labels (e.g. ``Wk 23``); defaults to short dates."""
+        self._x_labels = labels
 
     def set_mode(self, mode: str) -> None:
         self._mode = mode
@@ -204,7 +209,15 @@ class GraphWidget(Widget):
         # Spread x-tick labels to avoid overlap
         step = max(1, n // self._MAX_XTICKS)
         xtick_positions = x_indices[::step]
-        xtick_labels = [_format_date_label(self._dates[i]) for i in xtick_positions]
+        if self._x_labels and len(self._x_labels) == n:
+            xtick_labels = []
+            prev = None
+            for i in xtick_positions:
+                label = self._x_labels[i]
+                xtick_labels.append("" if label == prev else label)
+                prev = label
+        else:
+            xtick_labels = [_format_date_label(self._dates[i]) for i in xtick_positions]
         plt.xticks(xtick_positions, xtick_labels)
 
         # ── Zero line (bright) ─────────────────────────────────────

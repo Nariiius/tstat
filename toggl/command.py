@@ -222,8 +222,10 @@ class CommandTab(Container):
         dates, values, raw_values, avg = svc.get_graph_data(
             daily_data, self._current_graph_mode, baseline=baseline
         )
+        x_labels = svc.graph_x_labels(dates, self.period.mode)
         graph = self.query_one("#cmd-graph", GraphWidget)
         graph.set_data(dates, values, avg=avg)
+        graph.set_x_labels(x_labels)
         graph.set_mode(self._current_graph_mode)
         graph.refresh()
 
