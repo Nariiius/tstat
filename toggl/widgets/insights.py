@@ -287,10 +287,11 @@ def format_discoveries(discoveries: list[Discovery]) -> str:
     CLR_MUTED  = "#4a5565"
 
     KIND_META = {
-        "drift":    ("\u2193 DRIFT",      CLR_RED),
-        "growth":   ("\u2191 GROWTH",     CLR_GREEN),
-        "best_gap": ("\u25c8 BEST PERIOD", CLR_AMBER),
-        "failure":  ("\u26a0 PATTERN",    CLR_RED),
+        "failure_mode":       ("⚠ FAILURE",       CLR_RED),
+        "positive_driver":    ("★ POSITIVE DRIVER", CLR_GREEN),
+        "neglect":            ("∅ NEGLECT",        CLR_AMBER),
+        "trajectory_change":  ("↗ TRAJECTORY",      CLR_AMBER),
+        "best_period_gap":    ("◈ BEST PERIOD",     CLR_AMBER),
     }
 
     lines = [f"[bold {CLR_HEADER}]DISCOVERIES[/]\n"]

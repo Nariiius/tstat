@@ -259,7 +259,22 @@ def _bundle_from_dict(data: dict[str, Any]) -> InsightsBundle:
         playbook=playbook,
         positives=data.get("positives", {}),
         points=data.get("points", {}),
-        discoveries=[Discovery(**d) for d in data.get("discoveries", [])],
+        discoveries=[
+            Discovery(
+                kind=d.get("kind", ""),
+                title=d.get("title", ""),
+                summary=d.get("summary", ""),
+                evidence=d.get("evidence", ""),
+                period=d.get("period", ""),
+                confidence=d.get("confidence", 0.0),
+                impact=d.get("impact", 0.0),
+                novelty=d.get("novelty", 0.0),
+                score=d.get("score", 0.0),
+                subject=d.get("subject", ""),
+                actionability=d.get("actionability", 0.5),
+            )
+            for d in data.get("discoveries", [])
+        ],
         recovery_ignore=data.get("recovery_ignore", []),
         avoid_names=frozenset(data.get("avoid_names", [])),
         generated_at=data.get("generated_at", ""),
