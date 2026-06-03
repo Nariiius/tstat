@@ -13,6 +13,8 @@ from textual.widgets import Static
 from toggl.services.insights_bundle import InsightsBundle
 from toggl.services.playbook import Playbook, PlaybookStep
 from toggl.services.discovery import Discovery
+from toggl.services.coach import CoachFinding
+from toggl.services.week_brief import WeekBrief, WeekAction
 
 # ──────────────────────────────────────────────
 # Progress, status, and visual helpers
@@ -165,16 +167,29 @@ def _format_playbook_block(
     if steps:
         for i, step in enumerate(steps, 1):
             pts_str = f"[{CLR_GREEN}]{_fmt_pts(step.points)}[/]"
-            nums = "①②③④⑤"
+            nums = "\u2460\u2461\u2462\u2463\u2464\u2465\u2466\u2467\u2468"
             num = nums[i-1] if i <= len(nums) else f"{i}."
             label = f"[bold]{step.label}[/]"
-            amt = f" {step.amount}" if step.amount and step.amount != "×1" else ""
+            amt = f" {step.amount}" if step.amount and step.amount != "\u00d71" else ""
             step_line = f"  {num} {label}{amt}  {pts_str}"
             if not compact and step.points > 0:
                 target = float(pb.context.get("gap", pb.context.get("daily_target", 0)) or 1)
                 step_line += f"  {_progress_bar(step.points, target, width=6)}"
             lines.append(step_line)
+            if step.reason and not compact:
+                lines.append(f"    [{CLR_DIM}]{step.reason}[/]")
 
+        # ── Alternatives (also consider) ──
+        if pb.alternatives and not compact:
+            alt_names = ", ".join(a.label for a in pb.alternatives[:3])
+            lines.append(f"  [{CLR_MUTED}]Also consider:[/] {alt_names}")
+
+        lines.append("")
+
+    # ── Lookback (yesterday + patterns) ──
+    if pb.lookback and not compact:
+        for lb in pb.lookback:
+            lines.append(f"  [{CLR_DIM}]{lb}[/]")
         lines.append("")
 
     # ── Expected gain ──
@@ -243,9 +258,10 @@ def format_insights_tab(
 ) -> str:
     """Full detailed insights for the Insights tab.
 
-    Layout: Verdict → Playbook → Discoveries
-    Playbook shows 3 highest-leverage actions with pace improvement.
-    Discoveries shows trend analysis (drift, growth, best period, failure modes).
+    Layout: Verdict -> TODAY -> THIS WEEK -> PATTERNS
+    TODAY shows playbook with reasons, alternatives, and lookback context.
+    THIS WEEK shows the imperative Focus / Protect / Skip plan.
+    PATTERNS shows supporting evidence from Discoveries and Coach.
     """
     if is_loading:
         return _format_loading("Computing insights...", progress_stage)
@@ -260,18 +276,65 @@ def format_insights_tab(
     parts.append("\n")
     parts.append(_section_sep())
 
-    # ── 2. Playbook ──
+    # ── TODAY (playbook with reasons + alternatives + lookback) ──
+    parts.append("\n")
+    parts.append(_section_title("TODAY"))
     parts.append("\n")
     parts.append(_format_playbook_block(pb, include_math=True, compact=False, max_steps=6))
 
-    # ── 3. Discoveries ──
-    if bundle.discoveries:
+    # ── THIS WEEK (imperative Focus / Protect / Skip) ──
+    wb = bundle.week_brief
+    if wb.headline or wb.focus or wb.protect or wb.skip:
         parts.append(_section_sep())
         parts.append("\n\n")
+        parts.append(format_week_brief(wb))
+        parts.append("\n")
+
+    # ── PATTERNS (discoveries + coach as supporting evidence) ──
+    has_patterns = bool(bundle.discoveries or bundle.coach_findings)
+    if has_patterns:
+        parts.append(_section_sep())
+        parts.append("\n\n")
+        parts.append(_section_title("PATTERNS"))
+        parts.append("\n")
+
+    if bundle.discoveries:
         parts.append(format_discoveries(bundle.discoveries))
         parts.append("\n")
 
+    if bundle.coach_findings:
+        parts.append(format_coach_findings(bundle.coach_findings))
+        parts.append("\n")
+
     return "".join(parts).strip()
+
+
+def format_week_brief(wb: WeekBrief) -> str:
+    """Render the Week Brief (Focus / Protect / Skip) as Rich markup."""
+    if not wb.headline:
+        return ""
+
+    lines: list[str] = []
+    lines.append(f"[bold {CLR_ACCENT}]THIS WEEK[/]  [{CLR_DIM}]{wb.headline}[/]")
+    lines.append("")
+
+    def _action_lines(actions: list[WeekAction], label: str, color: str) -> list[str]:
+        out: list[str] = []
+        if not actions:
+            return out
+        out.append(f"[bold {color}]{label}[/]")
+        for a in actions:
+            out.append(f"  [{CLR_DIM}]•[/] {a.imperative}")
+            if a.evidence:
+                out.append(f"    [{CLR_MUTED}]{a.evidence}[/]")
+        out.append("")
+        return out
+
+    lines.extend(_action_lines(wb.focus, "FOCUS", CLR_GREEN))
+    lines.extend(_action_lines(wb.protect, "PROTECT", CLR_AMBER))
+    lines.extend(_action_lines(wb.skip, "SKIP", CLR_RED))
+
+    return "\n".join(lines).rstrip()
 
 
 def format_discoveries(discoveries: list[Discovery]) -> str:
@@ -294,7 +357,7 @@ def format_discoveries(discoveries: list[Discovery]) -> str:
         "best_period_gap":    ("◈ BEST PERIOD",     CLR_AMBER),
     }
 
-    lines = [f"[bold {CLR_HEADER}]DISCOVERIES[/]\n"]
+    lines = []
 
     for i, d in enumerate(discoveries, 1):
         label, color = KIND_META.get(d.kind, ("\u25c9", CLR_DIM))
@@ -315,6 +378,45 @@ def format_discoveries(discoveries: list[Discovery]) -> str:
         lines.append(f"[{CLR_MUTED}]{d.evidence}[/]")
 
         if i < len(discoveries):
+            sep = "\u2500" * 36
+            lines.append(f"\n[{CLR_MUTED}]{sep}[/]\n")
+
+    return "\n".join(lines)
+
+
+def format_coach_findings(findings: list[CoachFinding]) -> str:
+    """Render coach (personal baseline analysis) findings as Rich markup."""
+    if not findings:
+        return ""
+
+    KIND_META = {
+        "frequency_drop":    ("↘ FREQUENCY DROP",  CLR_RED),
+        "frequency_surge":   ("↗ ON A ROLL",       CLR_GREEN),
+        "streak_gap":        ("⏱ GAP REMINDER",    CLR_AMBER),
+        "negative_cluster":  ("⚠ PATTERN",         CLR_RED),
+        "positive_lift":     ("★ POSITIVE LIFT",   CLR_GREEN),
+    }
+
+    lines = []
+
+    for i, f in enumerate(findings, 1):
+        label, color = KIND_META.get(f.kind, ("○", CLR_DIM))
+
+        filled = int(f.confidence * 10)
+        bar = "\u2501" * filled + "\u2500" * (10 - filled)
+        conf_color = (
+            CLR_GREEN if f.confidence >= 0.85
+            else CLR_AMBER if f.confidence >= 0.75
+            else CLR_DIM
+        )
+
+        lines.append(
+            f"[bold {color}]{label}[/]  [{conf_color}]{bar}[/] {f.confidence:.0%}"
+        )
+        lines.append(f"[bold white]{f.title.upper()}[/]")
+        lines.append(f"[{CLR_DIM}]{f.summary}[/]")
+
+        if i < len(findings):
             sep = "\u2500" * 36
             lines.append(f"\n[{CLR_MUTED}]{sep}[/]\n")
 

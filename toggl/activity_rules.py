@@ -249,6 +249,28 @@ class ActivityRules:
 
         return cls(_natures=natures, _entries=entries)
 
+    def to_stable_dict(self) -> dict[str, Any]:
+        """Stable dict for cache fingerprint — sorted keys, no runtime state."""
+        natures = {
+            str(k): {"nature": str(v.nature)}
+            for k, v in sorted(self._natures.items())
+        }
+        entries = {}
+        for k, v in sorted(self._entries.items()):
+            entries[str(k)] = {
+                "category": v.category,
+                "coach_mode": v.coach_mode,
+                "coach_confidence_mod": v.coach_confidence_mod,
+                "max_per_day": v.max_per_day,
+                "max_per_week": v.max_per_week,
+                "remind_after_gap_days": v.remind_after_gap_days,
+                "throttle_after_days": v.throttle_after_days,
+                "combo_pairs": sorted(v.combo_pairs),
+                "combo_conflicts": sorted(v.combo_conflicts),
+                "combo_boost": v.combo_boost,
+            }
+        return {"natures": natures, "entries": entries}
+
     @classmethod
     def empty(cls) -> ActivityRules:
         """Fallback: every activity is *pursue* with no overrides."""

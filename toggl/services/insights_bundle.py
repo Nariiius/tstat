@@ -21,9 +21,12 @@ from toggl.const import (
     POSITIVES_CSV_FILE,
     PROJECTS_FILE,
 )
+from toggl.services.coach import CoachFinding, CoachService
 from toggl.services.discovery import Discovery, DiscoveryEngine
 from toggl.services.metrics import MetricsService
 from toggl.services.playbook import Playbook, PlaybookService, PlaybookStep
+from toggl.services.recent_context import build_recent_context
+from toggl.services.week_brief import WeekBrief, WeekBriefService, WeekAction
 
 logger = logging.getLogger("TStat")
 
@@ -34,6 +37,10 @@ class InsightsBundle:
     positives: dict[str, int | float] = field(default_factory=dict)
     points: dict[str, int | float] = field(default_factory=dict)
     discoveries: list[Discovery] = field(default_factory=list)
+    coach_findings: list[CoachFinding] = field(default_factory=list)
+    week_brief: WeekBrief = field(default_factory=lambda: WeekBrief(
+        headline="", focus=[], protect=[], skip=[],
+    ))
     recovery_ignore: list[str] = field(default_factory=list)
     avoid_names: frozenset[str] = field(default_factory=frozenset)
     generated_at: str = ""
@@ -45,18 +52,47 @@ def _stable_config_hash(
     negatives: dict[str, int | float],
     daily_target: float,
     recovery_ignore: list[str],
+    activity_rules: Any | None = None,
+    controllability: dict[str, float] | None = None,
+    availability_overrides: dict[str, Any] | None = None,
+    low_control_reasons: dict[str, str] | None = None,
+    default_hours: dict[str, float] | None = None,
+    discovery_lookback: dict[str, int] | None = None,
+    discovery_ignore: set[str] | None = None,
 ) -> str:
-    payload = json.dumps(
-        {
-            "points": sorted(points.items()),
-            "positives": sorted(positives.items()),
-            "negatives": sorted(negatives.items()),
-            "daily_target": daily_target,
-            "recovery_ignore": sorted(recovery_ignore),
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    payload = {
+        "points": sorted(points.items()),
+        "positives": sorted(positives.items()),
+        "negatives": sorted(negatives.items()),
+        "daily_target": daily_target,
+        "recovery_ignore": sorted(recovery_ignore),
+    }
+    # Include activity_rules if available
+    if activity_rules is not None:
+        from toggl.activity_rules import ActivityRules
+        if isinstance(activity_rules, ActivityRules):
+            payload["activity_rules"] = activity_rules.to_stable_dict()
+    # Include playbook settings if any are present
+    pb = {}
+    if controllability:
+        pb["controllability"] = dict(sorted(controllability.items()))
+    if availability_overrides:
+        pb["availability_overrides"] = dict(sorted(
+            (k, dict(sorted(v.items()))) for k, v in availability_overrides.items()
+        ))
+    if low_control_reasons:
+        pb["low_control_reasons"] = dict(sorted(low_control_reasons.items()))
+    if default_hours:
+        pb["default_hours"] = dict(sorted(default_hours.items()))
+    if discovery_lookback:
+        pb["discovery_lookback"] = dict(sorted(discovery_lookback.items()))
+    if discovery_ignore:
+        pb["discovery_ignore"] = sorted(discovery_ignore)
+    if pb:
+        payload["playbook"] = pb
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode()
+    ).hexdigest()[:16]
 
 
 def _file_fingerprint(paths: list[str]) -> dict[str, tuple[float, int]]:
@@ -97,15 +133,35 @@ class InsightsBundleService:
             low_control_reasons=config.low_control_reasons,
             default_hours=config.default_hours,
         )
+        self._coach_svc = CoachService(
+            cache=cache,
+            metrics=metrics,
+            config=config,
+            activity_rules=config.activity_rules,
+        )
+        self._week_brief_svc = WeekBriefService(
+            cache=cache,
+            metrics=metrics,
+            config=config,
+            activity_rules=config.activity_rules,
+        )
 
     def compute_fingerprint(self) -> dict[str, Any]:
+        cfg = self._config
         return {
             "config_hash": _stable_config_hash(
-                self._config.points,
-                self._config.positives,
-                self._config.negatives,
-                float(self._config.daily_target),
-                self._config.recovery_ignore,
+                cfg.points,
+                cfg.positives,
+                cfg.negatives,
+                float(cfg.daily_target),
+                cfg.recovery_ignore,
+                activity_rules=cfg.activity_rules,
+                controllability=cfg.controllability,
+                availability_overrides=cfg.availability_overrides,
+                low_control_reasons=cfg.low_control_reasons,
+                default_hours=cfg.default_hours,
+                discovery_lookback=cfg.discovery_lookback,
+                discovery_ignore=cfg.discovery_ignore,
             ),
             "files": _file_fingerprint([
                 CSV_FILE,
@@ -137,6 +193,25 @@ class InsightsBundleService:
         except Exception:
             logger.exception("DiscoveryEngine failed")
 
+        # Run coach
+        coach_findings: list[CoachFinding] = []
+        if on_progress:
+            on_progress("coach")
+        try:
+            coach_findings = self._coach_svc.compute()
+        except Exception:
+            logger.exception("CoachService failed")
+
+        # Run week brief (consumes discoveries + coach)
+        week_brief = WeekBrief(headline="", focus=[], protect=[], skip=[])
+        try:
+            week_brief = self._week_brief_svc.compute(
+                discoveries=discoveries,
+                coach_findings=coach_findings,
+            )
+        except Exception:
+            logger.exception("WeekBriefService failed")
+
         # Precompute avoid names for rendering filters
         avoid_names = frozenset(
             n for n in list(self._config.positives) + list(self._config.points)
@@ -148,6 +223,8 @@ class InsightsBundleService:
             positives=dict(self._config.positives),
             points=dict(self._config.points),
             discoveries=discoveries,
+            coach_findings=coach_findings,
+            week_brief=week_brief,
             recovery_ignore=list(self._config.recovery_ignore),
             avoid_names=avoid_names,
             generated_at=datetime.now().isoformat(timespec="seconds"),
@@ -175,6 +252,8 @@ class InsightsBundleService:
                 "positives": dict(bundle.positives),
                 "points": {k: v for k, v in bundle.points.items()},
                 "discoveries": [asdict(d) for d in bundle.discoveries],
+                "coach_findings": [asdict(f) for f in bundle.coach_findings],
+                "week_brief": _week_brief_to_dict(bundle.week_brief),
                 "recovery_ignore": bundle.recovery_ignore,
                 "avoid_names": list(bundle.avoid_names),
             }
@@ -191,6 +270,7 @@ def _playbook_to_dict(pb: Playbook) -> dict[str, Any]:
         "goal": pb.goal,
         "headline": pb.headline,
         "steps": [asdict(s) for s in pb.steps],
+        "alternatives": [asdict(s) for s in pb.alternatives],
         "done_today": pb.done_today,
         "blocked_today": pb.blocked_today,
         "low_control": pb.low_control,
@@ -199,6 +279,15 @@ def _playbook_to_dict(pb: Playbook) -> dict[str, Any]:
         "focus_line": pb.focus_line,
         "context": pb.context,
         "generated_at": pb.generated_at,
+    }
+
+
+def _week_brief_to_dict(wb: WeekBrief) -> dict[str, Any]:
+    return {
+        "headline": wb.headline,
+        "focus": [asdict(a) for a in wb.focus],
+        "protect": [asdict(a) for a in wb.protect],
+        "skip": [asdict(a) for a in wb.skip],
     }
 
 
@@ -223,6 +312,7 @@ def _fingerprints_match(
 def _bundle_from_dict(data: dict[str, Any]) -> InsightsBundle:
     pb_raw = data.get("playbook", {})
     steps = [PlaybookStep(**s) for s in pb_raw.get("steps", [])]
+    alternatives = [PlaybookStep(**s) for s in pb_raw.get("alternatives", [])]
     
     # Handle blocked_today format migration (old: list[str], new: list[tuple[str,str]])
     blocked_raw = pb_raw.get("blocked_today", [])
@@ -246,6 +336,7 @@ def _bundle_from_dict(data: dict[str, Any]) -> InsightsBundle:
         goal=pb_raw.get("goal", ""),
         headline=pb_raw.get("headline", ""),
         steps=steps,
+        alternatives=alternatives,
         done_today=pb_raw.get("done_today", []),
         blocked_today=blocked_today,
         low_control=low_control,
@@ -255,6 +346,7 @@ def _bundle_from_dict(data: dict[str, Any]) -> InsightsBundle:
         context=pb_raw.get("context", {}),
         generated_at=pb_raw.get("generated_at", ""),
     )
+    wb_raw = data.get("week_brief", {})
     return InsightsBundle(
         playbook=playbook,
         positives=data.get("positives", {}),
@@ -275,6 +367,23 @@ def _bundle_from_dict(data: dict[str, Any]) -> InsightsBundle:
             )
             for d in data.get("discoveries", [])
         ],
+        coach_findings=[
+            CoachFinding(
+                kind=f.get("kind", ""),
+                title=f.get("title", ""),
+                summary=f.get("summary", ""),
+                confidence=f.get("confidence", 0.0),
+                impact=f.get("impact", 0.0),
+                subject=f.get("subject", ""),
+            )
+            for f in data.get("coach_findings", [])
+        ],
+        week_brief=WeekBrief(
+            headline=wb_raw.get("headline", ""),
+            focus=[WeekAction(**a) for a in wb_raw.get("focus", [])],
+            protect=[WeekAction(**a) for a in wb_raw.get("protect", [])],
+            skip=[WeekAction(**a) for a in wb_raw.get("skip", [])],
+        ),
         recovery_ignore=data.get("recovery_ignore", []),
         avoid_names=frozenset(data.get("avoid_names", [])),
         generated_at=data.get("generated_at", ""),

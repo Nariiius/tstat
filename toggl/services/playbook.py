@@ -35,6 +35,7 @@ class Playbook:
     goal: str
     headline: str
     steps: list[PlaybookStep] = field(default_factory=list)
+    alternatives: list[PlaybookStep] = field(default_factory=list)
     expected_gain: float = 0.0
     done_today: list[str] = field(default_factory=list)
     blocked_today: list[tuple[str, str]] = field(default_factory=list)
@@ -158,7 +159,7 @@ class PlaybookService:
         low_control = self._build_low_control_section(logged_today)
 
         if gap > 0.5:
-            steps, expected_gain, gap_note = self._build_gap_playbook(
+            steps, alternatives, expected_gain, gap_note = self._build_gap_playbook(
                 gap, today_str, logged_today, recent, context
             )
             headline = f"Need {self._fmt_pts(gap)} today (at {self._fmt_pts(today_net)})"
@@ -166,6 +167,7 @@ class PlaybookService:
                 goal="hit_today_target",
                 headline=headline,
                 steps=steps,
+                alternatives=alternatives,
                 expected_gain=expected_gain,
                 done_today=sorted(logged_today),
                 blocked_today=blocked_today,
@@ -180,18 +182,19 @@ class PlaybookService:
         week_delta = summary.get("delta", 0)
         if week_delta < -0.5 and days_left > 0:
             per_day = round(abs(week_delta) / days_left, 1)
-            steps, expected_gain, gap_note = self._build_gap_playbook(
+            steps, alternatives, expected_gain, gap_note = self._build_gap_playbook(
                 per_day, today_str, logged_today, recent, context
             )
             headline = (
                 f"Week {self._fmt_pts(summary.get('actual', 0))} "
-                f"({self._fmt_pts(week_delta)} vs pace) — ~{per_day}/day for {days_left}d"
+                f"({self._fmt_pts(week_delta)} vs pace) \u2014 ~{per_day}/day for {days_left}d"
             )
             context["per_day_needed"] = per_day
             return Playbook(
                 goal="fix_week",
                 headline=headline,
                 steps=steps,
+                alternatives=alternatives,
                 expected_gain=expected_gain,
                 done_today=sorted(logged_today),
                 blocked_today=blocked_today,
@@ -203,13 +206,14 @@ class PlaybookService:
                 generated_at=generated_at,
             )
 
-        # On track — show stretch actions
-        steps, expected_gain = self._build_on_track_playbook(today_str, logged_today, recent)
+        # On track \u2014 show stretch actions
+        steps, alternatives, expected_gain = self._build_on_track_playbook(today_str, logged_today, recent)
         headline = f"On track at {self._fmt_pts(today_net)} (target {self._fmt_pts(target)})"
         return Playbook(
             goal="on_track",
             headline=headline,
             steps=steps,
+            alternatives=alternatives,
             expected_gain=expected_gain,
             done_today=sorted(logged_today),
             blocked_today=blocked_today,
@@ -231,12 +235,12 @@ class PlaybookService:
         logged_today: set[str],
         recent: RecentContext,
         context: dict[str, Any],
-    ) -> tuple[list[PlaybookStep], float, str]:
+    ) -> tuple[list[PlaybookStep], list[PlaybookStep], float, str]:
         """Build playbook for gap-filling or week recovery."""
         habit_candidates = self._gather_habit_candidates(today_str, logged_today)
         project_candidates = self._gather_project_candidates(today_str, logged_today)
 
-        steps = self._select_steps(gap, habit_candidates, project_candidates)
+        steps, alternatives = self._select_steps(gap, habit_candidates, project_candidates)
         expected_gain = round(sum(s.points for s in steps), 1)
 
         # Build gap note with week pace projection
@@ -249,41 +253,60 @@ class PlaybookService:
             remainder = round(-np, 1) if np < 0 else 0
             gap_note = (
                 f"Playbook adds [bold]{expected_gain:+.1f}[/] to today. "
-                f"Week pace {cp:+.1f}/d → {np:+.1f}/d"
+                f"Week pace {cp:+.1f}/d \u2192 {np:+.1f}/d"
                 + (f"  (still need ~{remainder}/d)" if remainder > 0 else "")
             )
 
-        return steps, expected_gain, gap_note
+        return steps, alternatives, expected_gain, gap_note
 
     def _build_on_track_playbook(
         self,
         today_str: str,
         logged_today: set[str],
         recent: RecentContext,
-    ) -> tuple[list[PlaybookStep], float]:
+    ) -> tuple[list[PlaybookStep], list[PlaybookStep], float]:
         """Build playbook for on-track days — stretch actions."""
         habit_candidates = self._gather_habit_candidates(today_str, logged_today)
         project_candidates = self._gather_project_candidates(today_str, logged_today)
 
-        # For on-track, just pick the highest-value available action
+        # For on-track, pick the highest-value available action
         all_candidates = sorted(
             habit_candidates + project_candidates,
             key=lambda c: -c.rank_score
         )
 
         steps = []
+        alternatives = []
+        used_names: set[str] = set()
+
         if all_candidates:
             best = all_candidates[0]
+            used_names.add(best.name)
             steps.append(PlaybookStep(
                 action=best.action,
                 label=best.name,
                 amount=best.amount,
                 points=best.points,
-                reason=best.reason or "Stretch — bank extra points while ahead",
+                reason=best.reason or "Stretch \u2014 bank extra points while ahead",
             ))
 
+            # Capture up to 3 runner-up alternatives
+            for alt in all_candidates[1:]:
+                if alt.name in used_names:
+                    continue
+                if len(alternatives) >= 3:
+                    break
+                alternatives.append(PlaybookStep(
+                    action=alt.action,
+                    label=alt.name,
+                    amount=alt.amount,
+                    points=alt.points,
+                    reason=alt.reason or "Stretch \u2014 bank extra points while ahead",
+                ))
+                used_names.add(alt.name)
+
         expected_gain = round(sum(s.points for s in steps), 1)
-        return steps, expected_gain
+        return steps, alternatives, expected_gain
 
     # ────────────────────────────────────────
     # Candidate gathering
@@ -321,12 +344,14 @@ class PlaybookService:
             rank_score = points_per_hour * controllability * availability * repeatability
 
             # Build reason
+            gap_days = self._days_since_last(name)
             reason = f"Quick {float(pts):.1f} pts"
             remind = self._rules.get_remind_after_gap_days(name)
             if remind is not None:
-                gap_days = self._days_since_last(name)
                 if gap_days >= remind:
-                    reason = f"⏱ {gap_days}d since last (reminds after {remind}d)"
+                    reason = f"\u23f1 {gap_days}d since last — remind after {remind}d \u00b7 +{float(pts):.0f} pts"
+                elif gap_days >= max(remind - 1, 1):
+                    reason = f"\u23f1 {gap_days}d since last \u00b7 streak at risk \u00b7 +{float(pts):.0f} pts"
 
             candidates.append(_Candidate(
                 name=name,
@@ -401,8 +426,9 @@ class PlaybookService:
         gap: float,
         habit_candidates: list[_Candidate],
         project_candidates: list[_Candidate],
-    ) -> list[PlaybookStep]:
-        """Select up to MAX_STEPS with bucket constraints."""
+    ) -> tuple[list[PlaybookStep], list[PlaybookStep]]:
+        """Select up to MAX_STEPS with bucket constraints.
+        Returns (steps, alternatives) where alternatives are the next best unused candidates."""
         habits = sorted(habit_candidates, key=lambda c: -c.rank_score)
         projects = sorted(project_candidates, key=lambda c: -c.rank_score)
 
@@ -454,7 +480,25 @@ class PlaybookService:
             else:
                 project_count += 1
 
-        return steps
+        # Capture 2–3 runner-up candidates as alternatives
+        alternatives: list[PlaybookStep] = []
+        alt_pool = sorted(
+            [c for c in habits + projects if c.name not in used_names],
+            key=lambda c: -c.rank_score
+        )
+        for candidate in alt_pool:
+            if len(alternatives) >= 3:
+                break
+            alternatives.append(PlaybookStep(
+                action=candidate.action,
+                label=candidate.name,
+                amount=candidate.amount,
+                points=candidate.points,
+                reason=candidate.reason,
+            ))
+            used_names.add(candidate.name)
+
+        return steps, alternatives
 
     # ────────────────────────────────────────
     # Blocked and low-control sections

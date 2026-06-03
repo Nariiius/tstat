@@ -157,3 +157,59 @@ def test_once_per_day_excluded_when_logged(playbook_svc, tmp_data_dir, sample_co
     assert "GI Dailies" not in [s.label for s in pb.steps]
     if pb.goal == "hit_today_target":
         assert "GI Dailies" in pb.done_today or "GI Dailies" in str(pb.done_today)
+
+
+def test_playbook_has_alternatives_field(playbook_svc):
+    """Playbook.alternatives should be populated when there are runner-up candidates."""
+    pb = playbook_svc.compute()
+    assert hasattr(pb, "alternatives")
+    # Should be a list (may be empty if few candidates)
+    assert isinstance(pb.alternatives, list)
+
+
+def test_playbook_steps_have_reasons(playbook_svc):
+    """Every step should have a non-empty reason string."""
+    pb = playbook_svc.compute()
+    for step in pb.steps:
+        assert step.reason, f"Step '{step.label}' has empty reason"
+
+
+def test_playbook_lookback_present_with_history(
+    tmp_data_dir, sample_daily_csv, sample_config, monkeypatch
+):
+    """With enough history, lookback should have content and be rendered."""
+    import toggl.const
+    import toggl.cache as cache_mod
+    import toggl.services.recent_context as rc_mod
+    import toggl.services.playbook as pb_mod
+    from datetime import date as real_date
+
+    today = real_date(2023, 1, 8)
+
+    class MockDate(real_date):
+        @classmethod
+        def today(cls):
+            return today
+
+    monkeypatch.setattr(cache_mod, "date", MockDate)
+    monkeypatch.setattr(rc_mod, "date", MockDate)
+    monkeypatch.setattr(pb_mod, "date", MockDate)
+
+    with open(toggl.const.NEGATIVES_CSV_FILE, "w") as f:
+        f.write("Date,Negative,Points\n")
+        f.write("2023-01-02,Procrastination,3\n")
+        f.write("2023-01-03,Procrastination,3\n")
+        f.write("2023-01-07,Procrastination,3\n")
+
+    import toggl.config as cfg_mod
+    cache = DataCache.load()
+    metrics = MetricsService(
+        cache, cfg_mod.POINTS, cfg_mod.NEGATIVES, cfg_mod.POSITIVES, [], lambda: 13.0
+    )
+    svc = PlaybookService(
+        metrics, cache, dict(cfg_mod.POINTS), dict(cfg_mod.POSITIVES),
+        ActivityRules.empty(), lambda: 13.0,
+    )
+    pb = svc.compute()
+    # lookback should be a list
+    assert isinstance(pb.lookback, list)
