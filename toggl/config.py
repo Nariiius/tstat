@@ -25,7 +25,9 @@ class Config:
     __slots__ = (
         "points", "negatives", "positives", "daily_target",
         "rate_colors", "category_registry", "recovery_ignore",
-        "activity_rules",
+        "activity_rules", "controllability", "availability_overrides",
+        "low_control_reasons", "default_hours", "discovery_lookback",
+        "discovery_ignore",
     )
 
     def __init__(
@@ -38,6 +40,12 @@ class Config:
         category_registry: CategoryRegistry,
         recovery_ignore: list[str],
         activity_rules: ActivityRules,
+        controllability: dict[str, float] | None = None,
+        availability_overrides: dict[str, dict] | None = None,
+        low_control_reasons: dict[str, str] | None = None,
+        default_hours: dict[str, float] | None = None,
+        discovery_lookback: dict[str, int] | None = None,
+        discovery_ignore: set[str] | None = None,
     ) -> None:
         self.points = points
         self.negatives = negatives
@@ -47,6 +55,14 @@ class Config:
         self.category_registry = category_registry
         self.recovery_ignore = recovery_ignore
         self.activity_rules = activity_rules
+        self.controllability = controllability or {}
+        self.availability_overrides = availability_overrides or {}
+        self.low_control_reasons = low_control_reasons or {}
+        self.default_hours = default_hours or {}
+        self.discovery_lookback = discovery_lookback or {
+            "drift": 60, "growth": 60, "failure": 90, "best_period": 120
+        }
+        self.discovery_ignore = discovery_ignore or set()
 
     @classmethod
     def load(cls) -> "Config":
@@ -81,8 +97,36 @@ class Config:
             config.get("category_natures"),
             config.get("activity_rules"),
         )
+        
+        # Parse playbook section
+        playbook_raw = config.get("playbook", {})
+        if not isinstance(playbook_raw, dict):
+            playbook_raw = {}
+        
+        controllability = {}
+        for name, val in playbook_raw.get("controllability", {}).items():
+            controllability[str(name)] = float(val)
+        
+        availability_overrides = playbook_raw.get("availability_overrides", {})
+        low_control_reasons = {
+            str(k): str(v) for k, v in playbook_raw.get("low_control_reasons", {}).items()
+        }
+        
+        default_hours = {}
+        for name, val in playbook_raw.get("default_hours", {}).items():
+            default_hours[str(name)] = float(val)
+        
+        discovery_lookback = {
+            str(k): int(v) for k, v in playbook_raw.get("discovery_lookback", {}).items()
+        }
+        
+        discovery_ignore_raw = playbook_raw.get("discovery_ignore", [])
+        discovery_ignore = set(str(x) for x in discovery_ignore_raw)
+        
         return cls(points, negatives, positives, daily_target,
-                   rate_colors, category_registry, recovery_ignore, activity_rules)
+                   rate_colors, category_registry, recovery_ignore, activity_rules,
+                   controllability, availability_overrides, low_control_reasons,
+                   default_hours, discovery_lookback, discovery_ignore)
 
 
 def _config_setup_hint() -> str:
@@ -151,11 +195,21 @@ DAILY_TARGET: int | float = DEFAULT_DAILY_TARGET
 RATE_COLORS: RateColors = RateColors()
 CATEGORY_REGISTRY: CategoryRegistry = CategoryRegistry()
 ACTIVITY_RULES: ActivityRules = ActivityRules.empty()
+CONTROLLABILITY: dict[str, float] = {}
+AVAILABILITY_OVERRIDES: dict[str, dict] = {}
+LOW_CONTROL_REASONS: dict[str, str] = {}
+DEFAULT_HOURS: dict[str, float] = {}
+DISCOVERY_LOOKBACK: dict[str, int] = {
+    "drift": 60, "growth": 60, "failure": 90, "best_period": 120
+}
+DISCOVERY_IGNORE: set[str] = set()
 
 
 def load_runtime_settings() -> None:
     global POINTS, NEGATIVES, POSITIVES, RECOVERY_IGNORE
     global DAILY_TARGET, RATE_COLORS, CATEGORY_REGISTRY, ACTIVITY_RULES
+    global CONTROLLABILITY, AVAILABILITY_OVERRIDES, LOW_CONTROL_REASONS
+    global DEFAULT_HOURS, DISCOVERY_LOOKBACK, DISCOVERY_IGNORE
     cfg = Config.load()
     POINTS.clear()
     POINTS.update(cfg.points)
@@ -169,6 +223,18 @@ def load_runtime_settings() -> None:
     RATE_COLORS.update(cfg.rate_colors)
     CATEGORY_REGISTRY.update(cfg.category_registry)
     ACTIVITY_RULES = cfg.activity_rules
+    CONTROLLABILITY.clear()
+    CONTROLLABILITY.update(cfg.controllability)
+    AVAILABILITY_OVERRIDES.clear()
+    AVAILABILITY_OVERRIDES.update(cfg.availability_overrides)
+    LOW_CONTROL_REASONS.clear()
+    LOW_CONTROL_REASONS.update(cfg.low_control_reasons)
+    DEFAULT_HOURS.clear()
+    DEFAULT_HOURS.update(cfg.default_hours)
+    DISCOVERY_LOOKBACK.clear()
+    DISCOVERY_LOOKBACK.update(cfg.discovery_lookback)
+    DISCOVERY_IGNORE.clear()
+    DISCOVERY_IGNORE.update(cfg.discovery_ignore)
 
 def get_daily_target() -> int | float:
     return DAILY_TARGET

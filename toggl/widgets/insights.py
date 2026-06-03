@@ -1,6 +1,6 @@
-"""Playbook + Coach formatters and Insights tab widget.
+"""Playbook + Discoveries formatters and Insights tab widget.
 
-Improves information quality and presentation for actionable daily insights.
+Actionable daily insights with trend analysis.
 """
 
 from __future__ import annotations
@@ -187,95 +187,21 @@ def _format_playbook_block(
         done = ", ".join(pb.done_today)
         lines.append(f"  [{CLR_DIM}]✓ Done today:[/] {done}")
 
-    # ── Pending today ──
+    # ── Blocked today ──
     if pb.blocked_today:
-        pending = ", ".join(pb.blocked_today)
-        lines.append(f"  [{CLR_DIM}]◷ Pending:[/] {pending}")
+        for name, reason in pb.blocked_today:
+            lines.append(f"  [{CLR_DIM}]◷ {name}:[/] {reason}")
 
     if pb.done_today or pb.blocked_today:
         lines.append("")
 
+    # ── Low control ──
+    if pb.low_control:
+        for name, reason in pb.low_control:
+            lines.append(f"  [{CLR_MUTED}]○ {name}:[/] {reason}")
+        lines.append("")
+
     return "\n".join(lines) if lines else "[dim]No steps right now.[/]\n"
-
-
-# ──────────────────────────────────────────────
-# Scoreboard formatter
-# ──────────────────────────────────────────────
-
-def _format_scoreboard(
-    positives: dict[str, int | float] | None = None,
-    points: dict[str, int | float] | None = None,
-    *,
-    recovery_ignore: frozenset[str] | None = None,
-    is_avoid: frozenset[str] | None = None,
-) -> str:
-    """Highest-value actions sorted by points — compact reference section."""
-    if not positives:
-        return ""
-
-    skip = recovery_ignore or frozenset()
-    avoid = is_avoid or frozenset()
-
-    items: list[tuple[str, float, str]] = []
-    # Logged positives (fixed points per log)
-    seen = set()
-    for name, pts in sorted(positives.items(), key=lambda x: -x[1]):
-        if name in skip or name in avoid:
-            continue
-        seen.add(name)
-        items.append((name, float(pts), "pts"))
-    # Tracking projects with positive rates (not already listed)
-    if points:
-        for name, pts in sorted(points.items(), key=lambda x: -x[1]):
-            if name in seen or pts <= 0:
-                continue
-            if name in skip or name in avoid:
-                continue
-            items.append((name, float(pts), "pts/hr"))
-    items.sort(key=lambda x: -x[1])
-
-    if not items:
-        return ""
-
-    lines: list[str] = []
-    lines.append(f"[bold {CLR_ACCENT}]HIGHEST-VALUE ACTIONS[/]")
-    for name, pts, unit in items[:8]:
-        if unit == "pts":
-            lines.append(f"  {name}  [{CLR_GREEN}]+{pts:.0f}[/]")
-        else:
-            lines.append(f"  {name}  [{CLR_GREEN}]+{pts:.1f}/hr[/]")
-
-    return "\n".join(lines)
-
-
-# ──────────────────────────────────────────────
-# Coach formatter
-# ──────────────────────────────────────────────
-
-
-def _format_coach_finding(finding: Any) -> str:
-    """Format a coach finding as a card — the text already contains multi-line markup."""
-    return finding.text
-
-
-def _format_coach_section(pb: Playbook, bundle: InsightsBundle, *, max_findings: int | None = None) -> str:
-    """Render the Coach section as numbered cards."""
-    if not bundle.coach.findings:
-        return ""
-
-    parts: list[str] = []
-    n = len(bundle.coach.findings)
-    findings = bundle.coach.findings[:max_findings] if max_findings is not None else bundle.coach.findings
-
-    parts.append(f"[bold {CLR_ACCENT}]COACH[/]")
-    parts.append("")
-
-    for i, finding in enumerate(findings):
-        parts.append(_format_coach_finding(finding))
-        if i < len(findings) - 1:
-            parts.append("")
-
-    return "\n".join(parts)
 
 
 # ──────────────────────────────────────────────
@@ -291,7 +217,7 @@ def format_overview_playbook(
 ) -> str:
     """Compact playbook for the Overview dashboard pane.
 
-    Shows verdict + best 3 steps + top 2 coach findings.
+    Shows verdict + best 3 steps.
     Omits progress bars and lookback to fit the Overview's smaller space.
     """
     if is_loading:
@@ -304,13 +230,7 @@ def format_overview_playbook(
     parts: list[str] = []
     parts.append(_format_verdict(pb))
     parts.append("\n")
-    parts.append(_format_playbook_block(pb, include_math=False, compact=True, max_steps=3))
-
-    # Coach summary (best 2 findings)
-    if bundle.coach.findings:
-        parts.append(_section_sep())
-        parts.append("\n")
-        parts.append(_format_coach_section(pb, bundle, max_findings=2))
+    parts.append(_format_playbook_block(pb, include_math=False, compact=True, max_steps=6))
 
     return "".join(parts).strip()
 
@@ -323,10 +243,9 @@ def format_insights_tab(
 ) -> str:
     """Full detailed insights for the Insights tab.
 
-    Layout: Verdict → Playbook → Scoreboard → Coach
+    Layout: Verdict → Playbook → Discoveries
     Playbook shows 3 highest-leverage actions with pace improvement.
-    Scoreboard shows highest-value actions for reference.
-    Coach shows 3 statistically-gated behavioural findings.
+    Discoveries shows trend analysis (drift, growth, best period, failure modes).
     """
     if is_loading:
         return _format_loading("Computing insights...", progress_stage)
@@ -343,28 +262,9 @@ def format_insights_tab(
 
     # ── 2. Playbook ──
     parts.append("\n")
-    parts.append(_format_playbook_block(pb, include_math=True, compact=False, max_steps=3))
+    parts.append(_format_playbook_block(pb, include_math=True, compact=False, max_steps=6))
 
-    # ── 3. Scoreboard ──
-    scoreboard = _format_scoreboard(
-        positives=bundle.positives if bundle.positives else None,
-        points=bundle.points if bundle.points else None,
-        recovery_ignore=frozenset(bundle.recovery_ignore),
-        is_avoid=bundle.avoid_names,
-    )
-    if scoreboard:
-        parts.append(_section_sep())
-        parts.append("\n")
-        parts.append(scoreboard)
-        parts.append("\n")
-
-    # ── 4. Coach ──
-    if bundle.coach.findings:
-        parts.append(_section_sep())
-        parts.append("\n")
-        parts.append(_format_coach_section(pb, bundle, max_findings=None))
-
-    # ── 5. Discoveries ──
+    # ── 3. Discoveries ──
     if bundle.discoveries:
         parts.append(_section_sep())
         parts.append("\n\n")

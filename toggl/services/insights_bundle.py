@@ -1,4 +1,4 @@
-"""Insights bundle — playbook + coach with disk cache."""
+"""Insights bundle — playbook + discoveries with disk cache."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Any, Callable
 
 from toggl.cache import DataCache
-from toggl.category import CategoryRegistry
 from toggl.config import Config
 from toggl.const import (
     CSV_FILE,
@@ -22,7 +21,6 @@ from toggl.const import (
     POSITIVES_CSV_FILE,
     PROJECTS_FILE,
 )
-from toggl.services.coach import CoachReport, CoachService, CoachFinding
 from toggl.services.discovery import Discovery, DiscoveryEngine
 from toggl.services.metrics import MetricsService
 from toggl.services.playbook import Playbook, PlaybookService, PlaybookStep
@@ -33,7 +31,6 @@ logger = logging.getLogger("TStat")
 @dataclass
 class InsightsBundle:
     playbook: Playbook = field(default_factory=lambda: Playbook(goal="", headline=""))
-    coach: CoachReport = field(default_factory=CoachReport)
     positives: dict[str, int | float] = field(default_factory=dict)
     points: dict[str, int | float] = field(default_factory=dict)
     discoveries: list[Discovery] = field(default_factory=list)
@@ -95,14 +92,10 @@ class InsightsBundleService:
             config.activity_rules,
             get_daily_target,
             recovery_ignore=config.recovery_ignore,
-        )
-        self._coach_svc = CoachService(
-            metrics,
-            cache,
-            dict(config.points),
-            dict(config.positives),
-            config.category_registry,
-            config.activity_rules,
+            controllability_map=config.controllability,
+            availability_overrides=config.availability_overrides,
+            low_control_reasons=config.low_control_reasons,
+            default_hours=config.default_hours,
         )
 
     def compute_fingerprint(self) -> dict[str, Any]:
@@ -131,9 +124,6 @@ class InsightsBundleService:
         if on_progress:
             on_progress("playbook")
         playbook = self._playbook_svc.compute()
-        if on_progress:
-            on_progress("coach")
-        coach = self._coach_svc.compute()
 
         # Run discovery engine
         discoveries: list[Discovery] = []
@@ -155,7 +145,6 @@ class InsightsBundleService:
 
         return InsightsBundle(
             playbook=playbook,
-            coach=coach,
             positives=dict(self._config.positives),
             points=dict(self._config.points),
             discoveries=discoveries,
@@ -183,7 +172,6 @@ class InsightsBundleService:
                 "fingerprint": self.compute_fingerprint(),
                 "generated_at": bundle.generated_at,
                 "playbook": _playbook_to_dict(bundle.playbook),
-                "coach": _coach_to_dict(bundle.coach),
                 "positives": dict(bundle.positives),
                 "points": {k: v for k, v in bundle.points.items()},
                 "discoveries": [asdict(d) for d in bundle.discoveries],
@@ -205,17 +193,12 @@ def _playbook_to_dict(pb: Playbook) -> dict[str, Any]:
         "steps": [asdict(s) for s in pb.steps],
         "done_today": pb.done_today,
         "blocked_today": pb.blocked_today,
+        "low_control": pb.low_control,
         "gap_note": pb.gap_note,
         "lookback": pb.lookback,
         "focus_line": pb.focus_line,
         "context": pb.context,
         "generated_at": pb.generated_at,
-    }
-
-
-def _coach_to_dict(coach: CoachReport) -> dict[str, Any]:
-    return {
-        "findings": [asdict(f) for f in coach.findings],
     }
 
 
@@ -240,23 +223,40 @@ def _fingerprints_match(
 def _bundle_from_dict(data: dict[str, Any]) -> InsightsBundle:
     pb_raw = data.get("playbook", {})
     steps = [PlaybookStep(**s) for s in pb_raw.get("steps", [])]
+    
+    # Handle blocked_today format migration (old: list[str], new: list[tuple[str,str]])
+    blocked_raw = pb_raw.get("blocked_today", [])
+    blocked_today = []
+    for item in blocked_raw:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            blocked_today.append(tuple(item))
+        elif isinstance(item, str):
+            blocked_today.append((item, "blocked"))
+    
+    # Handle low_control format migration
+    low_control_raw = pb_raw.get("low_control", [])
+    low_control = []
+    for item in low_control_raw:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            low_control.append(tuple(item))
+        elif isinstance(item, str):
+            low_control.append((item, "low control"))
+    
     playbook = Playbook(
         goal=pb_raw.get("goal", ""),
         headline=pb_raw.get("headline", ""),
         steps=steps,
         done_today=pb_raw.get("done_today", []),
+        blocked_today=blocked_today,
+        low_control=low_control,
         gap_note=pb_raw.get("gap_note", ""),
         lookback=pb_raw.get("lookback", []),
         focus_line=pb_raw.get("focus_line", ""),
         context=pb_raw.get("context", {}),
         generated_at=pb_raw.get("generated_at", ""),
     )
-    findings = [
-        CoachFinding(**f) for f in data.get("coach", {}).get("findings", [])
-    ]
     return InsightsBundle(
         playbook=playbook,
-        coach=CoachReport(findings=findings),
         positives=data.get("positives", {}),
         points=data.get("points", {}),
         discoveries=[Discovery(**d) for d in data.get("discoveries", [])],
