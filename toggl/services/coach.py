@@ -20,8 +20,8 @@ from toggl.cache import DataCache
 from toggl.category import CategoryRegistry
 from toggl.services.metrics import MetricsService
 
-MIN_SAMPLES = 10          # absolute floor for any finding
-MIN_LIFT_PTS = 5.0        # minimum avg net difference to be worth reporting
+MIN_SAMPLES = 7           # absolute floor for any finding (10 preferred, 7 floor)
+MIN_LIFT_PTS = 3.0        # minimum avg net difference to be worth reporting
 TOP_N = 20                 # how many best/worst days to analyze for prevalence
 
 
@@ -220,12 +220,13 @@ class CoachService:
                 best_total = total_occurrences
                 best_good_pct = good_pct
 
-        if not best_name or best_ratio < 0.30:
+        if not best_name or best_ratio < 0.20:
             return None
 
+        neg_pct = round(best_ratio * 100)
         text = (
             f"[bold]#2 BIGGEST NEGATIVE DRIVER[/]\n"
-            f"  {best_name} — present on {best_ratio:.0%} of negative days "
+            f"  {best_name} — appears on {neg_pct}% of negative days "
             f"vs {best_good_pct}% of positive days\n"
             f"  {best_total} occurrences total. "
             f"Breaking this pattern gives you the largest expected turnaround."
@@ -244,19 +245,17 @@ class CoachService:
     def _largest_gap(
         self, daily: list[dict[str, Any]]
     ) -> CoachFinding | None:
-        """Activity whose current frequency has dropped most vs its best period."""
+        """Top 3 activities whose frequency has dropped most vs their best period."""
 
         today = date.today()
         current_month = today.strftime("%Y-%m")
+        known_dates = {d["date"] for d in daily}
 
-        largest_gap = -999.0
-        best_info: tuple | None = None
+        gaps: list[tuple[float, str, str, float, float, int]] = []
 
         for name in self._positives:
-            # Build per-month counts from all-time positive data
-            monthly: dict[str, int] = {}       # YYYY-MM → days logged
+            monthly: dict[str, int] = {}           # YYYY-MM → days logged
             month_total_days: dict[str, int] = {}  # YYYY-MM → total days with data
-            known_dates = {d["date"] for d in daily}
 
             for d_str, entries in self._cache.positives_raw.items():
                 if d_str not in known_dates:
@@ -287,29 +286,29 @@ class CoachService:
             curr_total = month_total_days.get(current_month, curr_count)
             curr_freq = curr_count / max(curr_total, 1)
 
-            # Must have a meaningful current-month sample
-            if curr_total < 4:
-                continue
-
             gap = best_freq - curr_freq
-            if gap > largest_gap and gap > 0.10:
-                largest_gap = gap
-                best_info = (name, best_month, best_freq, curr_freq, total_points)
+            if gap > 0.08:
+                gaps.append((gap, name, best_month, best_freq, curr_freq, total_points))
 
-        if best_info is None:
+        gaps.sort(key=lambda x: -x[0])
+        if not gaps:
             return None
-        name, best_month, best_freq, curr_freq, n_total = best_info
 
-        text = (
-            f"[bold]#3 LARGEST GAP[/]\n"
-            f"  {name} — best period {best_month} at {best_freq:.0%} "
-            f"→ current month {curr_freq:.0%}\n"
-            f"  {n_total} data points over {len(monthly)} months. "
-            f"This is the biggest drop-off worth recovering."
-        )
+        # Format top 3 gaps as one card
+        top = gaps[:3]
+        lines = ["[bold]#3 LARGEST GAPS vs BEST MONTH[/]"]
+        for gap, name, best_month, best_freq, curr_freq, n_total in top:
+            pct_drop = round(gap * 100)
+            lines.append(
+                f"  {name}: best {best_freq:.0%} → now {curr_freq:.0%} "
+                f"({pct_drop}pt drop)"
+            )
+
+        avg_gap = sum(g for g, *_ in top) / len(top)
+        text = "\n".join(lines)
         return CoachFinding(
             analyzer="largest_gap",
             text=text,
-            confidence=min(0.90, 0.40 + gap),
-            evidence={"name": name, "best_month": best_month, "gap": gap},
+            confidence=min(0.90, 0.40 + avg_gap),
+            evidence={"gaps": [(name, round(gap, 2)) for gap, name, _, _, _, _ in top]},
         )

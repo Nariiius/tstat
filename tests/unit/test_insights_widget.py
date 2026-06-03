@@ -44,14 +44,14 @@ def test_insights_tab_markup_parses(tmp_data_dir, sample_daily_csv, sample_confi
     bundle = _bundle_svc(tmp_data_dir, sample_daily_csv, sample_config).compute()
     markup = format_insights_tab(bundle)
     Text.from_markup(markup)
-    assert "expected gain" in markup.lower()
+    assert "completed" in markup.lower() and "pace" in markup.lower()
 
 
 def test_overview_playbook_markup_parses(tmp_data_dir, sample_daily_csv, sample_config):
     bundle = _bundle_svc(tmp_data_dir, sample_daily_csv, sample_config).compute()
     markup = format_overview_playbook(bundle)
     Text.from_markup(markup)
-    assert "expected gain" in markup.lower()
+    assert "completed" in markup.lower() and "pace" in markup.lower()
 
 
 def test_playbook_scroll_pane_scrolls_when_short():

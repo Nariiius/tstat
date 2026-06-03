@@ -36,6 +36,7 @@ class Playbook:
     steps: list[PlaybookStep] = field(default_factory=list)
     expected_gain: float = 0.0          # sum of top-3 step points
     done_today: list[str] = field(default_factory=list)
+    blocked_today: list[str] = field(default_factory=list)
     gap_note: str = ""
     lookback: list[str] = field(default_factory=list)
     focus_line: str = ""
@@ -64,6 +65,7 @@ class PlaybookService:
         positives: dict[str, int | float],
         activity_rules: ActivityRules,
         get_daily_target: Callable[[], float],
+        recovery_ignore: list[str] | None = None,
     ) -> None:
         self._metrics = metrics
         self._cache = cache
@@ -71,6 +73,7 @@ class PlaybookService:
         self._positives = positives
         self._rules = activity_rules
         self._get_daily_target = get_daily_target
+        self._recovery_ignore = frozenset(recovery_ignore or [])
 
     # ────────────────────────────────────────
     # Main entry point
@@ -80,6 +83,8 @@ class PlaybookService:
         today = date.today()
         today_str = today.strftime("%Y-%m-%d")
         generated_at = datetime.now().isoformat(timespec="seconds")
+
+        all_once_per_day = {n for n in self._positives if self._rules.is_once_per_day(n)}
 
         if not self._has_any_data():
             return Playbook(
@@ -95,6 +100,10 @@ class PlaybookService:
                     )
                 ],
                 expected_gain=0.0,
+                blocked_today=sorted(
+                    n for n in all_once_per_day
+                    if self._rules.should_suggest(n) and n not in self._recovery_ignore
+                ) if all_once_per_day else [],
                 generated_at=generated_at,
             )
 
@@ -109,6 +118,10 @@ class PlaybookService:
         once_per_day_logged = {
             n for n in logged_today if self._rules.is_once_per_day(n)
         }
+        blocked_today = sorted(
+            n for n in (all_once_per_day - once_per_day_logged)
+            if self._rules.should_suggest(n) and n not in self._recovery_ignore
+        )
 
         week = get_current_week()
         dashboard = self._metrics.get_week_dashboard_rows(week)
@@ -127,13 +140,21 @@ class PlaybookService:
             steps, gap_note = self._build_steps_for_gap(
                 gap, today_str, logged_today, recent
             )
+            expected_gain = round(sum(s.points for s in steps), 1)
+            if expected_gain > 0:
+                wd = context.get("week_delta", 0)
+                dl = max(context.get("days_left", 1), 1)
+                cp = wd / dl
+                np = (wd + expected_gain) / dl
+                gap_note = f"If completed: week pace {cp:+.1f}/d → {np:+.1f}/d"
             headline = f"Need {self._fmt_pts(gap)} today (at {self._fmt_pts(today_net)})"
             return Playbook(
                 goal="hit_today_target",
                 headline=headline,
                 steps=steps,
-                expected_gain=round(sum(s.points for s in steps), 1),
+                expected_gain=expected_gain,
                 done_today=sorted(once_per_day_logged),
+                blocked_today=blocked_today,
                 gap_note=gap_note,
                 lookback=lookback,
                 focus_line=focus_line,
@@ -148,6 +169,12 @@ class PlaybookService:
             steps, gap_note = self._build_week_recovery_steps(
                 recovery, per_day, today_str, logged_today, recent
             )
+            expected_gain = round(sum(s.points for s in steps), 1)
+            if expected_gain > 0:
+                dl = max(days_left, 1)
+                cp = week_delta / dl
+                np = (week_delta + expected_gain) / dl
+                gap_note = f"If completed: week pace {cp:+.1f}/d → {np:+.1f}/d"
             headline = (
                 f"Week {self._fmt_pts(summary.get('actual', 0))} "
                 f"({self._fmt_pts(week_delta)} vs pace) — ~{per_day}/day for {days_left}d"
@@ -157,8 +184,9 @@ class PlaybookService:
                 goal="fix_week",
                 headline=headline,
                 steps=steps,
-                expected_gain=round(sum(s.points for s in steps), 1),
+                expected_gain=expected_gain,
                 done_today=sorted(once_per_day_logged),
+                blocked_today=blocked_today,
                 gap_note=gap_note,
                 lookback=lookback,
                 focus_line=focus_line,
@@ -175,6 +203,7 @@ class PlaybookService:
             steps=steps,
             expected_gain=round(sum(s.points for s in steps), 1),
             done_today=sorted(once_per_day_logged),
+            blocked_today=blocked_today,
             lookback=lookback,
             focus_line=focus_line,
             context=context,
@@ -376,6 +405,7 @@ class PlaybookService:
                 if not rate:
                     continue
                 hours = max(per_day / rate, 0.25)
+                hours = min(hours, 2.0)  # realistic session cap
                 h = int(hours)
                 m = int((hours - h) * 60)
                 amount = f"{h}h" if h >= 1 else (f"{m}m" if m else "30m")
@@ -473,9 +503,16 @@ class PlaybookService:
                 continue
             if name in logged_today and self._rules.is_once_per_day(name):
                 continue
-            reason = self._history_reason_for_label(name, recent) or (
-                f"Quick {float(pts):.1f} pts — fast way to close the gap"
-            )
+            reason = self._history_reason_for_label(name, recent)
+            if not reason:
+                # Check for streak reminders
+                remind = self._rules.get_remind_after_gap_days(name)
+                if remind is not None:
+                    gap_days = self._days_since_last(name)
+                    if gap_days >= remind:
+                        reason = f"{gap_days}d since last — don't let this habit drift"
+                if not reason:
+                    reason = f"Quick {float(pts):.1f} pts — fast way to close the gap"
             entry: dict[str, Any] = {
                 "action": "log",
                 "label": name,

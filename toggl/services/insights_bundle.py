@@ -23,6 +23,7 @@ from toggl.const import (
     PROJECTS_FILE,
 )
 from toggl.services.coach import CoachReport, CoachService, CoachFinding
+from toggl.services.discovery import Discovery, DiscoveryEngine
 from toggl.services.metrics import MetricsService
 from toggl.services.playbook import Playbook, PlaybookService, PlaybookStep
 
@@ -33,6 +34,11 @@ logger = logging.getLogger("TStat")
 class InsightsBundle:
     playbook: Playbook = field(default_factory=lambda: Playbook(goal="", headline=""))
     coach: CoachReport = field(default_factory=CoachReport)
+    positives: dict[str, int | float] = field(default_factory=dict)
+    points: dict[str, int | float] = field(default_factory=dict)
+    discoveries: list[Discovery] = field(default_factory=list)
+    recovery_ignore: list[str] = field(default_factory=list)
+    avoid_names: frozenset[str] = field(default_factory=frozenset)
     generated_at: str = ""
 
 
@@ -88,6 +94,7 @@ class InsightsBundleService:
             dict(config.positives),
             config.activity_rules,
             get_daily_target,
+            recovery_ignore=config.recovery_ignore,
         )
         self._coach_svc = CoachService(
             metrics,
@@ -127,9 +134,33 @@ class InsightsBundleService:
         if on_progress:
             on_progress("coach")
         coach = self._coach_svc.compute()
+
+        # Run discovery engine
+        discoveries: list[Discovery] = []
+        try:
+            engine = DiscoveryEngine(
+                cache=self._cache,
+                metrics=self._metrics,
+                config=self._config,
+            )
+            discoveries = engine.compute()
+        except Exception:
+            logger.exception("DiscoveryEngine failed")
+
+        # Precompute avoid names for rendering filters
+        avoid_names = frozenset(
+            n for n in list(self._config.positives) + list(self._config.points)
+            if not self._config.activity_rules.should_suggest(n)
+        )
+
         return InsightsBundle(
             playbook=playbook,
             coach=coach,
+            positives=dict(self._config.positives),
+            points=dict(self._config.points),
+            discoveries=discoveries,
+            recovery_ignore=list(self._config.recovery_ignore),
+            avoid_names=avoid_names,
             generated_at=datetime.now().isoformat(timespec="seconds"),
         )
 
@@ -153,6 +184,11 @@ class InsightsBundleService:
                 "generated_at": bundle.generated_at,
                 "playbook": _playbook_to_dict(bundle.playbook),
                 "coach": _coach_to_dict(bundle.coach),
+                "positives": dict(bundle.positives),
+                "points": {k: v for k, v in bundle.points.items()},
+                "discoveries": [asdict(d) for d in bundle.discoveries],
+                "recovery_ignore": bundle.recovery_ignore,
+                "avoid_names": list(bundle.avoid_names),
             }
             tmp = self._cache_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -168,6 +204,7 @@ def _playbook_to_dict(pb: Playbook) -> dict[str, Any]:
         "headline": pb.headline,
         "steps": [asdict(s) for s in pb.steps],
         "done_today": pb.done_today,
+        "blocked_today": pb.blocked_today,
         "gap_note": pb.gap_note,
         "lookback": pb.lookback,
         "focus_line": pb.focus_line,
@@ -220,5 +257,10 @@ def _bundle_from_dict(data: dict[str, Any]) -> InsightsBundle:
     return InsightsBundle(
         playbook=playbook,
         coach=CoachReport(findings=findings),
+        positives=data.get("positives", {}),
+        points=data.get("points", {}),
+        discoveries=[Discovery(**d) for d in data.get("discoveries", [])],
+        recovery_ignore=data.get("recovery_ignore", []),
+        avoid_names=frozenset(data.get("avoid_names", [])),
         generated_at=data.get("generated_at", ""),
     )

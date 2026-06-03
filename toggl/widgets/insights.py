@@ -12,6 +12,7 @@ from textual.widgets import Static
 
 from toggl.services.insights_bundle import InsightsBundle
 from toggl.services.playbook import Playbook, PlaybookStep
+from toggl.services.discovery import Discovery
 
 # ──────────────────────────────────────────────
 # Progress, status, and visual helpers
@@ -177,17 +178,74 @@ def _format_playbook_block(
         lines.append("")
 
     # ── Expected gain ──
-    if pb.expected_gain > 0:
-        lines.append(f"  [{CLR_DIM}]Expected gain: [bold]{_fmt_pts(pb.expected_gain)}[/] pts[/]")
+    if pb.gap_note:
+        lines.append(f"  [{CLR_DIM}]{pb.gap_note}[/]")
         lines.append("")
 
     # ── Done today ──
     if pb.done_today:
         done = ", ".join(pb.done_today)
         lines.append(f"  [{CLR_DIM}]✓ Done today:[/] {done}")
+
+    # ── Pending today ──
+    if pb.blocked_today:
+        pending = ", ".join(pb.blocked_today)
+        lines.append(f"  [{CLR_DIM}]◷ Pending:[/] {pending}")
+
+    if pb.done_today or pb.blocked_today:
         lines.append("")
 
     return "\n".join(lines) if lines else "[dim]No steps right now.[/]\n"
+
+
+# ──────────────────────────────────────────────
+# Scoreboard formatter
+# ──────────────────────────────────────────────
+
+def _format_scoreboard(
+    positives: dict[str, int | float] | None = None,
+    points: dict[str, int | float] | None = None,
+    *,
+    recovery_ignore: frozenset[str] | None = None,
+    is_avoid: frozenset[str] | None = None,
+) -> str:
+    """Highest-value actions sorted by points — compact reference section."""
+    if not positives:
+        return ""
+
+    skip = recovery_ignore or frozenset()
+    avoid = is_avoid or frozenset()
+
+    items: list[tuple[str, float, str]] = []
+    # Logged positives (fixed points per log)
+    seen = set()
+    for name, pts in sorted(positives.items(), key=lambda x: -x[1]):
+        if name in skip or name in avoid:
+            continue
+        seen.add(name)
+        items.append((name, float(pts), "pts"))
+    # Tracking projects with positive rates (not already listed)
+    if points:
+        for name, pts in sorted(points.items(), key=lambda x: -x[1]):
+            if name in seen or pts <= 0:
+                continue
+            if name in skip or name in avoid:
+                continue
+            items.append((name, float(pts), "pts/hr"))
+    items.sort(key=lambda x: -x[1])
+
+    if not items:
+        return ""
+
+    lines: list[str] = []
+    lines.append(f"[bold {CLR_ACCENT}]HIGHEST-VALUE ACTIONS[/]")
+    for name, pts, unit in items[:8]:
+        if unit == "pts":
+            lines.append(f"  {name}  [{CLR_GREEN}]+{pts:.0f}[/]")
+        else:
+            lines.append(f"  {name}  [{CLR_GREEN}]+{pts:.1f}/hr[/]")
+
+    return "\n".join(lines)
 
 
 # ──────────────────────────────────────────────
@@ -263,12 +321,12 @@ def format_insights_tab(
     is_loading: bool = False,
     progress_stage: str = "",
 ) -> str:
-    """Full detailed insights for the Insights tab — no caps, everything shown.
+    """Full detailed insights for the Insights tab.
 
-    Narrative flow:
-      1. Verdict — where you stand right now
-      2. Playbook — all steps, focus, lookback, gap math
-      3. Coach — all behavioural findings with confidence
+    Layout: Verdict → Playbook → Scoreboard → Coach
+    Playbook shows 3 highest-leverage actions with pace improvement.
+    Scoreboard shows highest-value actions for reference.
+    Coach shows 3 statistically-gated behavioural findings.
     """
     if is_loading:
         return _format_loading("Computing insights...", progress_stage)
@@ -287,13 +345,79 @@ def format_insights_tab(
     parts.append("\n")
     parts.append(_format_playbook_block(pb, include_math=True, compact=False, max_steps=3))
 
-    # ── 3. Coach ──
+    # ── 3. Scoreboard ──
+    scoreboard = _format_scoreboard(
+        positives=bundle.positives if bundle.positives else None,
+        points=bundle.points if bundle.points else None,
+        recovery_ignore=frozenset(bundle.recovery_ignore),
+        is_avoid=bundle.avoid_names,
+    )
+    if scoreboard:
+        parts.append(_section_sep())
+        parts.append("\n")
+        parts.append(scoreboard)
+        parts.append("\n")
+
+    # ── 4. Coach ──
     if bundle.coach.findings:
         parts.append(_section_sep())
         parts.append("\n")
         parts.append(_format_coach_section(pb, bundle, max_findings=None))
 
+    # ── 5. Discoveries ──
+    if bundle.discoveries:
+        parts.append(_section_sep())
+        parts.append("\n\n")
+        parts.append(format_discoveries(bundle.discoveries))
+        parts.append("\n")
+
     return "".join(parts).strip()
+
+
+def format_discoveries(discoveries: list[Discovery]) -> str:
+    """Render discoveries as Rich markup."""
+    if not discoveries:
+        return ""
+
+    CLR_HEADER = "#63f3ff"
+    CLR_RED    = "#ff5f5f"
+    CLR_GREEN  = "#37d994"
+    CLR_AMBER  = "#ff9e3a"
+    CLR_DIM    = "#8d98a7"
+    CLR_MUTED  = "#4a5565"
+
+    KIND_META = {
+        "drift":    ("\u2193 DRIFT",      CLR_RED),
+        "growth":   ("\u2191 GROWTH",     CLR_GREEN),
+        "best_gap": ("\u25c8 BEST PERIOD", CLR_AMBER),
+        "failure":  ("\u26a0 PATTERN",    CLR_RED),
+    }
+
+    lines = [f"[bold {CLR_HEADER}]DISCOVERIES[/]\n"]
+
+    for i, d in enumerate(discoveries, 1):
+        label, color = KIND_META.get(d.kind, ("\u25c9", CLR_DIM))
+
+        filled = int(d.confidence * 10)
+        bar    = "\u2501" * filled + "\u2500" * (10 - filled)
+        conf_color = (
+            CLR_GREEN if d.confidence >= 0.85
+            else CLR_AMBER if d.confidence >= 0.75
+            else CLR_DIM
+        )
+
+        lines.append(
+            f"[bold {color}]{label}[/]  [{conf_color}]{bar}[/] {d.confidence:.0%}"
+        )
+        lines.append(f"[bold white]{d.title.upper()}[/]")
+        lines.append(f"[{CLR_DIM}]{d.summary}[/]")
+        lines.append(f"[{CLR_MUTED}]{d.evidence}[/]")
+
+        if i < len(discoveries):
+            sep = "\u2500" * 36
+            lines.append(f"\n[{CLR_MUTED}]{sep}[/]\n")
+
+    return "\n".join(lines)
 
 
 def format_command_playbook_line(bundle: InsightsBundle | None) -> str | None:
