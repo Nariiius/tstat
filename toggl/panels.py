@@ -27,6 +27,12 @@ from toggl.formatters import (
     build_category_rows,
 )
 from toggl.services.metrics import MetricsService
+from toggl.services.insights_bundle import InsightsBundle
+from toggl.widgets.insights import (
+    DetailedInsightsWidget,
+    PlaybookScrollPane,
+    format_overview_playbook,
+)
 
 logger = logging.getLogger("TStat")
 
@@ -59,6 +65,32 @@ def get_sync_status_data() -> dict[str, Any]:
         "quota_limit": API_RUN_STATS["limit"],
         "quota_resets_in": API_RUN_STATS["resets_in"],
     }
+
+
+def compact_sync_status() -> str:
+    """One-line Rich-markup sync/quota summary for the Insights tab footer."""
+    status = get_sync_status_data()
+    parts: list[str] = []
+
+    parts.append(f"[#8d98a7]sync[/] {status['last_updated']}")
+    parts.append(f"[#8d98a7]{status['synced_weeks']}w/{status['synced_days']}d cached[/]")
+
+    cache_age = status["projects_cache_age_days"]
+    if cache_age is not None:
+        age_str = f"{cache_age:.0f}d" if cache_age < 90 else "stale"
+        parts.append(f"[#8d98a7]projects {age_str}[/]")
+    else:
+        parts.append("[#ff5f5f]no projects cache[/]")
+
+    remaining = status["quota_remaining"]
+    limit = status["quota_limit"]
+    if remaining is not None and limit is not None:
+        color = "#ff5f5f" if remaining < 5 else "#8d98a7"
+        parts.append(f"[{color}]{remaining}/{limit} quota[/]")
+    else:
+        parts.append("[#8d98a7]quota unknown[/]")
+
+    return "  ".join(parts)
 
 
 class SyncPanel(Container):
@@ -236,14 +268,6 @@ class OverviewPanel(Container):
     #overview-insights {
         height: 1fr;
         min-height: 5;
-        border: round #3d4f63;
-        padding: 0 1;
-        background: #0b1016;
-        text-align: center;
-        content-align: center middle;
-    }
-    #overview-insights:focus {
-        border: round #63f3ff;
     }
     #overview-categories-table {
         height: 1fr;
@@ -270,7 +294,7 @@ class OverviewPanel(Container):
                 yield AutoWidthDataTable(
                     zebra_stripes=False, cursor_type="row", id="overview-categories-table"
                 )
-                yield Static(id="overview-insights")
+                yield PlaybookScrollPane(id="overview-insights")
             with Vertical(id="overview-right"):
                 with Vertical(id="overview-recovery-container"):
                     yield AutoWidthDataTable(
@@ -305,7 +329,6 @@ class OverviewPanel(Container):
             col.text_align = "center"
         log_table.styles.border = ("none", None)
 
-        self.query_one("#overview-insights", Static).can_focus = True
 
         for table_id in [
             "#overview-recovery-table", "#overview-categories-table",
@@ -318,13 +341,26 @@ class OverviewPanel(Container):
             except Exception:
                 pass
 
-    def refresh_data(self, cache: DataCache, active_week: str, metrics: MetricsService) -> None:
+    def refresh_data(
+        self,
+        cache: DataCache,
+        active_week: str,
+        metrics: MetricsService,
+        insights_bundle: InsightsBundle | None = None,
+        *,
+        insights_loading: bool = False,
+        progress_stage: str = "",
+    ) -> None:
         """Reload all overview panels from the given DataCache."""
         try:
             self._refresh_categories(cache, active_week, metrics)
             self._refresh_recovery(metrics)
             self._refresh_recent_log(cache)
-            self._refresh_insights(cache, active_week, metrics)
+            self._refresh_insights(
+                insights_bundle,
+                insights_loading=insights_loading,
+                progress_stage=progress_stage,
+            )
         except Exception:
             logger.exception("OverviewPanel.refresh_data failed")
 
@@ -378,20 +414,27 @@ class OverviewPanel(Container):
         log_table.move_cursor(row=0)
         self.query_one("#overview-recent-log-wrapper").border_title = "[b][#63f3ff]Recent Activity[/][/]"
 
-    def _refresh_insights(self, cache: DataCache, active_week: str, metrics: MetricsService) -> None:
-        insights = self.query_one("#overview-insights", Static)
-        week_report = metrics.get_report_sections(active_week, "WEEK")
-        net = week_report["total_points"]
-        insights.update(
-            "[#8d98a7]Coming soon™[/]\n\n"
-            "[dim]Dynamic insights, trend analysis,\n"
-            "and other fancy pants features\n"
-            "will appear here. Eventually.\n\n"
-            "We heard you like data so we\n"
-            "put data in your data.[/]"
+    def _refresh_insights(
+        self,
+        insights_bundle: InsightsBundle | None,
+        *,
+        insights_loading: bool = False,
+        progress_stage: str = "",
+    ) -> None:
+        insights = self.query_one("#overview-insights", PlaybookScrollPane)
+        subtitle = ""
+        if insights_bundle and insights_bundle.playbook.context.get("today_net") is not None:
+            net = insights_bundle.playbook.context["today_net"]
+            subtitle = f"[#8d98a7]Today {format_signed_rich(net)}[/]"
+        insights.set_markup(
+            format_overview_playbook(
+                insights_bundle,
+                is_loading=insights_loading,
+                progress_stage=progress_stage,
+            ),
+            border_title="[b][#63f3ff]Playbook[/][/]",
+            border_subtitle=subtitle,
         )
-        insights.border_title = "[b][#63f3ff]Insights[/][/]"
-        insights.border_subtitle = f"[#8d98a7]Week net {format_signed_rich(net)} pts[/]"
 
     # ── Section-skipping helpers ──
 
@@ -431,3 +474,52 @@ class OverviewPanel(Container):
     @on(Button.Pressed, "#btn-manage")
     def _on_manage(self) -> None:
         self.post_message(ManageRequested())
+
+
+class InsightsPanel(Container):
+    """Insights tab — playbook, coach, and compact sync/quota footer."""
+
+    DEFAULT_CSS = """
+    InsightsPanel {
+        height: 1fr;
+    }
+    #insights-panel-inner {
+        height: 1fr;
+        min-height: 0;
+    }
+    #insights-detail-widget {
+        height: 1fr;
+        min-height: 0;
+    }
+    #insights-sync-line {
+        height: auto;
+        min-height: 1;
+        padding: 0 1;
+        text-align: center;
+        content-align: center middle;
+        border: none;
+        background: #0b1016;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="insights-panel-inner"):
+            yield DetailedInsightsWidget(id="insights-detail-widget")
+            yield Static(id="insights-sync-line")
+
+    def refresh_data(
+        self,
+        insights_bundle: InsightsBundle | None = None,
+        *,
+        is_loading: bool = False,
+        progress_stage: str = "",
+        sync_summary: str | None = None,
+    ) -> None:
+        widget = self.query_one(DetailedInsightsWidget)
+        widget.set_bundle(
+            insights_bundle,
+            is_loading=is_loading,
+            progress_stage=progress_stage,
+        )
+        sync_line = self.query_one("#insights-sync-line", Static)
+        sync_line.update(sync_summary or compact_sync_status())

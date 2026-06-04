@@ -38,6 +38,7 @@ from toggl.cache import (
     sync_current_week_light,
 )
 from toggl.config import (
+    Config,
     load_runtime_settings,
     POINTS,
     NEGATIVES,
@@ -46,8 +47,17 @@ from toggl.config import (
     get_daily_target,
 )
 from toggl.services.metrics import MetricsService
+from toggl.services.insights_bundle import InsightsBundle, InsightsBundleService
 from toggl.command import CommandTab
-from toggl.panels import LogNegRequested, LogPosRequested, ManageRequested, OverviewPanel, SyncPanel
+from toggl.panels import (
+    InsightsPanel,
+    LogNegRequested,
+    LogPosRequested,
+    ManageRequested,
+    OverviewPanel,
+)
+from toggl.widgets.insights import format_command_playbook_line
+from toggl.widgets.tables import CategoryTable
 from toggl.neg import log_activity_direct
 
 from toggl.screens.dialogs import (
@@ -174,11 +184,13 @@ class TogglTUI(App):
     VIEWS = [
         "Overview",
         "Command",
-        "Sync/Quota",
+        "Insights",
     ]
 
     # Reactive state: triggers watch_data_cache on every assignment
     data_cache: reactive[DataCache | None] = reactive[DataCache | None](None)
+    insights_bundle: reactive[InsightsBundle | None] = reactive[InsightsBundle | None](None)
+    _progress_stage: reactive[str] = reactive("")
 
     def __init__(self) -> None:
         super().__init__()
@@ -189,6 +201,8 @@ class TogglTUI(App):
         self._active_week = get_current_week()
         self._sync_in_progress = False
         self._metrics: MetricsService | None = None
+        self._insights_service: InsightsBundleService | None = None
+        self._insights_generation_id = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -206,7 +220,7 @@ class TogglTUI(App):
                     yield OverviewPanel(id="overview-view", classes="view")
                     with Container(id="command-view", classes="view"):
                         yield CommandTab()
-                    yield SyncPanel(id="sync-view", classes="view")
+                    yield InsightsPanel(id="insights-view", classes="view")
                 with Vertical(id="spark-rail"):
                     pass
         yield ScrollableFooter(show_command_palette=False)
@@ -240,10 +254,31 @@ class TogglTUI(App):
             get_daily_target,
         )
 
+    def _build_insights_service(
+        self, cache: DataCache, metrics: MetricsService
+    ) -> InsightsBundleService:
+        return InsightsBundleService(metrics, cache, Config.load(), get_daily_target)
+
     def watch_data_cache(self, cache: DataCache | None) -> None:
         """Reactively refresh all views when data_cache changes."""
         if cache is not None:
             self.refresh_all_views()
+
+    def watch_insights_bundle(self, bundle: InsightsBundle | None) -> None:
+        if bundle is not None:
+            try:
+                self.refresh_overview_view()
+                self.refresh_command_view()
+                self.refresh_insights_view()
+            except Exception:
+                pass
+
+    def watch__progress_stage(self, stage: str) -> None:
+        """Refresh Insights tab whenever compute progress stage changes."""
+        try:
+            self.refresh_insights_view()
+        except Exception:
+            pass
 
     @work(thread=False, exclusive=True)
     async def load_data(self) -> None:
@@ -253,7 +288,11 @@ class TogglTUI(App):
         cache = await asyncio.to_thread(DataCache.load)
         self._metrics = self._build_metrics(cache)
         self.data_cache = cache
-        # watch_data_cache handles refresh_all_views automatically
+        self._insights_service = self._build_insights_service(cache, self._metrics)
+        cached = self._insights_service.try_load_cache()
+        if cached:
+            self.insights_bundle = cached
+        self._compute_insights_in_background()
 
     def check_auto_sync(self) -> None:
         """Periodic auto-sync check running in background."""
@@ -293,6 +332,9 @@ class TogglTUI(App):
         cache = get_cache()
         self._metrics = self._build_metrics(cache)
         self.data_cache = cache
+        if cache:
+            self._insights_service = self._build_insights_service(cache, self._metrics)
+            self._compute_insights_in_background()
         if ok:
             self.notify("Auto-refreshed stale data")
         else:
@@ -315,8 +357,41 @@ class TogglTUI(App):
     _VIEW_REFRESH_MAP = {
         0: "refresh_overview_view",
         1: "refresh_command_view",
-        2: "refresh_sync_view",
+        2: "refresh_insights_view",
     }
+
+    def _compute_insights_in_background(self) -> None:
+        if self._insights_service is None:
+            return
+        gen_id = self._insights_generation_id + 1
+        self._insights_generation_id = gen_id
+        self._run_insight_compute(gen_id)
+
+    @work(thread=True)
+    def _run_insight_compute(self, gen_id: int) -> None:
+        try:
+            svc = self._insights_service
+            if svc is None:
+                return
+            bundle = svc.compute(
+                on_progress=lambda stage: self.call_from_thread(
+                    self._set_progress_stage, stage
+                )
+            )
+            self.call_from_thread(self._on_insights_computed, bundle, gen_id)
+        except Exception:
+            logger.exception("Insights bundle computation failed")
+
+    def _set_progress_stage(self, stage: str) -> None:
+        self._progress_stage = stage
+
+    def _on_insights_computed(self, bundle: InsightsBundle, gen_id: int) -> None:
+        if gen_id < self._insights_generation_id:
+            return
+        self._insights_generation_id = gen_id
+        if self._insights_service:
+            self._insights_service.save_cache(bundle)
+        self.insights_bundle = bundle
 
     def _refresh_view_by_index(self, index: int) -> None:
         method_name = self._VIEW_REFRESH_MAP.get(index)
@@ -348,7 +423,7 @@ class TogglTUI(App):
         view_ids = [
             "#overview-view",
             "#command-view",
-            "#sync-view",
+            "#insights-view",
         ]
         for index, view_id in enumerate(view_ids):
             widget = self.query_one(view_id, Container)
@@ -358,7 +433,7 @@ class TogglTUI(App):
         focus_targets = {
             0: "#overview-categories-table",
             1: "#cmd-graph",
-            2: "#sync-table",
+            2: "#insights-detail-widget",
         }
         selector = focus_targets.get(self.active_view_index)
         if selector:
@@ -371,7 +446,18 @@ class TogglTUI(App):
         """Refresh the Overview dashboard panel."""
         try:
             panel = self.query_one(OverviewPanel)
-            panel.refresh_data(self.data_cache, self._active_week, self._metrics)
+            bundle = self.insights_bundle
+            loading = self._insights_generation_id > 0 and (
+                bundle is None or not bundle.playbook.headline
+            )
+            panel.refresh_data(
+                self.data_cache,
+                self._active_week,
+                self._metrics,
+                bundle,
+                insights_loading=loading and bundle is None,
+                progress_stage=self._progress_stage if loading else "",
+            )
         except Exception:
             pass  # Panel may not be mounted yet
 
@@ -382,16 +468,34 @@ class TogglTUI(App):
             cmd_tab.data_cache = self.data_cache
             cmd_tab.metrics = self._metrics
             cmd_tab.refresh_all()
+            self._refresh_command_playbook_line(cmd_tab)
         except Exception:
             pass  # Container may not be mounted yet
 
-    def refresh_sync_view(self) -> None:
-        """Refresh the Sync/Quota panel."""
+    def _refresh_command_playbook_line(self, cmd_tab: CommandTab) -> None:
+        if cmd_tab.period.mode != "month":
+            return
+        line = format_command_playbook_line(self.insights_bundle)
+        if not line:
+            return
         try:
-            panel = self.query_one(SyncPanel)
-            panel.refresh_data()
+            cat_table = cmd_tab.query_one(CategoryTable)
+            cat_table.border_subtitle = f"[#8d98a7]{line}[/]"
         except Exception:
-            pass  # Panel may not be mounted yet
+            pass
+
+    def refresh_insights_view(self) -> None:
+        try:
+            panel = self.query_one(InsightsPanel)
+            bundle = self.insights_bundle
+            loading = self._insights_generation_id > 0 and bundle is None
+            panel.refresh_data(
+                bundle,
+                is_loading=loading,
+                progress_stage=self._progress_stage if loading else "",
+            )
+        except Exception:
+            pass
 
     @on(Tabs.TabActivated, "#view-tabs")
     def on_tab_activated(self, event: Tabs.TabActivated) -> None:
@@ -515,7 +619,9 @@ class TogglTUI(App):
         cache = get_cache()
         self._metrics = self._build_metrics(cache)
         self.data_cache = cache
-        # watch_data_cache handles refresh_all_views automatically
+        if cache:
+            self._insights_service = self._build_insights_service(cache, self._metrics)
+            self._compute_insights_in_background()
         if ok:
             self.notify(success_msg)
         else:

@@ -83,6 +83,9 @@ class TestOverviewButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            app.action_prev_view()
+            await pilot.pause()
+            assert app.active_view_index == 0
 
             await pilot.click("#btn-neg-log")
             await pilot.pause()
@@ -96,6 +99,9 @@ class TestOverviewButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            app.action_prev_view()
+            await pilot.pause()
+            assert app.active_view_index == 0
 
             await pilot.click("#btn-pos-log")
             await pilot.pause()
@@ -107,7 +113,7 @@ class TestOverviewButtons:
 class TestCommandTabButtons:
     """Test navigation and cycle buttons in CommandTab.
 
-    These tests switch to the Command view (index 1) first.
+    Command view is the default landing tab (index 1).
     """
 
     @pytest.mark.asyncio
@@ -116,8 +122,7 @@ class TestCommandTabButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.action_next_view()
-            await pilot.pause()
+            assert app.active_view_index == 1
 
             from toggl.command import CommandTab
             cmd = app.query_one(CommandTab)
@@ -134,8 +139,7 @@ class TestCommandTabButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.action_next_view()
-            await pilot.pause()
+            assert app.active_view_index == 1
 
             from toggl.command import CommandTab
             cmd = app.query_one(CommandTab)
@@ -154,8 +158,7 @@ class TestCommandTabButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.action_next_view()
-            await pilot.pause()
+            assert app.active_view_index == 1
 
             period_btn = app.query_one("#cmd-cycle-period")
             assert "Day" in str(period_btn.label)
@@ -178,8 +181,7 @@ class TestCommandTabButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.action_next_view()
-            await pilot.pause()
+            assert app.active_view_index == 1
 
             scale_btn = app.query_one("#cmd-cycle-scale")
             assert "7d" in str(scale_btn.label)
@@ -194,8 +196,7 @@ class TestCommandTabButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.action_next_view()
-            await pilot.pause()
+            assert app.active_view_index == 1
 
             metric_btn = app.query_one("#cmd-cycle-metric")
             assert "Net" in str(metric_btn.label)
@@ -222,8 +223,7 @@ class TestCalendarButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.action_next_view()
-            await pilot.pause()
+            assert app.active_view_index == 1
 
             from toggl.widgets.calendar import CalendarWidget
             cal = app.query_one(CalendarWidget)
@@ -240,8 +240,7 @@ class TestCalendarButtons:
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.action_next_view()
-            await pilot.pause()
+            assert app.active_view_index == 1
 
             from toggl.widgets.calendar import CalendarWidget
             cal = app.query_one(CalendarWidget)

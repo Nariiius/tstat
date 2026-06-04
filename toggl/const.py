@@ -92,3 +92,16 @@ PROJECTS_FILE = os.path.join(DATA_DIR, "toggl_projects.json")
 DEFAULT_DAILY_TARGET = 13.0
 LOW_QUOTA_WARNING = 5
 PROJECTS_CACHE_MAX_AGE_DAYS = 7
+
+PLAYBOOK_CACHE_FILE = os.path.join(DATA_DIR, "toggl_insights_bundle.json")
+
+# Logged positives that can only be counted once per calendar day in the playbook.
+# Now governed by ActivityRules via limits.max_per_day in toggl_config.json.
+# Defaults if not configured: nothing is once-per-day.
+ONCE_PER_DAY_POSITIVES: frozenset[str] = frozenset()
+
+# Abs Cinema philosophy (now governed by ActivityRules, retained as reference):
+# Watching things consumes leisure/entertainment time (bad).
+# Only genuinely great content ("Abs Cinema") is worthwhile,
+# and even then it must be a deliberate choice, never a system suggestion.
+# Configure via category_natures + activity_rules in toggl_config.json.

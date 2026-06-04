@@ -164,22 +164,15 @@ async def test_negative_modal_escape_closes(tui_data):
 
 
 @pytest.mark.asyncio
-async def test_sync_view_shows_all_status_fields(tui_data):
-    """Sync/Quota view shows current week, last updated, and quota info."""
+async def test_insights_sync_line_has_quota(tui_data):
+    """Insights tab sync footer mentions quota."""
     app = TogglTUI()
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
 
-        for _ in range(2):
-            app.action_next_view()
-            await pilot.pause()
+        app.action_next_view()
+        await pilot.pause()
         assert app.active_view_index == 2
 
-        sync_table = app.query_one("#sync-table")
-        all_text = " ".join(
-            str(sync_table.get_row_at(i)[0]).lower()
-            for i in range(sync_table.row_count)
-        )
-        assert "current week" in all_text
-        assert "last updated" in all_text
-        assert "synced weeks" in all_text
+        sync_line = app.query_one("#insights-sync-line")
+        assert "quota" in str(sync_line.render()).lower()

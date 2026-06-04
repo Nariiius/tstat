@@ -75,7 +75,7 @@ class TestAccessibility:
             assert app.active_view_index == 0
 
             # Navigate through all 3 views using keyboard
-            for i in range(4):
+            for i in range(3):
                 await pilot.press("ctrl+right")
                 await pilot.pause()
 

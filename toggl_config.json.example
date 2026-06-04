@@ -70,5 +70,89 @@
     "Journaling": 2,
     "Restraint": 3,
     "Existence Extrovert": 8
+  },
+
+  "category_natures": {
+    "Learning":     { "nature": "pursue" },
+    "Finance":      { "nature": "pursue" },
+    "Fitness":      { "nature": "pursue" },
+    "Productivity": { "nature": "pursue" },
+    "Misc":         { "nature": "neutral" },
+    "Entertainment": { "nature": "avoid" }
+  },
+
+  "activity_rules": {
+    "Abs Cinema": {
+      "category": "Entertainment",
+      "limits": { "max_per_day": 1 }
+    },
+    "Care": {
+      "limits": { "max_per_day": 1 },
+      "streak": { "remind_after_gap_days": 3 }
+    },
+    "Meditation": {
+      "limits": { "max_per_day": 1 },
+      "streak": { "remind_after_gap_days": 2 }
+    },
+    "GI Dailies": {
+      "limits": { "max_per_day": 1 }
+    },
+    "Sleep 8+ Hours": {
+      "limits": { "max_per_day": 1 }
+    },
+    "Socialising": {
+      "limits": { "max_per_day": 1 }
+    },
+    "Fitness": {
+      "category": "Fitness",
+      "combos": { "pairs_with": ["ProteinShake/Fit"], "boost": 0.3 }
+    },
+    "ProteinShake/Fit": {
+      "category": "Fitness",
+      "combos": { "pairs_with": ["Fitness"] }
+    }
+  },
+
+  "recovery_ignore": ["Abs Cinema"],
+
+  "playbook": {
+    "controllability": {
+      "Learning to Code": 0.95,
+      "Building Projects": 0.9,
+      "Personal Development": 0.85,
+      "Socialising": 0.3,
+      "Meditation": 1.0,
+      "Fitness": 0.9,
+      "Cold Shower": 1.0
+    },
+    "low_control_reasons": {
+      "Socialising": "depends on others — log when it happens, don't plan around it"
+    },
+    "default_hours": {
+      "Learning to Code": 1.5,
+      "Building Projects": 2.0,
+      "Personal Development": 1.0,
+      "Fitness": 1.0,
+      "Focus Thoughts": 0.5,
+      "Plan / Org / Review": 0.5
+    },
+    "availability_overrides": {
+      "Sleep 8+ Hours": {
+        "type": "time_window",
+        "available_after": "21:00",
+        "before_multiplier": 0.0,
+        "blocked_reason": "can't log until evening"
+      }
+    },
+    "discovery_lookback": {
+      "drift": 60,
+      "growth": 60,
+      "failure": 90,
+      "best_period": 120
+    },
+    "discovery_ignore": [
+      "Sleep / Rest",
+      "Chores / Waste"
+    ]
   }
 }
