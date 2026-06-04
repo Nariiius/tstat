@@ -130,9 +130,9 @@ class CalendarWidget(Static):
     def compose(self) -> ComposeResult:
         day_names = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
         with Container(id="cal-nav"):
-            yield Button("<<", id="cal-prev-month")
+            yield Button("\u2190", id="cal-prev-month")
             yield Label("", id="cal-month-label")
-            yield Button(">>", id="cal-next-month")
+            yield Button("\u2192", id="cal-next-month")
         with Container(id="cal-grid"):
             with Horizontal(classes="cal-row"):
                 yield Label("", classes="cal-week-num")

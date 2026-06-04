@@ -5,6 +5,7 @@ from typing import Any
 from rich.text import Text
 
 from toggl.config import CATEGORY_REGISTRY, RATE_COLORS
+from toggl.widgets.icons import ICON
 
 
 def _spark_net_rich(
@@ -18,12 +19,12 @@ def _spark_net_rich(
     logged) is appended after the net bar.
     """
     if net is None or (abs(net) < 0.05 and dim_zero):
-        return "[dim]\u2014[/]"
+        return f"[dim]{ICON['em_dash']}[/]"
     if abs(net) < 0.05:
         return "[dim]0.0[/]"
     bar_len = max(1, round(abs(net) / max_abs * bar_w)) if max_abs > 0 else 1
     if net > 0:
-        bar = "\u2588" * bar_len
+        bar = ICON["bar_block"] * bar_len
         return f"[#37d994]{bar} +{net}[/]"
     else:
         blame_total = blame_tracked + blame_logged
@@ -31,23 +32,23 @@ def _spark_net_rich(
             net_bar_len = max(1, bar_len - blame_w)
             red_count = round(blame_tracked / blame_total * blame_w)
             mag_count = blame_w - red_count
-            bar = "\u2588" * net_bar_len
-            block = "\u2588"
+            bar = ICON["bar_block"] * net_bar_len
+            block = ICON["bar_block"]
             blame = f"[#ff5f5f]{block * red_count}[/][#ff5fff]{block * mag_count}[/]"
-        bar = "\u2588" * bar_len
+        bar = ICON["bar_block"] * bar_len
         return f"[#ff5f5f]{net} {bar}[/]"
 
 
 def fmt_rate(rate: float | None) -> str:
     if rate is None:
-        return "\u2014"
+        return ICON["em_dash"]
     r = int(rate) if rate == int(rate) else rate
-    return f"\u00d7{r}"
+    return f"{ICON['multiply']}{r}"
 
 
 def fmt_pts(pts: float | None) -> str:
     if pts is None:
-        return "\u2014"
+        return ICON["em_dash"]
     if pts == 0:
         return "0.0"
     return f"+{pts}" if pts > 0 else str(pts)
@@ -65,7 +66,7 @@ def format_signed_rich(value: float) -> str:
 
 def fmt_pts_rich(pts: float | None) -> str:
     if pts is None:
-        return "\u2014"
+        return ICON["em_dash"]
     if pts == 0:
         return "0.0"
     if pts > 0:

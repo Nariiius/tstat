@@ -21,7 +21,11 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import MouseScrollDown, MouseScrollUp, Resize
 from textual.reactive import reactive
+from textual.screen import ModalScreen
 from textual.widgets import Footer, Label, Static, Tab, Tabs
+
+from toggl.widgets.icons import ICON
+from toggl.widgets.loading import LoadingWidget, ProgressIndicator
 
 from toggl.api import (
     TogglAPIError,
@@ -91,6 +95,77 @@ def time_left_in_week() -> str:
 
 
 # ──────────────────────────────────────────────
+# ──────────────────────────────────────────────
+# SPLASH SCREEN
+# ──────────────────────────────────────────────
+
+
+class SplashScreen(ModalScreen[None]):
+    """Startup splash screen shown during initial data loading."""
+
+    DEFAULT_CSS = """
+    SplashScreen {
+        background: #0b1016;
+        align: center middle;
+    }
+    SplashScreen > Container {
+        width: auto;
+        height: auto;
+        border: round #3d4f63;
+        padding: 2 4;
+        background: #0b1016;
+        align: center middle;
+    }
+    #splash-logo {
+        color: #63f3ff;
+        text-style: bold;
+        text-align: center;
+        width: auto;
+    }
+    #splash-subtitle {
+        color: #8d98a7;
+        text-align: center;
+        width: auto;
+        margin-top: 1;
+    }
+    #splash-progress-bar {
+        width: 30;
+        margin-top: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        from textual.containers import Container as Ctr
+        with Ctr():
+            yield Static(
+                "\n".join([
+                    "  \u2554" + "\u2550" * 28 + "\u2557",
+                    "  \u2551     " + "\u2502" * 3 + " \u2502" * 3 + "   \u2551",
+                    "  \u2551        \u2502\u2502      \u2551",
+                    "  \u2551      \u2502\u2502\u2502\u2502\u2502\u2502    \u2551",
+                    "  \u2551     \u2502\u2502  \u2502\u2502     \u2551",
+                    "  \u2551    \u2502\u2502    \u2502\u2502    \u2551",
+                    "  \u2551  " + "\u2502" * 14 + "  \u2551",
+                    "  \u255a" + "\u2550" * 28 + "\u255d",
+                    "",
+                    "       Life Points TUI",
+                    "          v1.3.1",
+                ]),
+                id="splash-logo",
+            )
+            yield Static("Loading data...", id="splash-subtitle")
+            yield ProgressIndicator(width=30, id="splash-progress-bar")
+
+    def set_progress(self, ratio: float) -> None:
+        try:
+            self.query_one("#splash-progress-bar", ProgressIndicator).set_progress(ratio)
+        except Exception:
+            pass
+
+    def dismiss_splash(self) -> None:
+        self.dismiss(None)
+
+
 # ──────────────────────────────────────────────
 # MAIN TUI APP
 # ──────────────────────────────────────────────
@@ -231,14 +306,20 @@ class TogglTUI(App):
         tabs = self.query_one("#view-tabs", Tabs)
         with tabs.prevent(Tabs.TabActivated):
             tabs.active = f"tab-{self.active_view_index}"
+        # Refresh footer BEFORE pushing splash screen so query_one still
+        # finds widgets on the main screen.
+        self.query_one(ScrollableFooter).refresh_bindings()
+        # Show splash screen while data loads (skip in tests / headless mode)
+        import sys
+        if "pytest" not in sys.modules and not self.is_headless:
+            self._splash = SplashScreen()
+            self.push_screen(self._splash)
         # Defer data loading to ensure child widget on_mount() has run
         # so their DataTables have columns set up before refresh.
         self.call_later(self.load_data)
-        self.query_one(ScrollableFooter).refresh_bindings()
 
         # Check for auto-sync immediately after mounting and then every 60 seconds
         # (Skip in testing environments to prevent visual test notifications)
-        import sys
         if "pytest" not in sys.modules:
             self.call_later(self.check_auto_sync)
             self.set_interval(60, self.check_auto_sync)
@@ -261,17 +342,22 @@ class TogglTUI(App):
 
     def watch_data_cache(self, cache: DataCache | None) -> None:
         """Reactively refresh all views when data_cache changes."""
-        if cache is not None:
+        if cache is not None and not self._is_splash_active:
             self.refresh_all_views()
 
     def watch_insights_bundle(self, bundle: InsightsBundle | None) -> None:
-        if bundle is not None:
+        if bundle is not None and not self._is_splash_active:
             try:
                 self.refresh_overview_view()
                 self.refresh_command_view()
                 self.refresh_insights_view()
             except Exception:
                 pass
+
+    @property
+    def _is_splash_active(self) -> bool:
+        """True while the splash screen is still visible."""
+        return hasattr(self, '_splash') and self._splash is not None
 
     def watch__progress_stage(self, stage: str) -> None:
         """Refresh Insights tab whenever compute progress stage changes."""
@@ -285,14 +371,42 @@ class TogglTUI(App):
         """Load cache data asynchronously (I/O runs in thread pool)."""
         import asyncio
 
+        # Animate splash progress
+        if hasattr(self, '_splash') and self._splash is not None:
+            self._splash.set_progress(0.2)
+
         cache = await asyncio.to_thread(DataCache.load)
+
+        if hasattr(self, '_splash') and self._splash is not None:
+            self._splash.set_progress(0.5)
+
         self._metrics = self._build_metrics(cache)
         self.data_cache = cache
         self._insights_service = self._build_insights_service(cache, self._metrics)
         cached = self._insights_service.try_load_cache()
         if cached:
             self.insights_bundle = cached
+
+        if hasattr(self, '_splash') and self._splash is not None:
+            self._splash.set_progress(0.75)
+
         self._compute_insights_in_background()
+
+        # Allow splash to show for at least 0.5s then dismiss
+        if hasattr(self, '_splash') and self._splash is not None:
+            self._splash.set_progress(1.0)
+            self.set_timer(0.3, self._dismiss_splash)
+
+    def _dismiss_splash(self) -> None:
+        """Dismiss the splash screen if still visible."""
+        try:
+            if hasattr(self, '_splash') and self._splash is not None:
+                self._splash.dismiss_splash()
+                self._splash = None
+                # Data loaded while splash was up — refresh now
+                self.refresh_all_views()
+        except Exception:
+            pass
 
     def check_auto_sync(self) -> None:
         """Periodic auto-sync check running in background."""
@@ -417,17 +531,39 @@ class TogglTUI(App):
         synced = get_last_updated_str()
 
         sync_widget = self.query_one("#sync-status", Static)
-        sync_widget.update(f"\u27f3\u2002{synced}")
 
-    def update_view_visibility(self) -> None:
-        view_ids = [
-            "#overview-view",
-            "#command-view",
-            "#insights-view",
-        ]
-        for index, view_id in enumerate(view_ids):
-            widget = self.query_one(view_id, Container)
-            widget.set_class(index == self.active_view_index, "-active")
+        # Determine sync age for color coding
+        try:
+            # Parse sync timestamp to determine freshness
+            if synced and synced != "never":
+                from datetime import datetime
+                for fmt in ("%d %b %Y %H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        sync_dt = datetime.strptime(synced, fmt)
+                        age_hours = (datetime.now() - sync_dt).total_seconds() / 3600
+                        if age_hours < 1:
+                            sync_widget.set_class(True, "sync-fresh")
+                        elif age_hours < 24:
+                            sync_widget.set_class(True, "sync-warn")
+                        else:
+                            sync_widget.set_class(True, "sync-stale")
+                        break
+                    except ValueError:
+                        continue
+            else:
+                sync_widget.set_class(True, "sync-stale")
+        except Exception:
+            pass
+
+        # Use arrow-circle icon for sync status
+        sync_icon = ICON["sync"]
+        sync_widget.update(f"{sync_icon}\u2002{synced}")
+
+        # If sync is in progress, start spinning animation
+        if self._sync_in_progress:
+            self._start_sync_spin()
+        else:
+            self._stop_sync_spin()
 
     def focus_active_view(self) -> None:
         focus_targets = {
@@ -500,8 +636,12 @@ class TogglTUI(App):
     @on(Tabs.TabActivated, "#view-tabs")
     def on_tab_activated(self, event: Tabs.TabActivated) -> None:
         if event.tab.id and event.tab.id.startswith("tab-"):
-            # Guard against stale events: verify this tab is actually active
-            tabs = self.query_one("#view-tabs", Tabs)
+            # Guard against stale events: verify this tab is actually active.
+            # If the splash screen is up, #view-tabs won't be in the DOM.
+            try:
+                tabs = self.query_one("#view-tabs", Tabs)
+            except Exception:
+                return
             if tabs.active != event.tab.id:
                 return
             new_index = int(event.tab.id.rsplit("-", 1)[1])
@@ -546,6 +686,50 @@ class TogglTUI(App):
 
     def _set_sync_inactive(self) -> None:
         self._sync_in_progress = False
+        self._stop_sync_spin()
+        self.update_status_line()
+
+    # ── Sync spinner animation ──────────────────────────────────────
+
+    def _start_sync_spin(self) -> None:
+        """Start the sync symbol spinning animation."""
+        if hasattr(self, '_spin_timer') and self._spin_timer is not None:
+            return  # Already spinning
+        self._spin_frame = 0
+        self._spin_timer = self.set_interval(0.15, self._advance_sync_spin)
+
+    def _stop_sync_spin(self) -> None:
+        """Stop the sync symbol spinning animation."""
+        if hasattr(self, '_spin_timer') and self._spin_timer is not None:
+            self._spin_timer.stop()
+            self._spin_timer = None
+
+    def _advance_sync_spin(self) -> None:
+        """Advance the spin frame."""
+        frames = ICON["spin_frames"]
+        self._spin_frame = (getattr(self, '_spin_frame', 0) + 1) % len(frames)
+        try:
+            sync_widget = self.query_one("#sync-status", Static)
+            synced = get_last_updated_str()
+            sync_widget.update(f"{frames[self._spin_frame]}\u2002{synced}")
+        except Exception:
+            pass
+
+    # ── Tab fade transition ─────────────────────────────────────────
+
+    def update_view_visibility(self) -> None:
+        view_ids = [
+            "#overview-view",
+            "#command-view",
+            "#insights-view",
+        ]
+        for index, view_id in enumerate(view_ids):
+            widget = self.query_one(view_id, Container)
+            is_active = (index == self.active_view_index)
+            if is_active and not widget.has_class("-active"):
+                # Fade in the newly active view
+                widget.styles.animate("opacity", value=1.0, duration=0.2)
+            widget.set_class(is_active, "-active")
 
     def action_sync_current_week(self) -> None:
         if self._sync_in_progress:

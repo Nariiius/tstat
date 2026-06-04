@@ -15,6 +15,8 @@ from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widgets import Button, Label
 
+from toggl.widgets.icons import ICON
+
 
 class DateStepper(Horizontal):
     """A compact date picker: ◀ | YYYY-MM-DD | ▶.
@@ -78,9 +80,9 @@ class DateStepper(Horizontal):
         self.selected_date = self._initial_date
 
     def compose(self) -> ComposeResult:
-        yield Button("\u25c0", id="stepper-prev", classes="stepper-btn")
+        yield Button(ICON["nav_prev"], id="stepper-prev", classes="stepper-btn")
         yield Label(self._format_date(self._initial_date), id="stepper-date-label")
-        yield Button("\u25b6", id="stepper-next", classes="stepper-btn")
+        yield Button(ICON["nav_next"], id="stepper-next", classes="stepper-btn")
 
     def on_mount(self) -> None:
         # Re-clamp in case max_date changed between __init__ and mount

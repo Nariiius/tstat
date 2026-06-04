@@ -15,6 +15,8 @@ from toggl.services.playbook import Playbook, PlaybookStep
 from toggl.services.discovery import Discovery
 from toggl.services.coach import CoachFinding
 from toggl.services.week_brief import WeekBrief, WeekAction
+from toggl.widgets.icons import ICON, intensity_block, fractional_bar
+from toggl.widgets.loading import LoadingWidget, PulseText
 
 # ──────────────────────────────────────────────
 # Progress, status, and visual helpers
@@ -36,14 +38,18 @@ def _progress_bar(
     """Render a horizontal progress bar in Rich markup.
 
     Returns empty string when target is zero or negative.
-    Colors shift from red → amber → green as progress increases.
+    Colors shift from red to amber to green as progress increases.
+    Uses fractional Unicode blocks for smoother visual.
     """
     if target <= 0:
         return ""
     ratio = min(abs(current) / abs(target), 1.0)
-    filled = int(ratio * width)
-    bar_fill = "━" * filled
-    bar_empty = "─" * (width - filled)
+    full_blocks = int(ratio * width)
+    remainder = (ratio * width) - full_blocks
+    frac = fractional_bar(remainder)
+    bar_fill = ICON["bar_filled"] * full_blocks + frac
+    bar_empty_blocks = width - full_blocks - (1 if remainder > 0 else 0)
+    bar_empty = ICON["bar_empty"] * max(0, bar_empty_blocks)
     pct = int(ratio * 100)
     if ratio >= 0.8:
         color = CLR_GREEN
@@ -56,27 +62,28 @@ def _progress_bar(
 
 def _status_badge(goal: str) -> str:
     """Coloured status badge for the current goal / verdict."""
+    bullet = ICON["status_on_track"]
     badges = {
-        "on_track": f"[bold {CLR_GREEN}]◉ ON TRACK[/]",
-        "hit_today_target": f"[bold {CLR_AMBER}]◉ CLOSE GAP[/]",
-        "fix_week": f"[bold {CLR_RED}]◉ RECOVER WEEK[/]",
-        "start_tracking": f"[{CLR_DIM}]◉ SETUP[/]",
+        "on_track": f"[bold {CLR_GREEN}]{bullet} ON TRACK[/]",
+        "hit_today_target": f"[bold {CLR_AMBER}]{bullet} CLOSE GAP[/]",
+        "fix_week": f"[bold {CLR_RED}]{bullet} RECOVER WEEK[/]",
+        "start_tracking": f"[{CLR_DIM}]{bullet} SETUP[/]",
     }
-    return badges.get(goal, f"[{CLR_DIM}]◉ {goal}[/]")
+    return badges.get(goal, f"[{CLR_DIM}]{bullet} {goal}[/]")
 
 
 def _section_sep() -> str:
     """Visual section separator."""
-    return f"[{CLR_DIM}]──────────────────────[/]"
+    return f"[{CLR_DIM}]{ICON['sep_thick']}[/]"
 
 
 def _format_loading(base: str, progress_stage: str = "") -> str:
     """Render loading message with optional per-stage progress."""
-    lines = [f"[{CLR_DIM}][bold]⏳[/] {base}[/]"]
+    lines = [f"[{CLR_DIM}][bold]{ICON['hourglass']}[/] {base}[/]"]
     if progress_stage == "playbook":
-        lines.append(f"[{CLR_DIM}]  ⠋ Analyzing activity data and generating playbook...[/]")
+        lines.append(f"[{CLR_DIM}]  {ICON['loading_dots'][0]} Analyzing activity data and generating playbook...[/]")
     elif progress_stage == "coach":
-        lines.append(f"[{CLR_DIM}]  ⠋ Running coach analyzers to find patterns...[/]")
+        lines.append(f"[{CLR_DIM}]  {ICON['loading_dots'][0]} Running coach analyzers to find patterns...[/]")
     return "\n".join(lines)
 
 
@@ -159,7 +166,7 @@ def _format_playbook_block(
 
     # ── Focus line (most important) ──
     if pb.focus_line and not compact:
-        lines.append(f"  [{CLR_FOCUS}]▸[/] {pb.focus_line}")
+        lines.append(f"  [{CLR_FOCUS}]{ICON['focus_pointer']}[/] {pb.focus_line}")
         lines.append("")
 
     # ── Today's steps ──
@@ -167,10 +174,10 @@ def _format_playbook_block(
     if steps:
         for i, step in enumerate(steps, 1):
             pts_str = f"[{CLR_GREEN}]{_fmt_pts(step.points)}[/]"
-            nums = "\u2460\u2461\u2462\u2463\u2464\u2465\u2466\u2467\u2468"
+            nums = ICON["num_circled"]
             num = nums[i-1] if i <= len(nums) else f"{i}."
             label = f"[bold]{step.label}[/]"
-            amt = f" {step.amount}" if step.amount and step.amount != "\u00d71" else ""
+            amt = f" {step.amount}" if step.amount and step.amount != ICON["multiply"] + "1" else ""
             step_line = f"  {num} {label}{amt}  {pts_str}"
             if not compact and step.points > 0:
                 target = float(pb.context.get("gap", pb.context.get("daily_target", 0)) or 1)
@@ -200,12 +207,12 @@ def _format_playbook_block(
     # ── Done today ──
     if pb.done_today:
         done = ", ".join(pb.done_today)
-        lines.append(f"  [{CLR_DIM}]✓ Done today:[/] {done}")
+        lines.append(f"  [{CLR_DIM}]{ICON['check']} Done today:[/] {done}")
 
     # ── Blocked today ──
     if pb.blocked_today:
         for name, reason in pb.blocked_today:
-            lines.append(f"  [{CLR_DIM}]◷ {name}:[/] {reason}")
+            lines.append(f"  [{CLR_DIM}]{ICON['blocked']} {name}:[/] {reason}")
 
     if pb.done_today or pb.blocked_today:
         lines.append("")
@@ -213,7 +220,7 @@ def _format_playbook_block(
     # ── Low control ──
     if pb.low_control:
         for name, reason in pb.low_control:
-            lines.append(f"  [{CLR_MUTED}]○ {name}:[/] {reason}")
+            lines.append(f"  [{CLR_MUTED}]{ICON['low_control']} {name}:[/] {reason}")
         lines.append("")
 
     return "\n".join(lines) if lines else "[dim]No steps right now.[/]\n"
@@ -324,15 +331,15 @@ def format_week_brief(wb: WeekBrief) -> str:
             return out
         out.append(f"[bold {color}]{label}[/]")
         for a in actions:
-            out.append(f"  [{CLR_DIM}]•[/] {a.imperative}")
+            out.append(f"  [{CLR_DIM}]{ICON['bullet']}[/] {a.imperative}")
             if a.evidence:
                 out.append(f"    [{CLR_MUTED}]{a.evidence}[/]")
         out.append("")
         return out
 
-    lines.extend(_action_lines(wb.focus, "FOCUS", CLR_GREEN))
-    lines.extend(_action_lines(wb.protect, "PROTECT", CLR_AMBER))
-    lines.extend(_action_lines(wb.skip, "SKIP", CLR_RED))
+    lines.extend(_action_lines(wb.focus, f"  {ICON['focus']} FOCUS", CLR_GREEN))
+    lines.extend(_action_lines(wb.protect, f"  {ICON['protect']} PROTECT", CLR_AMBER))
+    lines.extend(_action_lines(wb.skip, f"  {ICON['skip']} SKIP", CLR_RED))
 
     return "\n".join(lines).rstrip()
 
@@ -350,20 +357,20 @@ def format_discoveries(discoveries: list[Discovery]) -> str:
     CLR_MUTED  = "#4a5565"
 
     KIND_META = {
-        "failure_mode":       ("⚠ FAILURE",       CLR_RED),
-        "positive_driver":    ("★ POSITIVE DRIVER", CLR_GREEN),
-        "neglect":            ("∅ NEGLECT",        CLR_AMBER),
-        "trajectory_change":  ("↗ TRAJECTORY",      CLR_AMBER),
-        "best_period_gap":    ("◈ BEST PERIOD",     CLR_AMBER),
+        "failure_mode":       (f"{ICON['warning']} FAILURE",       CLR_RED),
+        "positive_driver":    (f"{ICON['star']} POSITIVE DRIVER", CLR_GREEN),
+        "neglect":            (f"{ICON['neglect']} NEGLECT",        CLR_AMBER),
+        "trajectory_change":  (f"{ICON['trajectory_up']} TRAJECTORY",      CLR_AMBER),
+        "best_period_gap":    (f"{ICON['diamond']} BEST PERIOD",     CLR_AMBER),
     }
 
     lines = []
 
     for i, d in enumerate(discoveries, 1):
-        label, color = KIND_META.get(d.kind, ("\u25c9", CLR_DIM))
+        label, color = KIND_META.get(d.kind, (ICON["status_on_track"], CLR_DIM))
 
         filled = int(d.confidence * 10)
-        bar    = "\u2501" * filled + "\u2500" * (10 - filled)
+        bar    = ICON["bar_filled"] * filled + ICON["bar_empty"] * (10 - filled)
         conf_color = (
             CLR_GREEN if d.confidence >= 0.85
             else CLR_AMBER if d.confidence >= 0.75
@@ -390,20 +397,20 @@ def format_coach_findings(findings: list[CoachFinding]) -> str:
         return ""
 
     KIND_META = {
-        "frequency_drop":    ("↘ FREQUENCY DROP",  CLR_RED),
-        "frequency_surge":   ("↗ ON A ROLL",       CLR_GREEN),
-        "streak_gap":        ("⏱ GAP REMINDER",    CLR_AMBER),
-        "negative_cluster":  ("⚠ PATTERN",         CLR_RED),
-        "positive_lift":     ("★ POSITIVE LIFT",   CLR_GREEN),
+        "frequency_drop":    (f"{ICON['frequency_drop']} FREQUENCY DROP",  CLR_RED),
+        "frequency_surge":   (f"{ICON['on_a_roll']} ON A ROLL",       CLR_GREEN),
+        "streak_gap":        (f"{ICON['gap_reminder']} GAP REMINDER",    CLR_AMBER),
+        "negative_cluster":  (f"{ICON['warning']} PATTERN",         CLR_RED),
+        "positive_lift":     (f"{ICON['star']} POSITIVE LIFT",   CLR_GREEN),
     }
 
     lines = []
 
     for i, f in enumerate(findings, 1):
-        label, color = KIND_META.get(f.kind, ("○", CLR_DIM))
+        label, color = KIND_META.get(f.kind, (ICON["low_control"], CLR_DIM))
 
         filled = int(f.confidence * 10)
-        bar = "\u2501" * filled + "\u2500" * (10 - filled)
+        bar = ICON["bar_filled"] * filled + ICON["bar_empty"] * (10 - filled)
         conf_color = (
             CLR_GREEN if f.confidence >= 0.85
             else CLR_AMBER if f.confidence >= 0.75

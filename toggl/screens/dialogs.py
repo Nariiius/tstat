@@ -16,6 +16,7 @@ from textual.widgets import Button, OptionList, Static
 
 from toggl.config import NEGATIVES, POSITIVES
 from toggl.widgets.date_stepper import DateStepper
+from toggl.widgets.icons import ICON
 
 
 def _parse_option_name(prompt: str) -> str:
@@ -33,11 +34,12 @@ def _parse_option_name(prompt: str) -> str:
 class BaseDialog(ModalScreen):
     """Base modal dialog with consistent centered floating appearance.
 
-    Provides a standard #dialog → #dialog-box structure with:
-    - Centered layout (100% screen overlay → auto-sized box)
+    Provides a standard #dialog -> #dialog-box structure with:
+    - Centered layout (100% screen overlay -> auto-sized box)
     - Consistent round #3d4f63 border, $accent on focus
     - Shared escape/cancel binding
     - border_title from the title argument
+    - Fade-in animation on mount
 
     Subclasses override ``body()`` to yield dialog content inside #dialog-box.
     Default action_cancel dismisses with None.
@@ -47,7 +49,7 @@ class BaseDialog(ModalScreen):
     $accent: #63f3ff;
 
     BaseDialog {
-        background: #0b1016 60%;
+        background: #0b1016 0%;
     }
 
     #dialog {
@@ -113,7 +115,8 @@ class BaseDialog(ModalScreen):
         return
 
     def on_mount(self) -> None:
-        self.query_one("#dialog-box").border_title = (
+        dialog_box = self.query_one("#dialog-box")
+        dialog_box.border_title = (
             f"[b][#63f3ff]{self._dialog_title}[/][/]"
         )
 
@@ -139,8 +142,15 @@ class ConfirmScreen(BaseDialog):
     def body(self) -> ComposeResult:
         yield Static(self._body_text, classes="dialog-body")
         with Horizontal(id="dialog-buttons"):
-            yield Static("[Y/Enter] confirm", id="btn-confirm", classes="dialog-help")
-            yield Static("  " "[N/Esc] cancel", id="btn-cancel", classes="dialog-help")
+            yield Static(
+                f"[#37d994]{ICON['check']}[/] Y/Enter confirm",
+                id="btn-confirm", classes="dialog-help"
+            )
+            yield Static(
+                "  "
+                f"[#ff5f5f]{ICON['multiply']}[/] N/Esc cancel",
+                id="btn-cancel", classes="dialog-help"
+            )
 
     @on(Click, "#btn-confirm")
     def on_confirm_click(self) -> None:
@@ -178,16 +188,20 @@ class NegativeInputScreen(BaseDialog):
         yield Static("Adjust date if needed, then select an action.", classes="dialog-body")
         yield DateStepper(id="negative-date-stepper")
         yield OptionList(id="negative-list")
-        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
+        yield Static(
+            f"[#8d98a7]{ICON['multiply']} Esc cancel[/]",
+            id="btn-cancel", classes="dialog-help"
+        )
 
     def on_mount(self) -> None:
         super().on_mount()
         option_list = self.query_one("#negative-list", OptionList)
         for name, pts in NEGATIVES.items():
+            prefix = f"[#ff5f5f]{ICON['minus']}[/] "
             if pts == int(pts):
-                option_list.add_option(f"{name}  ({int(pts):+d} pts)")
+                option_list.add_option(f"{prefix}{name}  ({int(pts):+d} pts)")
             else:
-                option_list.add_option(f"{name}  ({pts:+.1f} pts)")
+                option_list.add_option(f"{prefix}{name}  ({pts:+.1f} pts)")
         option_list.focus()
 
     def on_key(self, event) -> None:
@@ -202,8 +216,9 @@ class NegativeInputScreen(BaseDialog):
     def submit_negative(self, event: OptionList.OptionSelected) -> None:
         stepper = self.query_one("#negative-date-stepper", DateStepper)
         name = _parse_option_name(str(event.option.prompt))
+        stripped = name.replace(f"[#ff5f5f]{ICON['minus']}[/] ", "")
         self.dismiss({
-            "name": name,
+            "name": stripped,
             "date": stepper.selected_date.strftime("%Y-%m-%d"),
         })
 
@@ -233,16 +248,20 @@ class PositiveInputScreen(BaseDialog):
         yield Static("Adjust date if needed, then select an action.", classes="dialog-body")
         yield DateStepper(id="positive-date-stepper")
         yield OptionList(id="positive-list")
-        yield Static("[Esc] cancel", id="btn-cancel", classes="dialog-help")
+        yield Static(
+            f"[#8d98a7]{ICON['multiply']} Esc cancel[/]",
+            id="btn-cancel", classes="dialog-help"
+        )
 
     def on_mount(self) -> None:
         super().on_mount()
         option_list = self.query_one("#positive-list", OptionList)
         for name, pts in POSITIVES.items():
+            prefix = f"[#37d994]{ICON['plus']}[/] "
             if pts == int(pts):
-                option_list.add_option(f"{name}  (+{int(pts)} pts)")
+                option_list.add_option(f"{prefix}{name}  (+{int(pts)} pts)")
             else:
-                option_list.add_option(f"{name}  (+{pts:.1f} pts)")
+                option_list.add_option(f"{prefix}{name}  (+{pts:.1f} pts)")
         option_list.focus()
 
     def on_key(self, event) -> None:
@@ -257,8 +276,9 @@ class PositiveInputScreen(BaseDialog):
     def submit_positive(self, event: OptionList.OptionSelected) -> None:
         stepper = self.query_one("#positive-date-stepper", DateStepper)
         name = _parse_option_name(str(event.option.prompt))
+        stripped = name.replace(f"[#37d994]{ICON['plus']}[/] ", "")
         self.dismiss({
-            "name": name,
+            "name": stripped,
             "date": stepper.selected_date.strftime("%Y-%m-%d"),
         })
 
