@@ -24,6 +24,7 @@ from textual.events import Enter, Leave, MouseMove, MouseScrollDown, MouseScroll
 from textual.reactive import reactive
 from textual.widgets import Footer, Label, Static, Tab, Tabs
 
+from toggl.const import __version__
 from toggl.widgets.icons import ICON, ICON_GAP, icon_text, spinner_frame
 
 from toggl.api import (
@@ -225,7 +226,7 @@ class TogglTUI(App):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Container(id="chrome"):
-                yield Label("TStat v1.3.1", classes="app-title")
+                yield Label(f"TStat v{__version__}", classes="app-title")
                 tabs = Tabs(
                     *[Tab(view, id=f"tab-{index}") for index, view in enumerate(self.VIEWS)],
                     id="view-tabs",

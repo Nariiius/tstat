@@ -228,7 +228,7 @@ def _format_insights_border_title(pb: Playbook) -> str:
     )
     pace = _format_pace_border_line(pb, "TODAY", "GAP")
     if pace:
-        title = f"{title}{SEG_GAP}{pace}"
+        title = f"{title}[{CLR_DIM}] | [/]{pace}"
     return title
 
 
