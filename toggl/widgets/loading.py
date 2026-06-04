@@ -164,9 +164,9 @@ class ProgressIndicator(Label):
         empty = self._bar_width - filled
         pct = int(self._progress * 100)
         bar = (
-            f"[#63f3ff]{ICON['bar_filled'] * filled}[/]"
+            f"[bold #63f3ff]{ICON['bar_filled'] * filled}[/]"
             f"[#4a5565]{ICON['bar_empty'] * empty}[/]"
-            f"  [#63f3ff]{pct}%[/]"
+            f"  [#63f3ff]{pct:>3}%[/]"
         )
         self.update(bar)
 

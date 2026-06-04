@@ -13,7 +13,7 @@ from rich.text import Text
 from textual.app import RenderResult
 from textual.widget import Widget
 
-from toggl.widgets.icons import ICON, spark_char, fractional_bar
+from toggl.widgets.icons import ICON, spark_char
 
 _GREEN = (55, 217, 148)
 _RED = (255, 95, 95)

@@ -7,16 +7,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from textual.containers import VerticalScroll
-from textual.widgets import Static
+from textual.containers import VerticalScroll, Vertical
+from textual.widgets import Static, Label
 
 from toggl.services.insights_bundle import InsightsBundle
 from toggl.services.playbook import Playbook, PlaybookStep
 from toggl.services.discovery import Discovery
 from toggl.services.coach import CoachFinding
 from toggl.services.week_brief import WeekBrief, WeekAction
-from toggl.widgets.icons import ICON, intensity_block, fractional_bar
+from toggl.widgets.icons import ICON, SEG_GAP, dot_sep
 from toggl.widgets.loading import LoadingWidget, PulseText
+
+_STAGE_LABELS = {
+    "playbook": "Analyzing activity data and generating playbook...",
+    "coach": "Running coach analyzers to find patterns...",
+}
 
 # ──────────────────────────────────────────────
 # Progress, status, and visual helpers
@@ -32,37 +37,35 @@ CLR_FOCUS = "#e2b714"
 CLR_MIST = "#1e2a36"
 
 
-def _progress_bar(
-    current: float, target: float, width: int = 12
+def _confidence_bar(
+    ratio: float,
+    width: int = 12,
+    *,
+    bar_color: str | None = None,
 ) -> str:
-    """Render a horizontal progress bar in Rich markup.
-
-    Returns empty string when target is zero or negative.
-    Colors shift from red to amber to green as progress increases.
-    Uses fractional Unicode blocks for smoother visual.
-    """
-    if target <= 0:
-        return ""
-    ratio = min(abs(current) / abs(target), 1.0)
-    full_blocks = int(ratio * width)
-    remainder = (ratio * width) - full_blocks
-    frac = fractional_bar(remainder)
-    bar_fill = ICON["bar_filled"] * full_blocks + frac
-    bar_empty_blocks = width - full_blocks - (1 if remainder > 0 else 0)
-    bar_empty = ICON["bar_empty"] * max(0, bar_empty_blocks)
+    """Horizontal bar with fractional fill and percentage (discoveries, coach, etc.)."""
+    ratio = max(0.0, min(1.0, ratio))
+    if bar_color is None:
+        if ratio >= 0.85:
+            bar_color = CLR_GREEN
+        elif ratio >= 0.75:
+            bar_color = CLR_AMBER
+        else:
+            bar_color = CLR_DIM
+    filled = max(0, min(width, int(round(ratio * width))))
+    bar_fill = ICON["bar_filled"] * filled
+    bar_empty = ICON["bar_empty"] * (width - filled)
     pct = int(ratio * 100)
-    if ratio >= 0.8:
-        color = CLR_GREEN
-    elif ratio >= 0.5:
-        color = CLR_AMBER
-    else:
-        color = CLR_RED
-    return f"[{color}]{bar_fill}[/][{CLR_MUTED}]{bar_empty}[/] [{color}]{pct}%[/]"
+    return (
+        f"[bold {bar_color}]{bar_fill}[/]"
+        f"[{CLR_MUTED}]{bar_empty}[/] "
+        f"[{bar_color}]{pct}%[/]"
+    )
 
 
 def _status_badge(goal: str) -> str:
     """Coloured status badge for the current goal / verdict."""
-    bullet = ICON["status_on_track"]
+    bullet = ICON["dot"]
     badges = {
         "on_track": f"[bold {CLR_GREEN}]{bullet} ON TRACK[/]",
         "hit_today_target": f"[bold {CLR_AMBER}]{bullet} CLOSE GAP[/]",
@@ -74,17 +77,8 @@ def _status_badge(goal: str) -> str:
 
 def _section_sep() -> str:
     """Visual section separator."""
-    return f"[{CLR_DIM}]{ICON['sep_thick']}[/]"
+    return f"[{CLR_DIM}]{ICON['sep_thin']}[/]"
 
-
-def _format_loading(base: str, progress_stage: str = "") -> str:
-    """Render loading message with optional per-stage progress."""
-    lines = [f"[{CLR_DIM}][bold]{ICON['hourglass']}[/] {base}[/]"]
-    if progress_stage == "playbook":
-        lines.append(f"[{CLR_DIM}]  {ICON['loading_dots'][0]} Analyzing activity data and generating playbook...[/]")
-    elif progress_stage == "coach":
-        lines.append(f"[{CLR_DIM}]  {ICON['loading_dots'][0]} Running coach analyzers to find patterns...[/]")
-    return "\n".join(lines)
 
 
 def _confidence_tag(confidence: float) -> str:
@@ -120,32 +114,134 @@ def _section_title(title: str, *, subtitle: str | None = None) -> str:
 # ──────────────────────────────────────────────
 
 
-def _format_verdict(pb: Playbook) -> str:
-    """Top-of-screen verdict: status + headline + context summary."""
+def _format_verdict_summary_line(pb: Playbook) -> str:
+    """One-line context summary (compact overview)."""
+    ctx = pb.context
+    bits: list[str] = []
+    if "today_net" in ctx:
+        bits.append(f"today {_fmt_pts(ctx['today_net'])}")
+    if "daily_target" in ctx:
+        bits.append(f"target {_fmt_pts(ctx['daily_target'])}")
+    if ctx.get("gap", 0) > 0:
+        bits.append(f"gap {_fmt_pts(ctx['gap'])}")
+    if "days_left" in ctx:
+        bits.append(f"{ctx['days_left']}d left this week")
+    if ctx.get("week_delta", 0) != 0:
+        bits.append(f"week {_fmt_pts(ctx['week_delta'])} vs pace")
+    return dot_sep(pad="  ").join(bits)
+
+
+def _format_verdict(pb: Playbook, *, include_summary: bool = False) -> str:
+    """Verdict for scroll content (overview) or border (insights)."""
     badge = _status_badge(pb.goal)
     headline = pb.headline
-    lines: list[str] = []
-
-    lines.append(f"  {badge}  {headline}")
-
-    # Add a one-line context summary from available data
-    ctx = pb.context
-    context_bits: list[str] = []
-    if "today_net" in ctx:
-        context_bits.append(f"today {_fmt_pts(ctx['today_net'])}")
-    if "daily_target" in ctx:
-        context_bits.append(f"target {_fmt_pts(ctx['daily_target'])}")
-    if "gap" in ctx and ctx["gap"] > 0:
-        context_bits.append(f"gap {_fmt_pts(ctx['gap'])}")
-    if "days_left" in ctx:
-        context_bits.append(f"{ctx['days_left']}d left this week")
-    if "week_delta" in ctx and ctx["week_delta"] != 0:
-        context_bits.append(f"week {_fmt_pts(ctx['week_delta'])} vs pace")
-
-    if context_bits:
-        lines.append(f"  [{CLR_DIM}]{'  ·  '.join(context_bits)}[/]")
-
+    lines: list[str] = [f"  {badge}  {headline}"]
+    if include_summary:
+        summary = _format_verdict_summary_line(pb)
+        if summary:
+            lines.append(f"  [{CLR_DIM}]{summary}[/]")
     return "\n".join(lines)
+
+
+_BORDER_GOAL_LABELS = {
+    "on_track": ("ON TRACK", CLR_GREEN),
+    "hit_today_target": ("CLOSE GAP", CLR_AMBER),
+    "fix_week": ("RECOVER WEEK", CLR_RED),
+    "start_tracking": ("SETUP", CLR_DIM),
+}
+
+
+def _format_verdict_border(pb: Playbook) -> str:
+    """Status for top border: ◉ CLOSE GAP (TODAY chip covers the headline)."""
+    label, color = _BORDER_GOAL_LABELS.get(pb.goal, (pb.goal, CLR_DIM))
+    bullet = ICON["dot"]
+    return f"[bold {color}]{bullet} {label}[/]"
+
+
+def _pace_border_chips(pb: Playbook) -> dict[str, str]:
+    """PACE segments keyed by label (TODAY, GAP, TIME, WEEK)."""
+    ctx = pb.context
+    target = float(ctx.get("daily_target") or 0)
+    today_net = float(ctx.get("today_net", 0))
+    gap = float(ctx.get("gap") or 0)
+    days_left = int(ctx.get("days_left") or 0)
+    week_delta = float(ctx.get("week_delta") or 0)
+    chips: dict[str, str] = {}
+
+    if target > 0:
+        ratio = max(0.0, min(today_net / target, 1.0))
+        color = (
+            CLR_GREEN if today_net >= target * 0.8
+            else CLR_AMBER if today_net >= 0
+            else CLR_RED
+        )
+        chips["TODAY"] = (
+            f"[bold {color}]TODAY[/] {_confidence_bar(ratio, width=6, bar_color=color)}"
+            f" [{color}]{_fmt_pts(today_net)}[/][{CLR_DIM}]/{_fmt_pts(target)}[/]"
+        )
+
+    if gap > 0 and target > 0:
+        ratio = min(gap / target, 1.0)
+        color = CLR_AMBER if ratio < 0.5 else CLR_RED
+        chips["GAP"] = (
+            f"[bold {color}]GAP[/] {_confidence_bar(ratio, width=6, bar_color=color)}"
+            f" [{color}]{_fmt_pts(gap)}[/]"
+        )
+
+    if days_left >= 0:
+        ratio = min(days_left / 7.0, 1.0)
+        chips["TIME"] = (
+            f"[bold {CLR_ACCENT}]TIME[/] "
+            f"{_confidence_bar(ratio, width=6, bar_color=CLR_ACCENT)}"
+            f" [{CLR_ACCENT}]{days_left}d left[/]"
+        )
+
+    if week_delta != 0:
+        scale = max(abs(week_delta), target * 3, 20.0)
+        ratio = min(abs(week_delta) / scale, 1.0)
+        color = CLR_GREEN if week_delta >= 0 else CLR_RED
+        chips["WEEK"] = (
+            f"[bold {color}]WEEK[/] {_confidence_bar(ratio, width=6, bar_color=color)}"
+            f" [{color}]{_fmt_pts(week_delta)}[/] [{CLR_DIM}]vs pace[/]"
+        )
+
+    return chips
+
+
+def _format_pace_border_line(
+    pb: Playbook,
+    *labels: str,
+    chip_gap: str = SEG_GAP,
+) -> str:
+    """Join selected PACE chips for a border row."""
+    chips = _pace_border_chips(pb)
+    parts = [chips[label] for label in labels if label in chips]
+    return chip_gap.join(parts)
+
+
+def _format_insights_border_title(pb: Playbook) -> str:
+    """Top border: Insights | ◉ CLOSE GAP  …  TODAY  GAP."""
+    title = (
+        f"[bold {CLR_ACCENT}]Insights[/]"
+        f"[{CLR_DIM}] | [/]"
+        f"{_format_verdict_border(pb)}"
+    )
+    pace = _format_pace_border_line(pb, "TODAY", "GAP")
+    if pace:
+        title = f"{title}{SEG_GAP}{pace}"
+    return title
+
+
+def _format_insights_border_subtitle(pb: Playbook) -> str:
+    """Bottom border: TIME + WEEK (remaining PACE)."""
+    return _format_pace_border_line(
+        pb, "TIME", "WEEK", chip_gap=SEG_GAP * 4,
+    )
+
+
+def _format_pace_border_subtitle(pb: Playbook) -> str:
+    """Backward-compatible alias for tests."""
+    return _format_insights_border_subtitle(pb)
 
 
 # ──────────────────────────────────────────────
@@ -180,8 +276,9 @@ def _format_playbook_block(
             amt = f" {step.amount}" if step.amount and step.amount != ICON["multiply"] + "1" else ""
             step_line = f"  {num} {label}{amt}  {pts_str}"
             if not compact and step.points > 0:
-                target = float(pb.context.get("gap", pb.context.get("daily_target", 0)) or 1)
-                step_line += f"  {_progress_bar(step.points, target, width=6)}"
+                gap = float(pb.context.get("gap") or pb.context.get("daily_target") or 0)
+                if gap > 0:
+                    step_line += f"  {_confidence_bar(min(step.points / gap, 1.0), width=8)}"
             lines.append(step_line)
             if step.reason and not compact:
                 lines.append(f"    [{CLR_DIM}]{step.reason}[/]")
@@ -233,24 +330,19 @@ def _format_playbook_block(
 
 def format_overview_playbook(
     bundle: InsightsBundle | None,
-    *,
-    is_loading: bool = False,
-    progress_stage: str = "",
 ) -> str:
     """Compact playbook for the Overview dashboard pane.
 
     Shows verdict + best 3 steps.
     Omits progress bars and lookback to fit the Overview's smaller space.
     """
-    if is_loading:
-        return _format_loading("Computing playbook...", progress_stage)
     if bundle is None or not bundle.playbook.headline:
         return "[dim]Playbook will appear after data loads.[/]"
 
     pb = bundle.playbook
 
     parts: list[str] = []
-    parts.append(_format_verdict(pb))
+    parts.append(_format_verdict(pb, include_summary=True))
     parts.append("\n")
     parts.append(_format_playbook_block(pb, include_math=False, compact=True, max_steps=6))
 
@@ -259,32 +351,22 @@ def format_overview_playbook(
 
 def format_insights_tab(
     bundle: InsightsBundle | None,
-    *,
-    is_loading: bool = False,
-    progress_stage: str = "",
 ) -> str:
     """Full detailed insights for the Insights tab.
 
-    Layout: Verdict -> TODAY -> THIS WEEK -> PATTERNS
+    Layout: TODAY playbook -> THIS WEEK -> PATTERNS (scroll body).
+    Verdict + TODAY/GAP PACE sit in the top border; TIME/WEEK in the bottom border.
     TODAY shows playbook with reasons, alternatives, and lookback context.
     THIS WEEK shows the imperative Focus / Protect / Skip plan.
     PATTERNS shows supporting evidence from Discoveries and Coach.
     """
-    if is_loading:
-        return _format_loading("Computing insights...", progress_stage)
     if bundle is None:
         return "[dim]No insights yet.[/]"
 
     pb = bundle.playbook
     parts: list[str] = []
 
-    # ── 1. Verdict ──
-    parts.append(_format_verdict(pb))
-    parts.append("\n")
-    parts.append(_section_sep())
-
     # ── TODAY (playbook with reasons + alternatives + lookback) ──
-    parts.append("\n")
     parts.append(_section_title("TODAY"))
     parts.append("\n")
     parts.append(_format_playbook_block(pb, include_math=True, compact=False, max_steps=6))
@@ -367,10 +449,7 @@ def format_discoveries(discoveries: list[Discovery]) -> str:
     lines = []
 
     for i, d in enumerate(discoveries, 1):
-        label, color = KIND_META.get(d.kind, (ICON["status_on_track"], CLR_DIM))
-
-        filled = int(d.confidence * 10)
-        bar    = ICON["bar_filled"] * filled + ICON["bar_empty"] * (10 - filled)
+        label, color = KIND_META.get(d.kind, (ICON["dot"], CLR_DIM))
         conf_color = (
             CLR_GREEN if d.confidence >= 0.85
             else CLR_AMBER if d.confidence >= 0.75
@@ -378,7 +457,7 @@ def format_discoveries(discoveries: list[Discovery]) -> str:
         )
 
         lines.append(
-            f"[bold {color}]{label}[/]  [{conf_color}]{bar}[/] {d.confidence:.0%}"
+            f"[bold {color}]{label}[/]  {_confidence_bar(d.confidence, bar_color=conf_color)}"
         )
         lines.append(f"[bold white]{d.title.upper()}[/]")
         lines.append(f"[{CLR_DIM}]{d.summary}[/]")
@@ -408,9 +487,6 @@ def format_coach_findings(findings: list[CoachFinding]) -> str:
 
     for i, f in enumerate(findings, 1):
         label, color = KIND_META.get(f.kind, (ICON["low_control"], CLR_DIM))
-
-        filled = int(f.confidence * 10)
-        bar = ICON["bar_filled"] * filled + ICON["bar_empty"] * (10 - filled)
         conf_color = (
             CLR_GREEN if f.confidence >= 0.85
             else CLR_AMBER if f.confidence >= 0.75
@@ -418,7 +494,7 @@ def format_coach_findings(findings: list[CoachFinding]) -> str:
         )
 
         lines.append(
-            f"[bold {color}]{label}[/]  [{conf_color}]{bar}[/] {f.confidence:.0%}"
+            f"[bold {color}]{label}[/]  {_confidence_bar(f.confidence, bar_color=conf_color)}"
         )
         lines.append(f"[bold white]{f.title.upper()}[/]")
         lines.append(f"[{CLR_DIM}]{f.summary}[/]")
@@ -454,7 +530,11 @@ def format_command_playbook_line(bundle: InsightsBundle | None) -> str | None:
 
 
 class PlaybookScrollPane(VerticalScroll):
-    """Bordered, vertically scrollable playbook/coach text."""
+    """Bordered, vertically scrollable playbook/coach text.
+
+    Shows an animated spinner + pulsing stage text while loading,
+    then switches to static Rich markup content once data arrives.
+    """
 
     DEFAULT_CSS = """
     PlaybookScrollPane {
@@ -480,14 +560,50 @@ class PlaybookScrollPane(VerticalScroll):
         background: transparent;
         border: none;
     }
+    PlaybookScrollPane > #playbook-loading-area {
+        align: center middle;
+        width: 1fr;
+        height: auto;
+        padding: 2 0;
+    }
     """
 
     def compose(self):
         yield Static("", id="playbook-scroll-content", markup=True, expand=True)
+        with Vertical(id="playbook-loading-area"):
+            yield LoadingWidget("Computing...")
+            yield PulseText("")
+
+    def set_loading(self, base: str, stage: str = "") -> None:
+        """Show the animated spinner and pulsing stage text.
+
+        *base* is shown beside the spinner; *stage* appears as
+        pulsing text below it (mapped via ``_STAGE_LABELS``).
+        """
+        content = self.query_one("#playbook-scroll-content", Static)
+        content.display = False
+        stage_text = _STAGE_LABELS.get(stage, stage)
+        try:
+            self.query_one("#playbook-loading-area").display = True
+            self.query_one("#loading-label", Label).update(base)
+            self.query_one("#loading-label", Label).display = bool(base)
+            stage_label = self.query_one(PulseText)
+            stage_label.update(stage_text)
+            stage_label.display = bool(stage_text)
+        except Exception:
+            pass
+
+    def _hide_loading(self) -> None:
+        """Hide animated widgets and show the static content area."""
+        try:
+            self.query_one("#playbook-loading-area").display = False
+        except Exception:
+            pass
 
     def on_mount(self) -> None:
         self.can_focus = True
         self.scroll_home(animate=False)
+        self._hide_loading()
 
     def set_markup(
         self,
@@ -496,7 +612,10 @@ class PlaybookScrollPane(VerticalScroll):
         border_title: str = "",
         border_subtitle: str = "",
     ) -> None:
-        self.query_one("#playbook-scroll-content", Static).update(content)
+        self._hide_loading()
+        content_widget = self.query_one("#playbook-scroll-content", Static)
+        content_widget.display = True
+        content_widget.update(content)
         self.border_title = border_title
         self.border_subtitle = border_subtitle
         self.scroll_home(animate=False)
@@ -505,6 +624,13 @@ class PlaybookScrollPane(VerticalScroll):
 class DetailedInsightsWidget(PlaybookScrollPane):
     """Scrollable playbook + coach for the Insights tab."""
 
+    DEFAULT_CSS = """
+    DetailedInsightsWidget {
+        border-title-align: left;
+        border-subtitle-align: right;
+    }
+    """
+
     def set_bundle(
         self,
         bundle: InsightsBundle | None,
@@ -512,16 +638,15 @@ class DetailedInsightsWidget(PlaybookScrollPane):
         is_loading: bool = False,
         progress_stage: str = "",
     ) -> None:
-        subtitle = ""
-        if bundle and bundle.playbook.context.get("today_net") is not None:
-            net = bundle.playbook.context["today_net"]
-            subtitle = f"[{CLR_DIM}]Today {_fmt_pts(net)}[/]"
+        if is_loading:
+            self.set_loading("Computing insights...", progress_stage)
+            self.border_title = f"[bold {CLR_ACCENT}]Insights[/]"
+            self.border_subtitle = ""
+            return
+
+        pb = bundle.playbook
         self.set_markup(
-            format_insights_tab(
-                bundle,
-                is_loading=is_loading,
-                progress_stage=progress_stage,
-            ),
-            border_title=f"[bold {CLR_ACCENT}]Insights[/]",
-            border_subtitle=subtitle,
+            format_insights_tab(bundle),
+            border_title=_format_insights_border_title(pb),
+            border_subtitle=_format_insights_border_subtitle(pb),
         )

@@ -17,7 +17,8 @@ from __future__ import annotations
 # ──────────────────────────────────────────────
 
 ICON = {
-    # ── Status badges ────────────────────
+    # ── Status badges / list dots (fisheye ◉) ──
+    "dot": "\u25c9",
     "status_on_track": "\u25c9",
     "status_close_gap": "\u25c9",
     "status_recover": "\u25c9",
@@ -28,7 +29,7 @@ ICON = {
     "blocked": "\u25f7",
     "low_control": "\u25cb",
     "focus_pointer": "\u25b8",
-    "bullet": "\u2022",
+    "bullet": "\u25c9",
     "star": "\u2605",
     "warning": "\u26a0",
     "neglect": "\u2205",
@@ -53,14 +54,20 @@ ICON = {
 
     # ── Sync & time ─────────────────────
     "sync": "\u27f3",
+    "reload_local": "\u2261",
+    "reload_cache": "\u25a3",
+    "reload_api": "\u27f3",
+    "csv_span": "\u2395",
+    "projects": "\u229e",
+    "quota": "\u2394",
     "hourglass": "\u23f3",
     "clock": "\u23f1",
 
-    # ── Progress / bars ──────────────────
+    # ── Progress / bars (heavy fill ━, thin track ─) ──
     "bar_filled": "\u2501",
     "bar_empty": "\u2500",
-    "bar_block": "\u2588",
-    "bar_fractional": ["\u258f", "\u258e", "\u258d", "\u258c", "\u258b", "\u258a", "\u2589"],
+    "bar_block": "\u2501",
+    "bar_fractional": ["\u2501"],
 
     # ── Braille spinners ────────────────
     "spinner_frames": [
@@ -79,8 +86,8 @@ ICON = {
 
     # ── Separators ───────────────────────
     "sep_thin": "\u2500" * 22,
-    "sep_thick": "\u2550" * 22,
-    "sep_medium": "\u2501" * 22,
+    "sep_thick": "\u2500" * 22,
+    "sep_medium": "\u2500" * 22,
 
     # ── Sparkline levels ────────────────
     "spark_chars": [
@@ -97,6 +104,7 @@ ICON = {
 
     # ── Symbols ─────────────────────────
     "multiply": "\u00d7",
+    "info": "\u2139",
     "em_dash": "\u2014",
     "plus": "+",
     "minus": "\u2212",
@@ -141,7 +149,8 @@ ICON_ASCII = {
     "blocked": "[B]",
     "low_control": "( )",
     "focus_pointer": ">",
-    "bullet": "*",
+    "dot": "(o)",
+    "bullet": "(o)",
     "star": "*",
     "warning": "!",
     "neglect": "(/)",
@@ -160,6 +169,12 @@ ICON_ASCII = {
     "nav_page_back": "<<",
     "nav_page_forward": ">>",
     "sync": "(sync)",
+    "reload_local": "L",
+    "reload_cache": "C",
+    "reload_api": "A",
+    "csv_span": "D",
+    "projects": "P",
+    "quota": "Q",
     "hourglass": "(...)",
     "clock": "(t)",
     "bar_filled": "=",
@@ -188,6 +203,15 @@ ICON_ASCII = {
 }
 
 
+ICON_GAP = "\u2002"
+SEG_GAP = "\u2003"
+
+
+def dot_sep(*, pad: str = " ") -> str:
+    """Inline separator between phrases (same glyph as status/list dots)."""
+    return f"{pad}{icon('dot')}{pad}"
+
+
 def icon(key: str) -> str:
     """Return the Unicode icon for *key*, falling back to ASCII if needed.
 
@@ -206,6 +230,17 @@ def spinner_frame(index: int) -> str:
     return frames[index % len(frames)]
 
 
+def icon_text(
+    key: str,
+    text: str,
+    *,
+    icon_color: str = "#8d98a7",
+    text_color: str = "#d7dde8",
+) -> str:
+    """Render ``icon + gap + text`` as Rich markup."""
+    return f"[{icon_color}]{icon(key)}[/][{text_color}]{ICON_GAP}{text}[/]"
+
+
 def spark_char(value: float, min_val: float, max_val: float) -> str:
     """Map a numeric value to a sparkline character (▁ through █).
 
@@ -221,17 +256,10 @@ def spark_char(value: float, min_val: float, max_val: float) -> str:
 
 
 def fractional_bar(ratio: float) -> str:
-    """Return a fractional block character for *ratio* (0.0-1.0).
-
-    Uses ▏▎▍▌▋▊▉ for fractional portions and █ for full blocks.
-    """
-    fracs = ICON["bar_fractional"]
-    if ratio >= 1.0:
-        return "\u2588"
+    """Return one heavy bar cell when *ratio* warrants a partial fill (0.0-1.0)."""
     if ratio <= 0.0:
         return ""
-    idx = min(len(fracs) - 1, int(ratio * len(fracs)))
-    return fracs[idx]
+    return ICON["bar_filled"]
 
 
 def intensity_block(ratio: float) -> str:

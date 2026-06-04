@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
 from toggl.activity_rules import ActivityRules
-from toggl.widgets.icons import ICON
+from toggl.widgets.icons import ICON, dot_sep
 from toggl.cache import DataCache, get_current_week, get_week_dates
 from toggl.services.metrics import MetricsService
 from toggl.services.recent_context import (
@@ -326,9 +326,9 @@ class PlaybookService:
             remind = self._rules.get_remind_after_gap_days(name)
             if remind is not None:
                 if gap_days >= remind:
-                    reason = f"{ICON['gap_reminder']} {gap_days}d since last {ICON['em_dash']} remind after {remind}d \u00b7 +{float(pts):.0f} pts"
+                    reason = f"{ICON['gap_reminder']} {gap_days}d since last {ICON['em_dash']} remind after {remind}d{dot_sep()}+{float(pts):.0f} pts"
                 elif gap_days >= max(remind - 1, 1):
-                    reason = f"{ICON['gap_reminder']} {gap_days}d since last \u00b7 streak at risk \u00b7 +{float(pts):.0f} pts"
+                    reason = f"{ICON['gap_reminder']} {gap_days}d since last{dot_sep()}streak at risk{dot_sep()}+{float(pts):.0f} pts"
             lift = positive_lift.get(name, 0.0)
             if lift >= 2.0:
                 reason += f"  (net {lift:+.1f} when you do this)"
@@ -579,7 +579,7 @@ class PlaybookService:
             if y.positives:
                 tags.append(f"[#37d994]{', '.join(y.positives)}[/]")
             if tags:
-                y_str += f"  {' · '.join(tags)}"
+                y_str += f"  {dot_sep().join(tags)}"
             if y.top_project and y.top_project_hours >= 0.5:
                 y_str += f"  ({y.top_project} {y.top_project_hours:.1f}h)"
             lines.append(y_str)

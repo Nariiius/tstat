@@ -6,13 +6,7 @@ import json
 from typing import Any
 
 from toggl.activity_rules import ActivityRules
-from toggl.const import (
-    CONFIG_FILE,
-    DEFAULT_DAILY_TARGET,
-    RED,
-    RESET,
-)
-from toggl.const import GREEN, YELLOW, CYAN, DIM
+from toggl.const import CONFIG_FILE, DEFAULT_DAILY_TARGET, RED, RESET
 from toggl.rate_colors import RateColors
 from toggl.category import CategoryRegistry
 

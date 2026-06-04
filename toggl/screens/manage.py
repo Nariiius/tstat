@@ -15,6 +15,7 @@ from toggl.cache import DataCache
 from toggl.neg import delete_activity_entry, update_activity_date
 from toggl.screens.dialogs import ConfirmScreen
 from toggl.widgets.date_stepper import DateStepper
+from toggl.widgets.notifications import status_message
 
 
 class ManageScreen(ModalScreen):
@@ -310,7 +311,7 @@ class ManageScreen(ModalScreen):
 
         entry = self._get_selected_entry()
         if entry is None:
-            self.notify("No entry selected", severity="warning")
+            status_message(self.app, "Select an entry in the table first.", severity="warning")
             return
 
         # Push confirmation
@@ -321,9 +322,9 @@ class ManageScreen(ModalScreen):
                 )
                 if ok:
                     self._refresh_tables()
-                    self.notify(msg)
+                    status_message(self.app, msg)
                 else:
-                    self.notify(msg, severity="error")
+                    status_message(self.app, msg, severity="error")
 
         self.app.push_screen(
             ConfirmScreen("Delete Entry", f"Delete '{entry['name']}' from {entry['date']}?"),
@@ -337,7 +338,7 @@ class ManageScreen(ModalScreen):
 
         entry = self._get_selected_entry()
         if entry is None:
-            self.notify("No entry selected", severity="warning")
+            status_message(self.app, "Select an entry in the table first.", severity="warning")
             return
 
         self._editing_entry = entry
@@ -346,7 +347,7 @@ class ManageScreen(ModalScreen):
         try:
             entry_date = datetime.strptime(entry["date"], "%Y-%m-%d").date()
         except ValueError:
-            self.notify("Invalid date format", severity="error")
+            status_message(self.app, "Could not parse the entry date.", severity="error")
             return
 
         # Set up the date stepper
@@ -399,9 +400,9 @@ class ManageScreen(ModalScreen):
         if ok:
             self._hide_edit_bar()
             self._refresh_tables()
-            self.notify(msg)
+            status_message(self.app, msg)
         else:
-            self.notify(msg, severity="error")
+            status_message(self.app, msg, severity="error")
 
     def _cancel_edit(self) -> None:
         """Cancel date editing."""

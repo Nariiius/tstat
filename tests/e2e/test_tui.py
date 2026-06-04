@@ -201,7 +201,7 @@ async def test_all_views_render_without_error(tui_data):
 
 @pytest.mark.asyncio
 async def test_insights_sync_line_shows_status(tui_data):
-    """Insights tab footer shows compact sync/quota summary."""
+    """Bottom status bar shows compact sync/quota summary."""
     from textual.widgets import Static
 
     app = TogglTUI()
@@ -212,10 +212,11 @@ async def test_insights_sync_line_shows_status(tui_data):
         await pilot.pause()
         assert app.active_view_index == 2
 
-        sync_line = app.query_one("#insights-sync-line", Static)
-        text = str(sync_line.render())
-        assert "sync" in text.lower()
-        assert "cached" in text.lower()
+        meta = app.query_one("#meta-coverage", Static)
+        text = str(meta.render())
+        assert "w/" in text
+        quota = app.query_one("#meta-quota", Static)
+        assert "?" in str(quota.render()) or "/" in str(quota.render())
 
 
 @pytest.mark.asyncio

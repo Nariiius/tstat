@@ -104,13 +104,13 @@ class TestAppLaunch:
             assert app.query_one("#insights-detail-widget") is not None
 
     @pytest.mark.asyncio
-    async def test_sync_status_label_renders(self, tui_data):
-        """The sync status label has content."""
+    async def test_reload_status_label_renders(self, tui_data):
+        """The reload status label has content."""
         app = TogglTUI()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            sync_label = app.query_one("#sync-status", Static)
-            assert len(str(sync_label.render())) > 0
+            reload_label = app.query_one("#reload-local", Static)
+            assert len(str(reload_label.render())) > 0
 
     @pytest.mark.asyncio
     async def test_all_views_switch_without_crash(self, tui_data):
@@ -132,7 +132,7 @@ class TestAppLaunch:
         assert icon("warning") is not None
         assert spark_char(5, 0, 10) in ICON["spark_chars"]
         assert fractional_bar(0.0) == ""
-        assert fractional_bar(1.0) == ICON["bar_block"]
+        assert fractional_bar(1.0) == ICON["bar_filled"]
 
     @pytest.mark.asyncio
     async def test_loading_widget_imports(self, tui_data):
@@ -143,7 +143,7 @@ class TestAppLaunch:
         assert ProgressIndicator(width=20) is not None
 
     @pytest.mark.asyncio
-    async def test_splash_screen_imports(self, tui_data):
-        """SplashScreen class can be imported and composed (test-only, no push)."""
-        from toggl.tui import SplashScreen
-        assert SplashScreen is not None
+    async def test_launcher_imports(self, tui_data):
+        """Terminal launcher module is available."""
+        from toggl.launcher import launch
+        assert callable(launch)

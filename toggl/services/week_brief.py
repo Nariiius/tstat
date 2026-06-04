@@ -23,6 +23,7 @@ from toggl.activity_rules import ActivityRules
 from toggl.cache import DataCache
 from toggl.config import Config
 from toggl.services.coach import CoachFinding
+from toggl.widgets.icons import dot_sep
 from toggl.services.discovery import Discovery
 from toggl.services.metrics import MetricsService
 from toggl.services.recent_context import RecentContext, build_recent_context
@@ -95,9 +96,9 @@ class WeekBriefService:
             f"Week {actual:+.1f} ({delta:+.1f} vs pace)"
         )
         if days_left > 0:
-            headline += f" \u00b7 {days_left}d left"
+            headline += f"{dot_sep()}{days_left}d left"
         if per_day > 0:
-            headline += f" \u00b7 need ~{per_day}/d"
+            headline += f"{dot_sep()}need ~{per_day}/d"
 
         # ── Aggregated week data ──
         week_hours = self._compute_week_project_hours(today, week_str)
@@ -161,7 +162,7 @@ class WeekBriefService:
             actions.append(WeekAction(
                 name=name,
                 imperative=f"Track {name} ~{amt} \u2014 neglected {days_since}d, was {total_h:.1f}h total history",
-                evidence=f"+{float(rate):.0f}/h \u00b7 {days_since}d idle \u00b7 importance {importance:.1f}",
+                evidence=f"+{float(rate):.0f}/h{dot_sep()}{days_since}d idle{dot_sep()}importance {importance:.1f}",
             ))
             seen.add(name)
 
@@ -185,8 +186,8 @@ class WeekBriefService:
             amt = f"{h}h" if h >= 1 else f"{m}m"
             actions.append(WeekAction(
                 name=name,
-                imperative=f"Track {name} ~{amt} \u2014 not logged this week \u00b7 +{float(rate):.0f}/h",
-                evidence=f"+{float(rate):.0f}/h \u00b7 0h logged this week",
+                imperative=f"Track {name} ~{amt} \u2014 not logged this week{dot_sep()}+{float(rate):.0f}/h",
+                evidence=f"+{float(rate):.0f}/h 0h logged this week",
             ))
             seen.add(name)
             if len(actions) >= self.MAX_FOCUS:
@@ -206,7 +207,7 @@ class WeekBriefService:
                     actions.append(WeekAction(
                         name=f.subject,
                         imperative=f"Resume {f.subject} \u2014 {f.summary.split(chr(10))[0][:120]}",
-                        evidence=f"Coach: {f.kind} \u00b7 +{float(pts):.0f} pts",
+                        evidence=f"Coach: {f.kind}{dot_sep()}+{float(pts):.0f} pts",
                     ))
                     seen.add(f.subject)
                     if len(actions) >= self.MAX_FOCUS:
@@ -254,7 +255,7 @@ class WeekBriefService:
                     actions.append(WeekAction(
                         name=f.subject,
                         imperative=f"Keep {f.subject} \u2014 on a roll, above your baseline",
-                        evidence=f"Coach: frequency_surge \u00b7 +{float(pts):.0f} pts",
+                        evidence=f"Coach: frequency_surge{dot_sep()}+{float(pts):.0f} pts",
                     ))
                     seen.add(f.subject)
 
@@ -271,7 +272,7 @@ class WeekBriefService:
                 actions.append(WeekAction(
                     name=hab,
                     imperative=f"Keep {hab} \u2014 on your best recent day ({recent.best_recent.label})",
-                    evidence=f"Best day net: {recent.best_recent.net:+.1f} \u00b7 +{float(pts):.0f} pts",
+                    evidence=f"Best day net: {recent.best_recent.net:+.1f}{dot_sep()}+{float(pts):.0f} pts",
                 ))
                 seen.add(hab)
                 if len(actions) >= self.MAX_PROTECT:
@@ -302,7 +303,7 @@ class WeekBriefService:
             actions.append(WeekAction(
                 name=name,
                 imperative=f"Cut {name} \u2014 logged {count}\u00d7 this week",
-                evidence=f"-{float(pts):.0f} pts each \u00b7 breaking this pattern has high impact",
+                evidence=f"-{float(pts):.0f} pts each{dot_sep()}breaking this pattern has high impact",
             ))
             seen.add(name)
             if len(actions) >= self.MAX_SKIP:
@@ -354,7 +355,7 @@ class WeekBriefService:
                     actions.append(WeekAction(
                         name=f.subject,
                         imperative=f"Watch {f.subject} \u2014 appearing more than usual recently",
-                        evidence=f"Coach: negative_cluster \u00b7 -{float(pts):.0f} pts each",
+                        evidence=f"Coach: negative_cluster{dot_sep()}-{float(pts):.0f} pts each",
                     ))
                     seen.add(f.subject)
                     if len(actions) >= self.MAX_SKIP:

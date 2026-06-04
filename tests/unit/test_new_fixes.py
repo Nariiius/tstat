@@ -7,12 +7,8 @@ import pytest
 from datetime import date, timedelta
 
 from toggl.api import get_api_token, TogglAPIError
-from toggl.cache import (
-    _patch_daily_csv,
-    _patch_weekly_csv,
-    needs_auto_update,
-    parse_iso,
-)
+from toggl.cache import needs_auto_update, parse_iso
+from toggl.services.sync import _patch_daily_csv, _patch_weekly_csv
 
 
 def test_get_api_token_raises_error_on_missing(monkeypatch):

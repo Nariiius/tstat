@@ -1,6 +1,6 @@
 """Calculation engine and format helpers."""
 
-from toggl.config import POINTS, NEGATIVES, POSITIVES, get_daily_target
+from toggl.config import POINTS, NEGATIVES, POSITIVES
 
 
 def calculate_logged_activity_totals(

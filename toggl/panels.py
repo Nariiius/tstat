@@ -13,6 +13,7 @@ from textual.message import Message
 from textual.widgets import Button, DataTable, Static
 
 from toggl.widgets.auto_width_table import AutoWidthDataTable
+from toggl.widgets.icons import icon, icon_text
 
 from toggl.cache import DataCache
 from toggl.api import API_RUN_STATS, _format_reset_window
@@ -67,30 +68,35 @@ def get_sync_status_data() -> dict[str, Any]:
     }
 
 
-def compact_sync_status() -> str:
-    """One-line Rich-markup sync/quota summary for the Insights tab footer."""
+def compact_sync_status_parts() -> tuple[str, str, str]:
+    """Return coverage, projects-cache, and quota chips for the status tray."""
     status = get_sync_status_data()
-    parts: list[str] = []
 
-    parts.append(f"[#8d98a7]sync[/] {status['last_updated']}")
-    parts.append(f"[#8d98a7]{status['synced_weeks']}w/{status['synced_days']}d cached[/]")
+    coverage = icon_text(
+        "reload_local", f"{status['synced_weeks']}w/{status['synced_days']}d"
+    )
 
     cache_age = status["projects_cache_age_days"]
     if cache_age is not None:
-        age_str = f"{cache_age:.0f}d" if cache_age < 90 else "stale"
-        parts.append(f"[#8d98a7]projects {age_str}[/]")
+        age_str = f"{cache_age:.0f}d" if cache_age < 90 else "!"
+        projects = icon_text("projects", age_str)
     else:
-        parts.append("[#ff5f5f]no projects cache[/]")
+        projects = f"[#ff5f5f]{icon_text('projects', '--')}[/]"
 
     remaining = status["quota_remaining"]
     limit = status["quota_limit"]
     if remaining is not None and limit is not None:
         color = "#ff5f5f" if remaining < 5 else "#8d98a7"
-        parts.append(f"[{color}]{remaining}/{limit} quota[/]")
+        quota = icon_text("quota", f"{remaining}/{limit}", icon_color=color)
     else:
-        parts.append("[#8d98a7]quota unknown[/]")
+        quota = icon_text("quota", "?")
 
-    return "  ".join(parts)
+    return coverage, projects, quota
+
+
+def compact_sync_status() -> str:
+    """Compact Rich-markup sync/quota summary for the bottom status bar."""
+    return " ".join(compact_sync_status_parts())
 
 
 class SyncPanel(Container):
@@ -422,16 +428,17 @@ class OverviewPanel(Container):
         progress_stage: str = "",
     ) -> None:
         insights = self.query_one("#overview-insights", PlaybookScrollPane)
+        if insights_loading:
+            insights.set_loading("Computing playbook...", progress_stage)
+            insights.border_title = "[b][#63f3ff]Playbook[/][/]"
+            return
+
         subtitle = ""
         if insights_bundle and insights_bundle.playbook.context.get("today_net") is not None:
             net = insights_bundle.playbook.context["today_net"]
             subtitle = f"[#8d98a7]Today {format_signed_rich(net)}[/]"
         insights.set_markup(
-            format_overview_playbook(
-                insights_bundle,
-                is_loading=insights_loading,
-                progress_stage=progress_stage,
-            ),
+            format_overview_playbook(insights_bundle),
             border_title="[b][#63f3ff]Playbook[/][/]",
             border_subtitle=subtitle,
         )
@@ -442,7 +449,7 @@ class OverviewPanel(Container):
         """Add rows, marking section headers with keys so cursor skips them."""
         for row in rows:
             first = row[0]
-            if isinstance(first, Text) and str(first).startswith("•"):
+            if isinstance(first, Text) and str(first).startswith(icon("bullet")):
                 table.add_row(*row, key=f"_section_{len(table.rows)}")
             else:
                 table.add_row(*row)
@@ -477,7 +484,7 @@ class OverviewPanel(Container):
 
 
 class InsightsPanel(Container):
-    """Insights tab — playbook, coach, and compact sync/quota footer."""
+    """Insights tab — playbook and coach."""
 
     DEFAULT_CSS = """
     InsightsPanel {
@@ -491,21 +498,11 @@ class InsightsPanel(Container):
         height: 1fr;
         min-height: 0;
     }
-    #insights-sync-line {
-        height: auto;
-        min-height: 1;
-        padding: 0 1;
-        text-align: center;
-        content-align: center middle;
-        border: none;
-        background: #0b1016;
-    }
     """
 
     def compose(self) -> ComposeResult:
         with Vertical(id="insights-panel-inner"):
             yield DetailedInsightsWidget(id="insights-detail-widget")
-            yield Static(id="insights-sync-line")
 
     def refresh_data(
         self,
@@ -521,5 +518,3 @@ class InsightsPanel(Container):
             is_loading=is_loading,
             progress_stage=progress_stage,
         )
-        sync_line = self.query_one("#insights-sync-line", Static)
-        sync_line.update(sync_summary or compact_sync_status())

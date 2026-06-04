@@ -90,8 +90,8 @@ def stub_api(monkeypatch):
                 daily[ds] = {"Fitness": 0.7}
         return weekly, daily
 
-    import toggl.cache
-    monkeypatch.setattr(toggl.cache, "fetch_week_data", _fake_fetch)
+    import toggl.services.sync as sync_mod
+    monkeypatch.setattr(sync_mod, "fetch_week_data", _fake_fetch)
     return _fake_fetch
 
 

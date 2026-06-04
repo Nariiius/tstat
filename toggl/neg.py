@@ -4,11 +4,19 @@ import os
 import csv
 import io
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 
 from toggl.const import NEGATIVES_CSV_FILE, POSITIVES_CSV_FILE
-from toggl.const import RED, GREEN, YELLOW, MAGENTA, BOLD, DIM, RESET
 from toggl.config import NEGATIVES, POSITIVES
+from toggl.services.sync import _atomic_write
+
+
+def _write_activity_csv(filepath: str, field_name: str, rows: list[dict[str, Any]]) -> None:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=["Date", field_name, "Points"])
+    writer.writeheader()
+    writer.writerows(rows)
+    _atomic_write(filepath, buf.getvalue())
 
 
 def log_activity_direct(name: str, mode: Literal["positive", "negative"], entry_date: str | None = None) -> tuple[bool, str]:
@@ -52,12 +60,7 @@ def log_activity_direct(name: str, mode: Literal["positive", "negative"], entry_
         field: canonical,
         "Points": lookup[canonical],
     })
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["Date", field, "Points"])
-    writer.writeheader()
-    writer.writerows(rows)
-    from toggl.services.sync import _atomic_write
-    _atomic_write(csv_file, buf.getvalue())
+    _write_activity_csv(csv_file, field, rows)
     return True, f"Logged {canonical} ({sign}{lookup[canonical]} pts)"
 
 
@@ -99,12 +102,7 @@ def delete_activity_entry(mode: Literal["positive", "negative"], date_str: str, 
     if not deleted:
         return False, f"Entry '{name}' on {date_str} not found"
 
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["Date", field, "Points"])
-    writer.writeheader()
-    writer.writerows(rows)
-    from toggl.services.sync import _atomic_write
-    _atomic_write(csv_file, buf.getvalue())
+    _write_activity_csv(csv_file, field, rows)
     return True, f"Deleted '{name}' ({date_str})"
 
 
@@ -151,13 +149,5 @@ def update_activity_date(mode: Literal["positive", "negative"], old_date: str, n
     if not updated:
         return False, f"Entry '{name}' on {old_date} not found"
 
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["Date", field, "Points"])
-    writer.writeheader()
-    writer.writerows(rows)
-    from toggl.services.sync import _atomic_write
-    _atomic_write(csv_file, buf.getvalue())
+    _write_activity_csv(csv_file, field, rows)
     return True, f"Moved '{name}' from {old_date} to {new_date}"
-
-
-

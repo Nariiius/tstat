@@ -124,7 +124,12 @@ class TestBuildCategoryRows:
         }
         rows = build_category_rows(data, _dummy_name_fn, _dummy_cells_fn)
         # Find the three headers
-        headers = [r[0] for r in rows if isinstance(r[0], Text) and r[0].plain.startswith("•")]
+        from toggl.widgets.icons import icon
+
+        headers = [
+            r[0] for r in rows
+            if isinstance(r[0], Text) and r[0].plain.startswith(icon("bullet"))
+        ]
         assert len(headers) == 3
         header_texts = [h.plain for h in headers]
         assert any("POSITIVE" in t for t in header_texts)

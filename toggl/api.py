@@ -11,7 +11,7 @@ import base64
 
 from typing import Any
 
-from toggl.const import CONFIG_FILE, RED, RESET, GREEN, YELLOW, CYAN, BOLD, DIM
+from toggl.const import CONFIG_FILE, RED, RESET, YELLOW, CYAN, BOLD, DIM
 from toggl.const import PROJECTS_FILE, PROJECTS_CACHE_MAX_AGE_DAYS, LOW_QUOTA_WARNING
 from toggl.config import load_config
 

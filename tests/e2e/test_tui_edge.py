@@ -174,5 +174,6 @@ async def test_insights_sync_line_has_quota(tui_data):
         await pilot.pause()
         assert app.active_view_index == 2
 
-        sync_line = app.query_one("#insights-sync-line")
-        assert "quota" in str(sync_line.render()).lower()
+        quota = app.query_one("#meta-quota")
+        text = str(quota.render()).lower()
+        assert "?" in text or "/" in text

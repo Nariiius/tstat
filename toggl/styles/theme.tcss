@@ -14,35 +14,6 @@ Screen {
     color: $text-primary;
 }
 
-/* ── Splash screen (startup loading) ─────────────────── */
-SplashScreen {
-    background: $bg-base;
-    align: center middle;
-}
-
-#splash-container {
-    width: auto;
-    height: auto;
-    border: round $border-muted;
-    padding: 2 4;
-    background: $bg-base;
-    align: center middle;
-}
-
-#splash-logo {
-    color: $accent;
-    text-style: bold;
-    text-align: center;
-    width: auto;
-}
-
-#splash-loading {
-    color: $text-dim;
-    text-align: center;
-    width: auto;
-    margin-top: 1;
-}
-
 #root {
     height: 1fr;
 }
@@ -74,19 +45,72 @@ SplashScreen {
     display: none;
 }
 
-#sync-status {
+#reload-status {
     width: auto;
+    height: 1;
     padding: 0 1;
 }
 
-#sync-status.sync-fresh {
-    color: #37d994;
+.reload-chip {
+    width: auto;
+    height: 1;
+    padding: 0;
+    color: $text-dim;
 }
-#sync-status.sync-warn {
-    color: #e2b714;
+
+.reload-chip:hover,
+.status-meta-chip:hover {
+    color: $accent;
 }
-#sync-status.sync-stale {
-    color: #ff5f5f;
+
+#hover-tip {
+    layer: overlay;
+    display: none;
+    width: auto;
+    height: auto;
+    min-width: 28;
+    max-width: 58;
+    padding: 0 1;
+    background: #121820;
+    color: $text-dim;
+}
+
+#reload-cache,
+#reload-api {
+    margin-left: 1;
+}
+
+#status-tray {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    content-align: right middle;
+    color: $text-dim;
+}
+
+#status-message-inline {
+    width: auto;
+    height: 1;
+    padding: 0 1 0 0;
+}
+
+.status-meta-chip {
+    width: auto;
+    height: 1;
+    padding: 0 0 0 1;
+}
+
+#bottom-bar {
+    dock: bottom;
+    height: 1;
+    width: 1fr;
+    background: $bg-base;
+}
+
+#bottom-bar Footer {
+    dock: none;
+    width: 1fr;
+    height: 1;
 }
 
 #main {
@@ -235,6 +259,7 @@ Button:hover {
 
 /* ── Footer ────────────────────────────────────────── */
 Footer {
+    height: 1;
     background: $bg-base;
     color: $text-dim;
 }
@@ -265,21 +290,3 @@ OptionList > .option-list--option-highlighted {
     color: $accent;
 }
 
-/* ── Toast notifications with icons ─────────────────── */
-Toast {
-    background: $bg-base;
-    color: $text-primary;
-    border: round $border-muted;
-    padding: 0 1;
-    margin: 1 1 0 0;
-    height: auto;
-}
-Toast.-information {
-    border: round #37d994;
-}
-Toast.-warning {
-    border: round #e2b714;
-}
-Toast.-error {
-    border: round #ff5f5f;
-}

@@ -31,7 +31,6 @@ def setup_fixtures() -> dict[str, Any]:
     """
     import toggl.const
     import toggl.cache
-    import toggl.backfill
     import toggl.neg
     import toggl.config
     import toggl.calc
@@ -43,7 +42,6 @@ def setup_fixtures() -> dict[str, Any]:
     # ── Patch path constants ──────────────────────────────────
     patched = {}
     patched["DATA_DIR"] = str(data_dir)
-    patched["BACKFILL_DB"] = str(data_dir / "toggl_backfill.db")
     patched["CSV_FILE"] = str(data_dir / "toggl_data.csv")
     patched["DAILY_CSV_FILE"] = str(data_dir / "toggl_daily.csv")
     patched["NEGATIVES_CSV_FILE"] = str(data_dir / "toggl_negatives.csv")
@@ -54,13 +52,12 @@ def setup_fixtures() -> dict[str, Any]:
     for key, val in patched.items():
         setattr(toggl.const, key, val)
 
-    # Mirror imports in cache/backfill/neg modules
+    # Mirror imports in cache/neg modules
     setattr(toggl.cache, "CSV_FILE", toggl.const.CSV_FILE)
     setattr(toggl.cache, "DAILY_CSV_FILE", toggl.const.DAILY_CSV_FILE)
     setattr(toggl.cache, "NEGATIVES_CSV_FILE", toggl.const.NEGATIVES_CSV_FILE)
     setattr(toggl.cache, "POSITIVES_CSV_FILE", toggl.const.POSITIVES_CSV_FILE)
     setattr(toggl.cache, "HISTORY_FILE", toggl.const.HISTORY_FILE)
-    setattr(toggl.backfill, "BACKFILL_DB", toggl.const.BACKFILL_DB)
     setattr(toggl.neg, "NEGATIVES_CSV_FILE", toggl.const.NEGATIVES_CSV_FILE)
     setattr(toggl.neg, "POSITIVES_CSV_FILE", toggl.const.POSITIVES_CSV_FILE)
 

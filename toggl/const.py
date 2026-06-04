@@ -1,78 +1,16 @@
-"""Constants: ANSI colours, layout widths, file paths."""
+"""Constants: ANSI colours and file paths."""
 
 import os
-import re
-
-# ──────────────────────────────────────────────
-# TASK SHORT NAMES (for catchup block)
-# ──────────────────────────────────────────────
-TASK_SHORT_NAMES = {
-    "Building Projects": "Build",
-    "Finance / Markets": "Finance",
-    "Learning to Code": "Code",
-    "Fitness": "Fitness",
-    "Learning Japanese": "Japanese",
-    "Obligations / Social": "Social",
-    "Personal Development": "Personal Dev",
-    "Acads / Study": "Acads",
-    "Plan / Org / Review": "Plan/Org",
-    "Focus Thoughts": "Focus",
-    "Chores / Waste": "Chores",
-}
 
 # ──────────────────────────────────────────────
 # ANSI COLOURS
 # ──────────────────────────────────────────────
-GREEN = "\033[92m"
 RED = "\033[91m"
 YELLOW = "\033[93m"
 CYAN = "\033[96m"
-MAGENTA = "\033[95m"
-BLUE = "\033[94m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
 RESET = "\033[0m"
-
-# ──────────────────────────────────────────────
-# VISUAL WIDTH HELPERS
-# ──────────────────────────────────────────────
-_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
-
-
-def strip_ansi(s: str) -> str:
-    return _ANSI_RE.sub("", s)
-
-
-def vlen(s: str) -> int:
-    """Visual length of a string (ignores ANSI escape codes)."""
-    return len(strip_ansi(s))
-
-
-def pad_ansi(s: str, width: int) -> str:
-    """Right-pad an ANSI string so its visual length equals `width`."""
-    vis = vlen(s)
-    if vis >= width:
-        return s
-    return s + " " * (width - vis)
-
-
-# ──────────────────────────────────────────────
-# LAYOUT CONSTANTS
-# ──────────────────────────────────────────────
-COL1, COL2, COL3, COL4 = 23, 8, 8, 10
-TABLE_W = 2 + COL1 + 1 + COL2 + 1 + COL3 + 1 + COL4  # = 54
-
-SPARK_PTS_W = 5
-SPARK_BAR_W = 3
-BLAME_W = 3
-
-SPARK_W = (
-    SPARK_PTS_W + 1 + SPARK_BAR_W + 1 + 3 + 1 + SPARK_BAR_W + 1
-    + SPARK_PTS_W + 2 + BLAME_W
-)  # = 28
-
-TABLE_SPARK_GAP = 1
-SPARK_START_ROW = 1
 
 # ──────────────────────────────────────────────
 # FILE PATHS
@@ -94,14 +32,3 @@ LOW_QUOTA_WARNING = 5
 PROJECTS_CACHE_MAX_AGE_DAYS = 7
 
 PLAYBOOK_CACHE_FILE = os.path.join(DATA_DIR, "toggl_insights_bundle.json")
-
-# Logged positives that can only be counted once per calendar day in the playbook.
-# Now governed by ActivityRules via limits.max_per_day in toggl_config.json.
-# Defaults if not configured: nothing is once-per-day.
-ONCE_PER_DAY_POSITIVES: frozenset[str] = frozenset()
-
-# Abs Cinema philosophy (now governed by ActivityRules, retained as reference):
-# Watching things consumes leisure/entertainment time (bad).
-# Only genuinely great content ("Abs Cinema") is worthwhile,
-# and even then it must be a deliberate choice, never a system suggestion.
-# Configure via category_natures + activity_rules in toggl_config.json.

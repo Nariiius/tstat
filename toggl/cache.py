@@ -1,11 +1,8 @@
 """DataCache — reads all CSVs once per refresh cycle, serves queries from memory."""
 
-import logging
 import os
-from typing import Any
-
-logger = logging.getLogger("TStat")
 import csv
+from typing import Any
 import io
 from datetime import datetime, date, timedelta
 
@@ -88,31 +85,49 @@ def get_iso_format(d: date, is_end: bool = False) -> str:
 # ──────────────────────────────────────────────
 # LAST-UPDATED HELPERS
 # ──────────────────────────────────────────────
-import json
-
-# Imported from services.sync for backward compatibility
-from toggl.services.sync import _load_history, _save_history, _atomic_write  # noqa: E402, F401
+from toggl.services.sync import _load_history
 
 
 def get_last_updated_str() -> str:
+    dt = get_last_api_sync_time()
+    if dt is None:
+        return "Never"
+    return format_time_ago(dt)
+
+
+def format_time_ago(dt: datetime | None) -> str:
+    """Human-readable age string from a datetime (e.g. ``3s ago``)."""
+    short = format_time_ago_short(dt)
+    if short == "--":
+        return "never"
+    return f"{short} ago"
+
+
+def format_time_ago_short(dt: datetime | None) -> str:
+    """Compact age string for status chrome (e.g. ``3s``, ``1m``, ``2h``)."""
+    if dt is None:
+        return "--"
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    secs = int((now - dt).total_seconds())
+    if secs < 0:
+        secs = 0
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m"
+    hrs = mins // 60
+    rem = mins % 60
+    return f"{hrs}h{rem}m" if rem else f"{hrs}h"
+
+
+def get_last_api_sync_time() -> datetime | None:
+    """Return the last API sync timestamp from history, if recorded."""
     history = _load_history()
     ts = history.get("last_updated")
     if not ts:
-        return "Never"
-    dt = parse_iso(ts)
-    if dt is None:
-        return "Never"
-    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
-    diff = now - dt
-    secs = int(diff.total_seconds())
-    if secs < 60:
-        return f"{secs}s ago"
-    mins = secs // 60
-    if mins < 60:
-        return f"{mins}m ago"
-    hrs = mins // 60
-    rem = mins % 60
-    return f"{hrs}h {rem}m ago" if rem else f"{hrs}h ago"
+        return None
+    return parse_iso(ts)
 
 
 def needs_auto_update() -> bool:
@@ -341,13 +356,3 @@ def reset_cache() -> None:
     """Force cache reload after sync."""
     global _cache
     _cache = DataCache.load()
-
-
-# Backward-compatible aliases for moved sync functions
-from toggl.services.sync import (  # noqa: E402, F401
-    _patch_daily_csv,
-    _patch_weekly_csv,
-    fetch_week_data,
-    sync_api_to_csv,
-    sync_current_week_light,
-)

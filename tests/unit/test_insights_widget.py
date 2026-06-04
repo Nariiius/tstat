@@ -11,6 +11,9 @@ from toggl.services.insights_bundle import InsightsBundleService
 from toggl.services.metrics import MetricsService
 from toggl.widgets.insights import (
     PlaybookScrollPane,
+    _confidence_bar,
+    _format_insights_border_title,
+    _format_insights_border_subtitle,
     format_insights_tab,
     format_overview_playbook,
 )
@@ -101,6 +104,22 @@ def test_format_week_brief_renders(tmp_data_dir, sample_daily_csv, sample_config
     assert "Code" in markup
     assert "Exercise" in markup
     assert "Mistake" in markup
+
+
+def test_insights_tab_has_pace_scorecard(tmp_data_dir, sample_daily_csv, sample_config):
+    """TODAY/GAP in top border; TIME/WEEK in bottom border; verdict not in scroll."""
+    bundle = _bundle_svc(tmp_data_dir, sample_daily_csv, sample_config).compute()
+    pb = bundle.playbook
+    top = _format_insights_border_title(pb)
+    bottom = _format_insights_border_subtitle(pb)
+    assert "Insights" in top
+    assert "TODAY" in top and "GAP" in top
+    assert "━" in top and "─" in top
+    assert "CLOSE GAP" in top or "ON TRACK" in top or "RECOVER" in top
+    assert "TIME" in bottom or "WEEK" in bottom
+    body = format_insights_tab(bundle)
+    assert pb.headline not in body or "TODAY" in body
+    assert "CLOSE GAP" not in body and "ON TRACK" not in body
 
 
 def test_insights_tab_has_today_week_patterns_sections(
