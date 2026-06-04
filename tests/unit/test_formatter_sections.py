@@ -128,7 +128,7 @@ class TestBuildCategoryRows:
 
         headers = [
             r[0] for r in rows
-            if isinstance(r[0], Text) and r[0].plain.startswith(icon("bullet"))
+            if isinstance(r[0], Text) and r[0].plain.startswith(icon("dot_fisheye"))
         ]
         assert len(headers) == 3
         header_texts = [h.plain for h in headers]

@@ -17,8 +17,12 @@ from __future__ import annotations
 # ──────────────────────────────────────────────
 
 ICON = {
-    # ── Status badges / list dots (fisheye ◉) ──
-    "dot": "\u25c9",
+    # ── Inline separators / list bullets (thin •) ──
+    "dot": "\u2022",
+    "bullet": "\u2022",
+
+    # ── Status badges + category section headers (fisheye ◉) ──
+    "dot_fisheye": "\u25c9",
     "status_on_track": "\u25c9",
     "status_close_gap": "\u25c9",
     "status_recover": "\u25c9",
@@ -29,7 +33,6 @@ ICON = {
     "blocked": "\u25f7",
     "low_control": "\u25cb",
     "focus_pointer": "\u25b8",
-    "bullet": "\u25c9",
     "star": "\u2605",
     "warning": "\u26a0",
     "neglect": "\u2205",
@@ -149,8 +152,9 @@ ICON_ASCII = {
     "blocked": "[B]",
     "low_control": "( )",
     "focus_pointer": ">",
-    "dot": "(o)",
-    "bullet": "(o)",
+    "dot": "*",
+    "bullet": "*",
+    "dot_fisheye": "(o)",
     "star": "*",
     "warning": "!",
     "neglect": "(/)",
@@ -208,7 +212,7 @@ SEG_GAP = "\u2003"
 
 
 def dot_sep(*, pad: str = " ") -> str:
-    """Inline separator between phrases (same glyph as status/list dots)."""
+    """Inline separator between phrases (thin bullet •, not status fisheye)."""
     return f"{pad}{icon('dot')}{pad}"
 
 

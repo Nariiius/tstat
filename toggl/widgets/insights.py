@@ -65,7 +65,7 @@ def _confidence_bar(
 
 def _status_badge(goal: str) -> str:
     """Coloured status badge for the current goal / verdict."""
-    bullet = ICON["dot"]
+    bullet = ICON["dot_fisheye"]
     badges = {
         "on_track": f"[bold {CLR_GREEN}]{bullet} ON TRACK[/]",
         "hit_today_target": f"[bold {CLR_AMBER}]{bullet} CLOSE GAP[/]",
@@ -154,7 +154,7 @@ _BORDER_GOAL_LABELS = {
 def _format_verdict_border(pb: Playbook) -> str:
     """Status for top border: ◉ CLOSE GAP (TODAY chip covers the headline)."""
     label, color = _BORDER_GOAL_LABELS.get(pb.goal, (pb.goal, CLR_DIM))
-    bullet = ICON["dot"]
+    bullet = ICON["dot_fisheye"]
     return f"[bold {color}]{bullet} {label}[/]"
 
 

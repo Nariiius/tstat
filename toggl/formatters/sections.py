@@ -26,7 +26,10 @@ SECTION_COLORS = {
 def _fmt_section_header(label: str) -> Text:
     """Return a Rich Text section-divider row label with its fixed semantic color."""
     key = label
-    if key.startswith(f"{ICON['bullet']} "):
+    fisheye = ICON["dot_fisheye"]
+    if key.startswith(f"{fisheye} "):
+        key = key[len(fisheye) + 1 :]
+    elif key.startswith(f"{ICON['bullet']} "):
         key = key[2:]
     elif key.startswith("["):
         key = key[1:-1] if key.endswith("]") else key[1:]
@@ -145,7 +148,7 @@ def build_category_rows(
         section_rows = section_data.get(section_name, [])
         if section_rows:
             rows.append(
-                (_fmt_section_header(f"{ICON['bullet']} {section_name.upper()}"),
+                (_fmt_section_header(f"{ICON['dot_fisheye']} {section_name.upper()}"),
                  Text(""), Text(""), Text(""))
             )
         rows.extend(
@@ -158,13 +161,13 @@ def build_category_rows(
     if section_data.get("positive_results"):
         _render_logged_results(
             rows, section_data["positive_results"],
-            f"{ICON['bullet']} LOGGED POSITIVE",
+            f"{ICON['dot_fisheye']} LOGGED POSITIVE",
             SECTION_COLORS["LOGGED POSITIVE"],
         )
     if section_data.get("negative_results"):
         _render_logged_results(
             rows, section_data["negative_results"],
-            f"{ICON['bullet']} LOGGED NEGATIVE",
+            f"{ICON['dot_fisheye']} LOGGED NEGATIVE",
             SECTION_COLORS["LOGGED NEGATIVE"],
         )
 

@@ -449,7 +449,9 @@ class OverviewPanel(Container):
         """Add rows, marking section headers with keys so cursor skips them."""
         for row in rows:
             first = row[0]
-            if isinstance(first, Text) and str(first).startswith(icon("bullet")):
+            if isinstance(first, Text) and str(first).startswith(
+                (icon("dot_fisheye"), icon("bullet"))
+            ):
                 table.add_row(*row, key=f"_section_{len(table.rows)}")
             else:
                 table.add_row(*row)
