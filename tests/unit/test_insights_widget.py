@@ -154,6 +154,23 @@ def test_insights_week_subview_border(tmp_data_dir, sample_daily_csv, sample_con
         assert bundle.week_brief.headline not in body
 
 
+def test_insights_patterns_subview_border_minimal(
+    tmp_data_dir, sample_daily_csv, sample_config,
+):
+    """Patterns sub-view: nav only; no verdict badge or TIME/WEEK bottom chip."""
+    bundle = _bundle_svc(tmp_data_dir, sample_daily_csv, sample_config).compute()
+    pb = bundle.playbook
+    patterns_index = INSIGHT_VIEW_LABELS.index("Patterns")
+    top = _format_insights_border_title(pb, subview_index=patterns_index)
+    bottom = _format_insights_border_subtitle_full(pb, subview_index=patterns_index)
+    Text.from_markup(top)
+    assert top == _format_insights_subview_nav(patterns_index)
+    assert "Patterns" in top
+    assert bottom == ""
+    assert "CLOSE GAP" not in top and "ON TRACK" not in top and "RECOVER" not in top
+    assert "TIME" not in bottom and "WEEK" not in bottom
+
+
 def test_insights_subviews_split_content(
     tmp_data_dir, sample_daily_csv, sample_config,
 ):

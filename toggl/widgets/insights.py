@@ -334,6 +334,8 @@ def _border_pace_for_subview(pb: Playbook, subview_index: int) -> str:
 def _format_insights_border_title(pb: Playbook, *, subview_index: int = 0) -> str:
     """Top border: sub-views | sub-view verdict | TODAY or WEEK progress."""
     title = _format_insights_subview_nav(subview_index)
+    if INSIGHT_VIEWS[subview_index] == "patterns":
+        return title
     title = (
         f"{title}"
         f"[{CLR_DIM}] | [/]"
@@ -349,6 +351,8 @@ def _format_insights_border_subtitle_full(
     pb: Playbook, *, subview_index: int = 0,
 ) -> str:
     """Bottom border: TIME (and WEEK chip on Today view only)."""
+    if INSIGHT_VIEWS[subview_index] == "patterns":
+        return ""
     view = INSIGHT_VIEWS[subview_index]
     if view == "today":
         return _format_pace_border_line(pb, "TIME", "WEEK", chip_gap=SEG_GAP * 4)

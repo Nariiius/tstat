@@ -170,6 +170,7 @@ class ScrollableFooter(Footer):
 
 class TogglTUI(App):
     CSS_PATH = "styles/theme.tcss"
+    ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
         Binding("ctrl+left", "prev_view", "Prev"),
