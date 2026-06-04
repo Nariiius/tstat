@@ -8,10 +8,11 @@ from datetime import date, datetime, timedelta
 logger = logging.getLogger("TStat")
 logger.setLevel(logging.DEBUG)
 if not logger.handlers:
+    from logging.handlers import RotatingFileHandler
     from toggl.const import DATA_DIR
     log_path = os.path.join(DATA_DIR, "sync_debug.log")
-    fh = logging.FileHandler(log_path, mode="a")
-    fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    fh = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=3, mode="a")
+    fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(name)s.%(funcName)s:%(lineno)d — %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     logger.addHandler(fh)
 
 from textual import on
