@@ -152,6 +152,8 @@ class PlaybookService:
             "daily_target": target,
             "gap": gap,
             "days_left": days_left,
+            "week_actual": summary.get("actual", 0),
+            "week_expected": summary.get("expected", 0),
             "week_delta": summary.get("delta", 0),
         }
 

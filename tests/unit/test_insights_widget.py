@@ -10,11 +10,16 @@ from toggl.config import Config
 from toggl.services.insights_bundle import InsightsBundleService
 from toggl.services.metrics import MetricsService
 from toggl.widgets.insights import (
+    INSIGHT_VIEW_LABELS,
     PlaybookScrollPane,
     _confidence_bar,
+    _format_insights_border_subtitle_full,
     _format_insights_border_title,
-    _format_insights_border_subtitle,
+    _format_insights_subview_nav,
+    format_insights_patterns,
     format_insights_tab,
+    format_insights_today,
+    format_insights_week,
     format_overview_playbook,
 )
 
@@ -107,14 +112,15 @@ def test_format_week_brief_renders(tmp_data_dir, sample_daily_csv, sample_config
 
 
 def test_insights_tab_has_pace_scorecard(tmp_data_dir, sample_daily_csv, sample_config):
-    """TODAY/GAP in top border; TIME/WEEK in bottom border; verdict not in scroll."""
+    """Combined TODAY bar in top border; TIME/WEEK in bottom; verdict not in scroll."""
     bundle = _bundle_svc(tmp_data_dir, sample_daily_csv, sample_config).compute()
     pb = bundle.playbook
-    top = _format_insights_border_title(pb)
-    bottom = _format_insights_border_subtitle(pb)
-    assert "Insights" in top
-    assert "TODAY" in top and "GAP" in top
-    assert "━" in top and "─" in top
+    top = _format_insights_border_title(pb, subview_index=0)
+    bottom = _format_insights_border_subtitle_full(pb, subview_index=0)
+    assert "Today" in top and "Week" in top and "Patterns" in top
+    assert "TODAY" in top and "Need" in top
+    assert top.count("TODAY") == 1
+    assert "─" in top
     assert "CLOSE GAP" in top or "ON TRACK" in top or "RECOVER" in top
     assert "TIME" in bottom or "WEEK" in bottom
     body = format_insights_tab(bundle)
@@ -122,15 +128,48 @@ def test_insights_tab_has_pace_scorecard(tmp_data_dir, sample_daily_csv, sample_
     assert "CLOSE GAP" not in body and "ON TRACK" not in body
 
 
-def test_insights_tab_has_today_week_patterns_sections(
-    tmp_data_dir, sample_daily_csv, sample_config
-):
-    """The insights tab should show TODAY, THIS WEEK, and PATTERNS sections."""
+def test_insights_week_subview_border(tmp_data_dir, sample_daily_csv, sample_config):
+    """Week sub-view: RECOVER (not RECOVER WEEK), pace bar without WEEK label."""
+    from toggl.widgets.insights import (
+        _format_week_combined,
+        _format_week_verdict_border,
+        format_insights_week,
+    )
+
     bundle = _bundle_svc(tmp_data_dir, sample_daily_csv, sample_config).compute()
-    markup = format_insights_tab(bundle)
-    assert "TODAY" in markup
-    # Week brief may or may not have content depending on data
-    assert "PATTERNS" in markup or "DISCOVERIES" not in markup  # at minimum no old header
+    pb = bundle.playbook
+    top = _format_insights_border_title(pb, subview_index=1)
+    Text.from_markup(top)
+    assert "RECOVER WEEK" not in top
+    assert "TODAY" not in top
+    verdict = _format_week_verdict_border(pb)
+    assert " WEEK" not in verdict.split("]", 1)[-1]
+    week_chip = _format_week_combined(pb)
+    if week_chip:
+        Text.from_markup(week_chip)
+        assert "WEEK" in week_chip
+        assert "Need" in week_chip or "met" in week_chip
+    body = format_insights_week(bundle)
+    if body and bundle.week_brief.headline:
+        assert bundle.week_brief.headline not in body
+
+
+def test_insights_subviews_split_content(
+    tmp_data_dir, sample_daily_csv, sample_config,
+):
+    """Today / week / patterns are separate bodies without rule dividers."""
+    bundle = _bundle_svc(tmp_data_dir, sample_daily_csv, sample_config).compute()
+    today = format_insights_today(bundle)
+    week = format_insights_week(bundle)
+    patterns = format_insights_patterns(bundle)
+    Text.from_markup(today)
+    Text.from_markup(week)
+    Text.from_markup(patterns)
+    assert "\u2500" * 22 not in today
+    assert "\u2500" * 36 not in patterns
+    assert "THIS WEEK" not in week or week.startswith("[dim]")
+    bottom = _format_insights_border_subtitle_full(bundle.playbook, subview_index=0)
+    assert "TIME" in bottom or "WEEK" in bottom
 
 
 def test_insights_tab_renders_step_reasons(tmp_data_dir, sample_daily_csv, sample_config):

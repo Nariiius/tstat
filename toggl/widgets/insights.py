@@ -5,8 +5,9 @@ Actionable daily insights with trend analysis.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
+from textual.binding import Binding
 from textual.containers import VerticalScroll, Vertical
 from textual.widgets import Static, Label
 
@@ -35,6 +36,7 @@ CLR_DIM = "#8d98a7"
 CLR_MUTED = "#4a5565"
 CLR_FOCUS = "#e2b714"
 CLR_MIST = "#1e2a36"
+CLR_TRACK = "#7a9ec2"  # TODAY empty bar + need (colour 2)
 
 
 def _confidence_bar(
@@ -152,8 +154,21 @@ _BORDER_GOAL_LABELS = {
 
 
 def _format_verdict_border(pb: Playbook) -> str:
-    """Status for top border: ◉ CLOSE GAP (TODAY chip covers the headline)."""
+    """Status for top border on the Today sub-view."""
     label, color = _BORDER_GOAL_LABELS.get(pb.goal, (pb.goal, CLR_DIM))
+    bullet = ICON["dot_fisheye"]
+    return f"[bold {color}]{bullet} {label}[/]"
+
+
+def _format_week_verdict_border(pb: Playbook) -> str:
+    """Status for top border on the Week sub-view (pace-based, not daily goal)."""
+    delta = float(pb.context.get("week_delta", 0))
+    if delta >= 0.5:
+        label, color = "ON PACE", CLR_GREEN
+    elif delta < -0.5:
+        label, color = "RECOVER", CLR_RED
+    else:
+        label, color = "CLOSE", CLR_AMBER
     bullet = ICON["dot_fisheye"]
     return f"[bold {color}]{bullet} {label}[/]"
 
@@ -178,14 +193,6 @@ def _pace_border_chips(pb: Playbook) -> dict[str, str]:
         chips["TODAY"] = (
             f"[bold {color}]TODAY[/] {_confidence_bar(ratio, width=6, bar_color=color)}"
             f" [{color}]{_fmt_pts(today_net)}[/][{CLR_DIM}]/{_fmt_pts(target)}[/]"
-        )
-
-    if gap > 0 and target > 0:
-        ratio = min(gap / target, 1.0)
-        color = CLR_AMBER if ratio < 0.5 else CLR_RED
-        chips["GAP"] = (
-            f"[bold {color}]GAP[/] {_confidence_bar(ratio, width=6, bar_color=color)}"
-            f" [{color}]{_fmt_pts(gap)}[/]"
         )
 
     if days_left >= 0:
@@ -219,17 +226,133 @@ def _format_pace_border_line(
     return chip_gap.join(parts)
 
 
-def _format_insights_border_title(pb: Playbook) -> str:
-    """Top border: Insights | ◉ CLOSE GAP  …  TODAY  GAP."""
-    title = (
-        f"[bold {CLR_ACCENT}]Insights[/]"
-        f"[{CLR_DIM}] | [/]"
-        f"{_format_verdict_border(pb)}"
+def _today_border_bar(
+    ratio: float,
+    width: int,
+    *,
+    fill_color: str,
+    track_color: str,
+) -> str:
+    """Progress bar for border: fill + % in *fill_color*, empty track in *track_color*."""
+    ratio = max(0.0, min(1.0, ratio))
+    filled = max(0, min(width, int(round(ratio * width))))
+    bar_fill = ICON["bar_filled"] * filled
+    bar_empty = ICON["bar_empty"] * (width - filled)
+    pct = int(ratio * 100)
+    return (
+        f"[bold {fill_color}]{bar_fill}[/]"
+        f"[{track_color}]{bar_empty}[/] "
+        f"[{fill_color}]{pct}%[/]"
     )
-    pace = _format_pace_border_line(pb, "TODAY", "GAP")
+
+
+def _format_today_gap_combined(pb: Playbook) -> str:
+    """TODAY chip: colour-1 progress, green target, colour-2 remainder + need."""
+    ctx = pb.context
+    target = float(ctx.get("daily_target") or 0)
+    today_net = float(ctx.get("today_net", 0))
+    gap = float(ctx.get("gap") or 0)
+    if target <= 0:
+        return ""
+
+    progress = max(0.0, min(today_net / target, 1.0))
+    if today_net >= target:
+        fill_color = CLR_GREEN
+    elif today_net >= target * 0.8:
+        fill_color = CLR_AMBER
+    elif today_net >= 0:
+        fill_color = CLR_AMBER
+    else:
+        fill_color = CLR_RED
+    track_color = CLR_TRACK
+
+    bar = _today_border_bar(
+        progress, 10, fill_color=fill_color, track_color=track_color,
+    )
+    stats = (
+        f" [{fill_color}]{_fmt_pts(today_net)}[/]"
+        f"[{CLR_GREEN}]/{_fmt_pts(target)}[/]"
+    )
+    if gap > 0:
+        stats += f" [{track_color}]· Need {_fmt_pts(gap)}[/]"
+    elif today_net >= target:
+        stats += f" [{CLR_GREEN}]· met[/]"
+
+    return f"[bold {fill_color}]TODAY[/] {bar}{stats}"
+
+
+def _format_week_combined(pb: Playbook) -> str:
+    """Week pace bar for border: WEEK label + bar (verdict is separate, e.g. RECOVER)."""
+    ctx = pb.context
+    expected = float(ctx.get("week_expected") or 0)
+    actual = float(ctx.get("week_actual", 0))
+    delta = float(ctx.get("week_delta", 0))
+    need = round(-delta, 1) if delta < -0.01 else 0.0
+    if expected <= 0:
+        return ""
+
+    progress = max(0.0, min(actual / expected, 1.0))
+    if delta >= 0.5:
+        fill_color = CLR_GREEN
+    elif delta >= -0.5:
+        fill_color = CLR_AMBER
+    else:
+        fill_color = CLR_RED
+    track_color = CLR_TRACK
+
+    bar = _today_border_bar(
+        progress, 10, fill_color=fill_color, track_color=track_color,
+    )
+    stats = (
+        f" [{fill_color}]{_fmt_pts(actual)}[/]"
+        f"[{CLR_GREEN}]/{_fmt_pts(expected)}[/]"
+    )
+    if need > 0:
+        stats += f" [{track_color}]· Need {_fmt_pts(need)}[/]"
+    elif delta >= 0:
+        stats += f" [{CLR_GREEN}]· met[/]"
+
+    return f"[bold {fill_color}]WEEK[/] {bar}{stats}"
+
+
+def _border_verdict_for_subview(pb: Playbook, subview_index: int) -> str:
+    view = INSIGHT_VIEWS[subview_index]
+    if view == "week":
+        return _format_week_verdict_border(pb)
+    return _format_verdict_border(pb)
+
+
+def _border_pace_for_subview(pb: Playbook, subview_index: int) -> str:
+    view = INSIGHT_VIEWS[subview_index]
+    if view == "today":
+        return _format_today_gap_combined(pb)
+    if view == "week":
+        return _format_week_combined(pb)
+    return ""
+
+
+def _format_insights_border_title(pb: Playbook, *, subview_index: int = 0) -> str:
+    """Top border: sub-views | sub-view verdict | TODAY or WEEK progress."""
+    title = _format_insights_subview_nav(subview_index)
+    title = (
+        f"{title}"
+        f"[{CLR_DIM}] | [/]"
+        f"{_border_verdict_for_subview(pb, subview_index)}"
+    )
+    pace = _border_pace_for_subview(pb, subview_index)
     if pace:
         title = f"{title}[{CLR_DIM}] | [/]{pace}"
     return title
+
+
+def _format_insights_border_subtitle_full(
+    pb: Playbook, *, subview_index: int = 0,
+) -> str:
+    """Bottom border: TIME (and WEEK chip on Today view only)."""
+    view = INSIGHT_VIEWS[subview_index]
+    if view == "today":
+        return _format_pace_border_line(pb, "TIME", "WEEK", chip_gap=SEG_GAP * 4)
+    return _format_pace_border_line(pb, "TIME", chip_gap=SEG_GAP * 4)
 
 
 def _format_insights_border_subtitle(pb: Playbook) -> str:
@@ -349,63 +472,98 @@ def format_overview_playbook(
     return "".join(parts).strip()
 
 
+INSIGHT_VIEWS: tuple[str, ...] = ("today", "week", "patterns")
+INSIGHT_VIEW_LABELS: tuple[str, ...] = ("Today", "Week", "Patterns")
+
+
+def format_insights_today(bundle: InsightsBundle | None) -> str:
+    """Today's playbook — steps, reasons, lookback (no section dividers)."""
+    if bundle is None:
+        return "[dim]No insights yet.[/]"
+    pb = bundle.playbook
+    body = _format_playbook_block(pb, include_math=True, compact=False, max_steps=6)
+    return body.strip() or "[dim]No steps right now.[/]"
+
+
+def format_insights_week(bundle: InsightsBundle | None) -> str:
+    """Week brief — Focus / Protect / Skip (view title is in the border)."""
+    if bundle is None:
+        return "[dim]No insights yet.[/]"
+    wb = bundle.week_brief
+    if not (wb.headline or wb.focus or wb.protect or wb.skip):
+        return "[dim]No week plan for this period yet.[/]"
+    return format_week_brief(wb, show_title=False, show_headline=False).strip()
+
+
+def format_insights_patterns(bundle: InsightsBundle | None) -> str:
+    """Discoveries + coach findings (no horizontal rule dividers)."""
+    if bundle is None:
+        return "[dim]No insights yet.[/]"
+    if not bundle.discoveries and not bundle.coach_findings:
+        return "[dim]No patterns surfaced yet.[/]"
+    parts: list[str] = []
+    if bundle.discoveries:
+        parts.append(format_discoveries(bundle.discoveries))
+    if bundle.coach_findings:
+        if parts:
+            parts.append("")
+        parts.append(format_coach_findings(bundle.coach_findings))
+    return "\n".join(parts).strip()
+
+
 def format_insights_tab(
     bundle: InsightsBundle | None,
 ) -> str:
-    """Full detailed insights for the Insights tab.
-
-    Layout: TODAY playbook -> THIS WEEK -> PATTERNS (scroll body).
-    Verdict + TODAY/GAP PACE sit in the top border; TIME/WEEK in the bottom border.
-    TODAY shows playbook with reasons, alternatives, and lookback context.
-    THIS WEEK shows the imperative Focus / Protect / Skip plan.
-    PATTERNS shows supporting evidence from Discoveries and Coach.
-    """
+    """All insight sub-views joined (used by tests and legacy callers)."""
     if bundle is None:
         return "[dim]No insights yet.[/]"
+    chunks = [
+        format_insights_today(bundle),
+        format_insights_week(bundle),
+        format_insights_patterns(bundle),
+    ]
+    return "\n\n".join(c for c in chunks if c and not c.startswith("[dim]No"))
 
-    pb = bundle.playbook
+
+def _format_insights_subview_nav(active_index: int) -> str:
+    """Inline sub-view labels for the border (no rule dividers)."""
     parts: list[str] = []
-
-    # ── TODAY (playbook with reasons + alternatives + lookback) ──
-    parts.append(_section_title("TODAY"))
-    parts.append("\n")
-    parts.append(_format_playbook_block(pb, include_math=True, compact=False, max_steps=6))
-
-    # ── THIS WEEK (imperative Focus / Protect / Skip) ──
-    wb = bundle.week_brief
-    if wb.headline or wb.focus or wb.protect or wb.skip:
-        parts.append(_section_sep())
-        parts.append("\n\n")
-        parts.append(format_week_brief(wb))
-        parts.append("\n")
-
-    # ── PATTERNS (discoveries + coach as supporting evidence) ──
-    has_patterns = bool(bundle.discoveries or bundle.coach_findings)
-    if has_patterns:
-        parts.append(_section_sep())
-        parts.append("\n\n")
-        parts.append(_section_title("PATTERNS"))
-        parts.append("\n")
-
-    if bundle.discoveries:
-        parts.append(format_discoveries(bundle.discoveries))
-        parts.append("\n")
-
-    if bundle.coach_findings:
-        parts.append(format_coach_findings(bundle.coach_findings))
-        parts.append("\n")
-
-    return "".join(parts).strip()
+    for i, label in enumerate(INSIGHT_VIEW_LABELS):
+        if i == active_index:
+            parts.append(f"[bold {CLR_ACCENT}]{label}[/]")
+        else:
+            parts.append(f"[{CLR_DIM}]{label}[/]")
+    return dot_sep(pad=" ").join(parts)
 
 
-def format_week_brief(wb: WeekBrief) -> str:
+def _insights_content_for_view(
+    bundle: InsightsBundle | None, view: str,
+) -> str:
+    formatters: dict[str, Callable[[InsightsBundle | None], str]] = {
+        "today": format_insights_today,
+        "week": format_insights_week,
+        "patterns": format_insights_patterns,
+    }
+    return formatters.get(view, format_insights_today)(bundle)
+
+
+def format_week_brief(
+    wb: WeekBrief,
+    *,
+    show_title: bool = True,
+    show_headline: bool = True,
+) -> str:
     """Render the Week Brief (Focus / Protect / Skip) as Rich markup."""
-    if not wb.headline:
+    if not wb.headline and not (wb.focus or wb.protect or wb.skip):
         return ""
 
     lines: list[str] = []
-    lines.append(f"[bold {CLR_ACCENT}]THIS WEEK[/]  [{CLR_DIM}]{wb.headline}[/]")
-    lines.append("")
+    if show_title:
+        lines.append(f"[bold {CLR_ACCENT}]THIS WEEK[/]  [{CLR_DIM}]{wb.headline}[/]")
+    elif show_headline and wb.headline:
+        lines.append(f"[{CLR_DIM}]{wb.headline}[/]")
+    if lines:
+        lines.append("")
 
     def _action_lines(actions: list[WeekAction], label: str, color: str) -> list[str]:
         out: list[str] = []
@@ -464,8 +622,7 @@ def format_discoveries(discoveries: list[Discovery]) -> str:
         lines.append(f"[{CLR_MUTED}]{d.evidence}[/]")
 
         if i < len(discoveries):
-            sep = "\u2500" * 36
-            lines.append(f"\n[{CLR_MUTED}]{sep}[/]\n")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -500,8 +657,7 @@ def format_coach_findings(findings: list[CoachFinding]) -> str:
         lines.append(f"[{CLR_DIM}]{f.summary}[/]")
 
         if i < len(findings):
-            sep = "\u2500" * 36
-            lines.append(f"\n[{CLR_MUTED}]{sep}[/]\n")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -622,7 +778,12 @@ class PlaybookScrollPane(VerticalScroll):
 
 
 class DetailedInsightsWidget(PlaybookScrollPane):
-    """Scrollable playbook + coach for the Insights tab."""
+    """Insights tab — Today / Week / Patterns (←/→ in border)."""
+
+    BINDINGS = [
+        Binding("left", "insights_prev", "Prev view", show=False),
+        Binding("right", "insights_next", "Next view", show=False),
+    ]
 
     DEFAULT_CSS = """
     DetailedInsightsWidget {
@@ -631,6 +792,35 @@ class DetailedInsightsWidget(PlaybookScrollPane):
     }
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._view_index = 0
+        self._bundle: InsightsBundle | None = None
+
+    def action_insights_prev(self) -> None:
+        self._set_view((self._view_index - 1) % len(INSIGHT_VIEWS))
+
+    def action_insights_next(self) -> None:
+        self._set_view((self._view_index + 1) % len(INSIGHT_VIEWS))
+
+    def _set_view(self, index: int) -> None:
+        self._view_index = index
+        if self._bundle is not None:
+            self._show_bundle(self._bundle)
+
+    def _show_bundle(self, bundle: InsightsBundle) -> None:
+        pb = bundle.playbook
+        view = INSIGHT_VIEWS[self._view_index]
+        self.set_markup(
+            _insights_content_for_view(bundle, view),
+            border_title=_format_insights_border_title(
+                pb, subview_index=self._view_index,
+            ),
+            border_subtitle=_format_insights_border_subtitle_full(
+                pb, subview_index=self._view_index,
+            ),
+        )
+
     def set_bundle(
         self,
         bundle: InsightsBundle | None,
@@ -638,15 +828,19 @@ class DetailedInsightsWidget(PlaybookScrollPane):
         is_loading: bool = False,
         progress_stage: str = "",
     ) -> None:
+        self._bundle = bundle
         if is_loading:
             self.set_loading("Computing insights...", progress_stage)
-            self.border_title = f"[bold {CLR_ACCENT}]Insights[/]"
+            self.border_title = _format_insights_subview_nav(self._view_index)
             self.border_subtitle = ""
             return
 
-        pb = bundle.playbook
-        self.set_markup(
-            format_insights_tab(bundle),
-            border_title=_format_insights_border_title(pb),
-            border_subtitle=_format_insights_border_subtitle(pb),
-        )
+        if bundle is None:
+            self.set_markup(
+                "[dim]No insights yet.[/]",
+                border_title="",
+                border_subtitle="",
+            )
+            return
+
+        self._show_bundle(bundle)
