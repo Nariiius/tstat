@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import shutil
 from datetime import datetime, date, timedelta
 from typing import Any
 
@@ -61,7 +62,32 @@ def _save_history(history: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _ensure_csv_from_backup(csv_path: str) -> None:
+    """Restore CSV from latest backup if the file is missing.
+
+    This prevents data loss when the CSV file is accidentally deleted:
+    the sync edits existing data rather than creating a fresh file.
+    """
+    if os.path.exists(csv_path):
+        return
+    backup_dir = os.path.join(toggl.const.DATA_DIR, "backups")
+    if not os.path.isdir(backup_dir):
+        return
+    # Find the latest backup folder (sorted by name = sorted by time)
+    dirs = sorted(
+        d for d in os.listdir(backup_dir)
+        if os.path.isdir(os.path.join(backup_dir, d))
+    )
+    for d in reversed(dirs):
+        src = os.path.join(backup_dir, d, os.path.basename(csv_path))
+        if os.path.exists(src):
+            shutil.copy2(src, csv_path)
+            logger.warning("[SYNC] Restored %s from backup %s", os.path.basename(csv_path), d)
+            return
+
+
 def _patch_daily_csv(week_str: str, daily_data: dict[str, dict[str, float]]) -> None:
+    _ensure_csv_from_backup(toggl.const.DAILY_CSV_FILE)
     start_d, end_d = get_week_dates(week_str)
     week_dates = set(
         (start_d + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)
@@ -102,6 +128,7 @@ def _patch_daily_csv(week_str: str, daily_data: dict[str, dict[str, float]]) -> 
 
 
 def _patch_weekly_csv(week_str: str, weekly_data: dict[str, float]) -> None:
+    _ensure_csv_from_backup(toggl.const.CSV_FILE)
     existing_rows = []
     if os.path.exists(toggl.const.CSV_FILE):
         with open(toggl.const.CSV_FILE, "r", encoding="utf-8") as f:
@@ -268,3 +295,109 @@ def sync_current_week_light(
     history["last_updated"] = datetime.now().isoformat()
     _save_history(history)
     return {"success": True, "message": "Synced current week"}
+
+
+# ---------------------------------------------------------------------------
+# Daily-data gap detection and conservative backfill
+# ---------------------------------------------------------------------------
+
+
+def detect_daily_gaps() -> list[str]:
+    """Return weeks that have entries in the weekly CSV but zero days
+    in the daily CSV, sorted oldest-first.
+    """
+    if not os.path.exists(toggl.const.CSV_FILE):
+        return []
+    if not os.path.exists(toggl.const.DAILY_CSV_FILE):
+        # No daily CSV at all — every week with data is a gap
+        weeks_with_data: set[str] = set()
+        with open(toggl.const.CSV_FILE, "r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                weeks_with_data.add(row["Week"])
+        return sorted(weeks_with_data)
+
+    # Collect dates present in the daily CSV
+    daily_dates: set[str] = set()
+    with open(toggl.const.DAILY_CSV_FILE, "r", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            daily_dates.add(row["Date"])
+
+    # Scan weekly CSV for weeks whose date range has zero overlap
+    weeks: dict[str, tuple[date, date]] = {}
+    with open(toggl.const.CSV_FILE, "r", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            wk = row["Week"]
+            if wk not in weeks:
+                weeks[wk] = get_week_dates(wk)
+
+    gaps: list[str] = []
+    for wk in sorted(weeks.keys()):
+        start_d, end_d = weeks[wk]
+        # Does any day in this week exist in daily_dates?
+        any_present = any(
+            (start_d + timedelta(days=i)).strftime("%Y-%m-%d") in daily_dates
+            for i in range(7)
+        )
+        if not any_present:
+            gaps.append(wk)
+
+    # Skip the current + next week (API may have no entries for future)
+    current_week = get_current_week()
+    future_weeks = {current_week}
+    # Also skip the week after current (partial future week)
+    next_sunday = get_sunday_of_week(date.today()) + timedelta(days=7)
+    future_weeks.add(get_week_str(next_sunday))
+
+    gaps = [wk for wk in gaps if wk not in future_weeks]
+    return gaps
+
+
+def fill_daily_gaps(
+    max_weeks: int = 3, prompt_on_warning: bool = False
+) -> dict[str, bool | str]:
+    """Fetch daily data for weeks that are missing it, up to *max_weeks*.
+
+    Uses the existing ``_patch_*`` merge functions — existing data is
+    never overwritten, only missing weeks are filled in.
+
+    Returns ``{"success": True, "message": "Filled 3 week(s), 4 remaining"}``.
+    """
+    from toggl.api import (
+        get_api_token,
+        get_projects_map,
+        _reset_api_stats,
+        _confirm_sync_quota,
+    )
+
+    gaps = detect_daily_gaps()
+    if not gaps:
+        return {"success": True, "message": "No daily data gaps detected"}
+
+    # Only fill the oldest gaps first (furthest back)
+    to_fill = gaps[:max_weeks]
+
+    token = get_api_token()
+    _reset_api_stats()
+    estimated = len(to_fill) + 2  # +1 projects, +1 headroom
+    if not _confirm_sync_quota(token, estimated, "gap fill", prompt_on_warning):
+        return {"success": False, "message": "Gap fill cancelled (low quota)"}
+
+    projects_map = get_projects_map(token)
+    filled = 0
+    for wk in to_fill:
+        logger.debug("[SYNC] fill_daily_gaps: fetching week=%s", wk)
+        weekly_data, daily_data = fetch_week_data(wk, token, projects_map)
+        _patch_weekly_csv(wk, weekly_data)
+        _patch_daily_csv(wk, daily_data)
+        filled += 1
+
+    remaining = len(gaps) - filled
+    history = _load_history()
+    history["last_updated"] = datetime.now().isoformat()
+    _save_history(history)
+
+    if remaining > 0:
+        msg = f"Filled {filled} week(s), {remaining} remaining"
+    else:
+        msg = f"Filled {filled} week(s), all gaps resolved"
+    return {"success": True, "message": msg}

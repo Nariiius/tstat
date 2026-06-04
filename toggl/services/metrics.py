@@ -219,7 +219,7 @@ class MetricsService:
         return None
 
     def get_daily_breakdown(
-        self, daily_data: list[dict[str, Any]], mode: str
+        self, daily_data: list[dict[str, Any]], mode: str,
     ) -> list[dict[str, Any]]:
         aggregated: list[dict[str, Any]] = []
 
@@ -250,6 +250,20 @@ class MetricsService:
                     current_group["has_data"] = True
                 if d == date.today():
                     current_group["contains_today"] = True
+
+            # Fallback: use weekly CSV data for weeks with no daily entries
+            for group in aggregated:
+                if not group["has_data"]:
+                    week_str = get_week_str(group["start_date"])
+                    wk_projs = self._cache.get_week_projects(week_str)
+                    if wk_projs:
+                        res = calculate(wk_projs)
+                        earned = sum(r[3] for r in res if r[3] is not None and r[3] > 0)
+                        tracked = sum(abs(r[3]) for r in res if r[3] is not None and r[3] < 0)
+                        group["positive"] = round(earned, 1)
+                        group["negative"] = round(tracked, 1)
+                        group["net"] = round(earned - tracked, 1)
+                        group["has_data"] = True
 
         elif mode == "month":
             current_group = None

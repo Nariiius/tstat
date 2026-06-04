@@ -41,7 +41,7 @@ from toggl.cache import (
     needs_auto_update,
     reset_cache,
 )
-from toggl.services.sync import sync_api_to_csv, sync_current_week_light
+from toggl.services.sync import sync_api_to_csv, sync_current_week_light, fill_daily_gaps
 from toggl.services.backup import (
     get_last_backup,
     get_last_backup_str,
@@ -189,6 +189,7 @@ class TogglTUI(App):
         Binding("u", "sync_current_week", "Sync", show=False),
         Binding("U", "sync_full", "Full Sync", show=False),
         Binding("b", "backup", "Backup"),
+        Binding("B", "backfill_gaps", "Backfill"),
         Binding("n", "add_negative", "Neg"),
         Binding("p", "add_positive", "Pos"),
         Binding("m", "manage_logs", "Manage"),
@@ -1050,6 +1051,45 @@ class TogglTUI(App):
             after_confirm,
         )
 
+    def action_backfill_gaps(self) -> None:
+        if self._sync_in_progress:
+            self.show_status("Wait for the current sync to finish.", severity="warning")
+            return
+        def after_confirm(confirmed: bool) -> None:
+            if confirmed:
+                self.show_status("Checking for daily data gaps...")
+                self._do_backfill_gaps()
+
+        self.push_screen(
+            ConfirmScreen(
+                "Backfill gaps",
+                "Fetch missing daily data for older weeks?\n"
+                "(Fetches up to 3 weeks per run — safe on quota)",
+            ),
+            after_confirm,
+        )
+
+    @work(thread=True)
+    def _do_backfill_gaps(self) -> None:
+        self.call_from_thread(self._set_sync_active)
+        try:
+            result = fill_daily_gaps(max_weeks=3, prompt_on_warning=False)
+            ok = result["success"]
+            message = result.get("message", "")
+            self.call_from_thread(self._on_sync_done, ok, message, message)
+        except (TogglRateLimitError, TogglAPIError) as e:
+            self.call_from_thread(
+                self.show_status, str(e), severity="error"
+            )
+            self.call_from_thread(self._set_sync_inactive)
+        except Exception as e:
+            self.call_from_thread(
+                self.show_status,
+                f"Backfill error: {e}",
+                severity="error",
+            )
+            self.call_from_thread(self._set_sync_inactive)
+
     @work(thread=True)
     def _do_sync_full(self) -> None:
         self.call_from_thread(self._set_sync_active)
@@ -1127,15 +1167,8 @@ class TogglTUI(App):
 
     def action_backup(self) -> None:
         """Create a timestamped backup of all local data files and config."""
-        def after_confirm(confirmed: bool) -> None:
-            if confirmed:
-                self.show_status("Creating backup...")
-                self._do_backup()
-
-        self.push_screen(
-            ConfirmScreen("Backup", "Backup all local data and config now?"),
-            after_confirm,
-        )
+        self.show_status("Creating backup...")
+        self._do_backup()
 
     @work(thread=True)
     def _do_backup(self) -> None:
