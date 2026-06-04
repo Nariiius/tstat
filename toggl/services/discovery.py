@@ -142,6 +142,7 @@ class DiscoveryEngine:
     # ── Main pipeline ───────────────────────────────────────────────────
 
     def compute(self) -> list[Discovery]:
+        logger.debug("DiscoveryEngine.compute starting")
         today = date.today()
 
         candidates: list[Discovery] = []

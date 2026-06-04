@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
 from toggl.cache import DataCache
 from toggl.services.metrics import MetricsService
+
+logger = logging.getLogger("TStat")
 
 
 @dataclass

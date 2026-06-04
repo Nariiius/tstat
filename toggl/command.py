@@ -8,6 +8,7 @@ CommandTab: unified analytics layout.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 
 from textual import on
@@ -21,6 +22,8 @@ from toggl.state.period import PeriodController, PeriodMode
 from toggl.widgets.calendar import CalendarWidget
 from toggl.widgets.graph import GraphWidget
 from toggl.widgets.tables import CategoryTable, DailyBreakdownTable
+
+logger = logging.getLogger("TStat")
 
 
 # ── CommandTab ────────────────────────────────────────────────────────
@@ -209,6 +212,8 @@ class CommandTab(Container):
 
     def refresh_all(self) -> None:
         """Single refresh entry point — graph, calendar, tables, stats, controls."""
+        logger.debug("CommandTab.refresh_all: mode=%s period=%s",
+                      self._current_graph_mode, self.period.mode)
         start, end = self.period.get_visible_range()
         base_start, base_end = self.period.get_base_range()
 

@@ -3,12 +3,15 @@
 import sys
 import os
 import json
+import logging
 from typing import Any
 
 from toggl.activity_rules import ActivityRules
 from toggl.const import CONFIG_FILE, DEFAULT_DAILY_TARGET, RED, RESET
 from toggl.rate_colors import RateColors
 from toggl.category import CategoryRegistry
+
+logger = logging.getLogger("TStat")
 
 CONFIG_EXAMPLE_FILE = CONFIG_FILE.replace(".json", ".json.example")
 _REQUIRED_RATE_MAPS = ("points", "negatives", "positives")
@@ -60,10 +63,15 @@ class Config:
 
     @classmethod
     def load(cls) -> "Config":
+        logger.debug("Loading configuration from %s", CONFIG_FILE)
         config = load_config()
         points = _load_rate_map(config, "points")
         negatives = _load_rate_map(config, "negatives")
         positives = _load_rate_map(config, "positives")
+        logger.debug(
+            "Config loaded: %d points, %d negatives, %d positives",
+            len(points), len(negatives), len(positives),
+        )
         daily_target = float(_coerce_number(
             config.get("daily_target", DEFAULT_DAILY_TARGET), "daily_target"
         ))
@@ -204,6 +212,7 @@ def load_runtime_settings() -> None:
     global DAILY_TARGET, RATE_COLORS, CATEGORY_REGISTRY, ACTIVITY_RULES
     global CONTROLLABILITY, AVAILABILITY_OVERRIDES, LOW_CONTROL_REASONS
     global DEFAULT_HOURS, DISCOVERY_LOOKBACK, DISCOVERY_IGNORE
+    logger.debug("Loading runtime settings from config")
     cfg = Config.load()
     POINTS.clear()
     POINTS.update(cfg.points)

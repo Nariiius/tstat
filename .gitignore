@@ -21,6 +21,10 @@ bagels_ref/
 .vscode/
 .idea/
 
+# --- Test artifacts (auto-generated) ---
+tests/visual/__snapshots__/
+snapshot_report.html
+
 # --- Sensitive Information ---
 # If toggl_config.json contains API keys, definitely ignore it!
 toggl_config.json

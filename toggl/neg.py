@@ -3,12 +3,15 @@
 import os
 import csv
 import io
+import logging
 from datetime import date
 from typing import Any, Literal
 
 from toggl.const import NEGATIVES_CSV_FILE, POSITIVES_CSV_FILE
 from toggl.config import NEGATIVES, POSITIVES
 from toggl.services.sync import _atomic_write
+
+logger = logging.getLogger("TStat")
 
 
 def _write_activity_csv(filepath: str, field_name: str, rows: list[dict[str, Any]]) -> None:
@@ -31,11 +34,13 @@ def log_activity_direct(name: str, mode: Literal["positive", "negative"], entry_
     Returns:
         (True, message) on success, (False, error_message) on failure.
     """
+    logger.debug("log_activity_direct: %s %s date=%s", mode, name, entry_date or "today")
     lookup = POSITIVES if mode == "positive" else NEGATIVES
     lower_map = {k.lower(): k for k in lookup}
     canonical = lower_map.get(name.strip().lower())
     if not canonical:
         label = "Positive" if mode == "positive" else "Negative"
+        logger.warning("log_activity_direct: %s '%s' not found in config", mode, name)
         return False, f"{label} '{name}' not found"
 
     csv_file = POSITIVES_CSV_FILE if mode == "positive" else NEGATIVES_CSV_FILE
@@ -61,6 +66,7 @@ def log_activity_direct(name: str, mode: Literal["positive", "negative"], entry_
         "Points": lookup[canonical],
     })
     _write_activity_csv(csv_file, field, rows)
+    logger.info("Logged %s: %s (%s%s pts) on %s", mode, canonical, sign, lookup[canonical], log_date)
     return True, f"Logged {canonical} ({sign}{lookup[canonical]} pts)"
 
 

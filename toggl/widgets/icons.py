@@ -63,6 +63,7 @@ ICON = {
     "csv_span": "\u2395",
     "projects": "\u229e",
     "quota": "\u2394",
+    "backup": "\u2b06",
     "hourglass": "\u23f3",
     "clock": "\u23f1",
 
@@ -179,6 +180,7 @@ ICON_ASCII = {
     "csv_span": "D",
     "projects": "P",
     "quota": "Q",
+    "backup": "^",
     "hourglass": "(...)",
     "clock": "(t)",
     "bar_filled": "=",

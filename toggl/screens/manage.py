@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 
 from rich.text import Text
@@ -16,6 +17,8 @@ from toggl.neg import delete_activity_entry, update_activity_date
 from toggl.screens.dialogs import ConfirmScreen
 from toggl.widgets.date_stepper import DateStepper
 from toggl.widgets.notifications import status_message
+
+logger = logging.getLogger("TStat")
 
 
 class ManageScreen(ModalScreen):
@@ -317,6 +320,8 @@ class ManageScreen(ModalScreen):
         # Push confirmation
         def after_confirm(confirmed: bool) -> None:
             if confirmed:
+                logger.debug("ManageScreen: deleting %s entry '%s' (%s)",
+                              entry["mode"], entry["name"], entry["date"])
                 ok, msg = delete_activity_entry(
                     entry["mode"], entry["date"], entry["name"]
                 )
@@ -394,6 +399,8 @@ class ManageScreen(ModalScreen):
             self._hide_edit_bar()
             return  # No change
 
+        logger.debug("ManageScreen: updating %s entry '%s' from %s to %s",
+                      entry["mode"], entry["name"], entry["date"], new_date)
         ok, msg = update_activity_date(
             entry["mode"], entry["date"], entry["name"], new_date
         )

@@ -5,6 +5,7 @@ Extracted from ``tui.py`` to enable independent testing and reduce file size.
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from textual import on
@@ -17,6 +18,8 @@ from textual.widgets import Button, OptionList, Static
 from toggl.config import NEGATIVES, POSITIVES
 from toggl.widgets.date_stepper import DateStepper
 from toggl.widgets.icons import ICON
+
+logger = logging.getLogger("TStat")
 
 
 def _parse_option_name(prompt: str) -> str:
@@ -217,6 +220,7 @@ class NegativeInputScreen(BaseDialog):
         stepper = self.query_one("#negative-date-stepper", DateStepper)
         name = _parse_option_name(str(event.option.prompt))
         stripped = name.replace(f"[#ff5f5f]{ICON['minus']}[/] ", "")
+        logger.debug("Negative dialog submitted: %s", stripped)
         self.dismiss({
             "name": stripped,
             "date": stepper.selected_date.strftime("%Y-%m-%d"),
@@ -277,6 +281,7 @@ class PositiveInputScreen(BaseDialog):
         stepper = self.query_one("#positive-date-stepper", DateStepper)
         name = _parse_option_name(str(event.option.prompt))
         stripped = name.replace(f"[#37d994]{ICON['plus']}[/] ", "")
+        logger.debug("Positive dialog submitted: %s", stripped)
         self.dismiss({
             "name": stripped,
             "date": stepper.selected_date.strftime("%Y-%m-%d"),

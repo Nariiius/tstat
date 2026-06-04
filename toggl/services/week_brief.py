@@ -77,6 +77,7 @@ class WeekBriefService:
         coach_findings: list[CoachFinding] | None = None,
         recent: RecentContext | None = None,
     ) -> WeekBrief:
+        logger.debug("WeekBriefService.compute starting")
         today = date.today()
         if recent is None:
             recent = build_recent_context(self._metrics, self._cache, lookback_days=7)

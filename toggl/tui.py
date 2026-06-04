@@ -41,6 +41,14 @@ from toggl.cache import (
     reset_cache,
 )
 from toggl.services.sync import sync_api_to_csv, sync_current_week_light
+from toggl.services.backup import (
+    get_last_backup,
+    get_last_backup_str,
+    integrity_check as run_integrity_check,
+    startup_integrity_check,
+    create_backup,
+    rotate_old_backups,
+)
 from toggl.config import (
     Config,
     load_runtime_settings,
@@ -179,6 +187,7 @@ class TogglTUI(App):
         Binding("r", "refresh_data", "Refresh", show=False),
         Binding("u", "sync_current_week", "Sync", show=False),
         Binding("U", "sync_full", "Full Sync", show=False),
+        Binding("b", "backup", "Backup"),
         Binding("n", "add_negative", "Neg"),
         Binding("p", "add_positive", "Pos"),
         Binding("m", "manage_logs", "Manage"),
@@ -214,6 +223,7 @@ class TogglTUI(App):
         self._reload_local_at: datetime | None = None
         self._reload_cache_at: datetime | None = None
         self._reload_api_at: datetime | None = None
+        self._reload_backup_at: datetime | None = None
         self._reload_anim = {"local": False, "cache": False, "api": False}
         self._status_message = ""
         self._status_severity = "information"
@@ -250,6 +260,7 @@ class TogglTUI(App):
             yield ScrollableFooter(show_command_palette=False, id="app-footer")
             with Horizontal(id="status-tray"):
                 yield Static("", id="status-message-inline")
+                yield Static("", id="meta-backup", classes="status-meta-chip")
                 yield Static("", id="meta-coverage", classes="status-meta-chip")
                 yield Static("", id="meta-projects", classes="status-meta-chip")
                 yield Static("", id="meta-quota", classes="status-meta-chip")
@@ -263,6 +274,7 @@ class TogglTUI(App):
             tabs.active = f"tab-{self.active_view_index}"
         self.query_one(ScrollableFooter).refresh_bindings()
         self._reload_api_at = get_last_api_sync_time()
+        self._reload_backup_at = get_last_backup()
         self._setup_status_tooltips()
         self.update_status_bar()
         self._reschedule_reload_tick()
@@ -276,6 +288,11 @@ class TogglTUI(App):
         if "pytest" not in sys.modules:
             self.call_later(self.check_auto_sync)
             self.set_interval(60, self.check_auto_sync)
+
+        # Run startup integrity check (skip in tests)
+        integrity_msg = startup_integrity_check()
+        if integrity_msg:
+            self.show_status(integrity_msg, severity="warning", timeout=8.0)
 
     def _setup_status_tooltips(self) -> None:
         self._chip_tips = {
@@ -305,6 +322,11 @@ class TogglTUI(App):
             "meta-quota": (
                 "API quota\n"
                 "Hourly Toggl requests remaining / limit"
+            ),
+            "meta-backup": (
+                "Backup age\n"
+                "Time since last local data backup\n"
+                "Shortcut: b"
             ),
         }
 
@@ -439,7 +461,7 @@ class TogglTUI(App):
 
     def _needs_second_reload_ticks(self) -> bool:
         now = datetime.now()
-        for at in (self._reload_local_at, self._reload_cache_at, self._reload_api_at):
+        for at in (self._reload_local_at, self._reload_cache_at, self._reload_api_at, self._reload_backup_at):
             if at is None:
                 continue
             if (now - at).total_seconds() < 60:
@@ -538,6 +560,7 @@ class TogglTUI(App):
     def update_status_bar(self) -> None:
         try:
             msg_widget = self.query_one("#status-message-inline", Static)
+            meta_backup = self.query_one("#meta-backup", Static)
             meta_coverage = self.query_one("#meta-coverage", Static)
             meta_projects = self.query_one("#meta-projects", Static)
             meta_quota = self.query_one("#meta-quota", Static)
@@ -569,6 +592,9 @@ class TogglTUI(App):
             meta_coverage.update("")
             meta_projects.update("")
             meta_quota.update("")
+
+        backup_age = get_last_backup_str()
+        meta_backup.update(icon_text("backup", backup_age))
 
         reload_local.update(
             self._reload_segment("local", "reload_local", self._reload_local_at)
@@ -921,7 +947,7 @@ class TogglTUI(App):
     def action_show_help(self) -> None:
         self.show_status(
             "Ctrl+Left/Right switch views  n negative  p positive  "
-            "u sync  U full sync  m manage  r reload  q quit",
+            "u sync  U full sync  m manage  r reload  b backup  q quit",
             timeout=8.0,
         )
 
@@ -1097,6 +1123,40 @@ class TogglTUI(App):
             self.load_data()  # Reload cache in case entries were changed
 
         self.push_screen(ManageScreen(), after_manage)
+
+    def action_backup(self) -> None:
+        """Create a timestamped backup of all local data files and config."""
+        def after_confirm(confirmed: bool) -> None:
+            if confirmed:
+                self.show_status("Creating backup...")
+                self._do_backup()
+
+        self.push_screen(
+            ConfirmScreen("Backup", "Backup all local data and config now?"),
+            after_confirm,
+        )
+
+    @work(thread=True)
+    def _do_backup(self) -> None:
+        try:
+            ok, result = create_backup()
+            rotate_old_backups()
+            if ok:
+                self.call_from_thread(self._on_backup_done, True, result)
+            else:
+                self.call_from_thread(
+                    self.show_status, f"Backup failed: {result}", severity="error"
+                )
+        except Exception as e:
+            self.call_from_thread(
+                self.show_status, f"Backup error: {e}", severity="error"
+            )
+
+    def _on_backup_done(self, ok: bool, ts: str) -> None:
+        self._reload_backup_at = get_last_backup()
+        self.update_status_bar()
+        self._reschedule_reload_tick()
+        self.show_status(f"Backup saved ({ts})")
 
     def action_cmd_zoom_in(self) -> None:
         if self.active_view_index == 1:

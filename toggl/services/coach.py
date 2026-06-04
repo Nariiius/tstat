@@ -72,6 +72,7 @@ class CoachService:
 
     def compute(self, recent: RecentContext | None = None) -> list[CoachFinding]:
         """Run all coach analyzers and return ranked findings."""
+        logger.debug("CoachService.compute starting")
         today = date.today()
         findings: list[CoachFinding] = []
 

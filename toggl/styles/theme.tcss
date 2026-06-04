@@ -36,7 +36,18 @@ Screen {
     margin: 0 1;
 }
 
-#view-tabs > .-active {
+#view-tabs #tabs-scroll,
+#view-tabs #tabs-list-bar,
+#view-tabs #tabs-list {
+    width: 1fr;
+}
+
+#view-tabs #tabs-list > Tab {
+    width: 1fr;
+    text-align: center;
+}
+
+#view-tabs #tabs-list > Tab.-active {
     color: $accent;
     text-style: bold;
 }

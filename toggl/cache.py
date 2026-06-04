@@ -2,6 +2,7 @@
 
 import os
 import csv
+import logging
 from typing import Any
 import io
 from datetime import datetime, date, timedelta
@@ -12,6 +13,8 @@ from toggl.const import (
 )
 from toggl.config import POINTS, NEGATIVES, POSITIVES
 from toggl.calc import calculate_logged_activity_totals
+
+logger = logging.getLogger("TStat")
 
 
 
@@ -157,15 +160,24 @@ class DataCache:
 
     @classmethod
     def load(cls) -> "DataCache":
+        logger.debug("DataCache.load starting")
         cache = cls()
         cache._load_weekly()
         cache._load_daily()
         cache._load_negatives()
         cache._load_positives()
+        logger.debug(
+            "DataCache loaded: %d weeks, %d days, %d negative days, %d positive days",
+            len(cache.weekly_data),
+            len(cache.daily_data),
+            len(cache.negatives_raw),
+            len(cache.positives_raw),
+        )
         return cache
 
     def _load_weekly(self) -> None:
         if not os.path.exists(CSV_FILE):
+            logger.debug("WEEKLY CSV not found, skipping")
             return
         with open(CSV_FILE, "r", encoding="utf-8") as f:
             for row in csv.DictReader(f):
@@ -177,6 +189,7 @@ class DataCache:
                     self.weekly_data[wk][proj] = self.weekly_data[wk].get(proj, 0.0) + hrs
                 except (KeyError, ValueError):
                     continue
+        logger.debug("Weekly data: %d weeks loaded", len(self.weekly_data))
 
     def _load_daily(self) -> None:
         if not os.path.exists(DAILY_CSV_FILE):

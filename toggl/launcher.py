@@ -14,6 +14,14 @@ def launch() -> None:
     """Show a Rich progress bar while loading, then start the TUI."""
     console = Console(stderr=True)
 
+    # Pre-flight config safety check (before any TUI machinery starts)
+    from toggl.services.backup import config_safety_check
+
+    config_err = config_safety_check()
+    if config_err:
+        print(f"\n  {RED}{BOLD}Config error:{RESET} {config_err}", file=sys.stderr)
+        sys.exit(1)
+
     try:
         with Progress(
             TextColumn("[bold #d7dde8]{task.description}"),

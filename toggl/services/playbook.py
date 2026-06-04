@@ -7,6 +7,7 @@ points_per_hour × controllability × availability × repeatability.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
@@ -20,6 +21,8 @@ from toggl.services.recent_context import (
     build_recent_context,
     format_day_net,
 )
+
+logger = logging.getLogger("TStat")
 
 
 @dataclass
@@ -109,11 +112,13 @@ class PlaybookService:
     # ────────────────────────────────────────
 
     def compute(self, recent: RecentContext | None = None) -> Playbook:
+        logger.debug("PlaybookService.compute starting")
         today = date.today()
         today_str = today.strftime("%Y-%m-%d")
         generated_at = datetime.now().isoformat(timespec="seconds")
 
         if not self._has_any_data():
+            logger.debug("PlaybookService.compute: no data available, returning empty")
             return Playbook(
                 goal="start_tracking",
                 headline="Start tracking to see your playbook",
@@ -212,6 +217,8 @@ class PlaybookService:
         # On track \u2014 show stretch actions
         steps, alternatives, expected_gain = self._build_on_track_playbook(today_str, logged_today, recent)
         headline = f"On track at {self._fmt_pts(today_net)} (target {self._fmt_pts(target)})"
+        logger.debug("PlaybookService.compute done: goal=on_track, %d steps, %d alternatives",
+                      len(steps), len(alternatives))
         return Playbook(
             goal="on_track",
             headline=headline,

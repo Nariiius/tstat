@@ -3,6 +3,7 @@
 import sys
 import os
 import json
+import logging
 import threading
 import urllib.request
 import urllib.parse
@@ -14,6 +15,8 @@ from typing import Any
 from toggl.const import CONFIG_FILE, RED, RESET, YELLOW, CYAN, BOLD, DIM
 from toggl.const import PROJECTS_FILE, PROJECTS_CACHE_MAX_AGE_DAYS, LOW_QUOTA_WARNING
 from toggl.config import load_config
+
+logger = logging.getLogger("TStat")
 
 
 # ──────────────────────────────────────────────
@@ -124,10 +127,12 @@ def _make_auth_request(url: str, token: str, method: str = "GET") -> tuple[Any, 
 
 def toggl_request(endpoint: str, token: str) -> Any:
     url = "https://api.track.toggl.com/api/v9/" + endpoint
+    logger.debug("API request: %s", endpoint)
     body, headers, err = _make_auth_request(url, token)
     if err is None:
         if body is None:
             raise TogglAPIError("API returned empty response", status_code=None)
+        logger.debug("API response: %s — %d bytes", endpoint, len(body))
         return json.loads(body)
     if err in (402, 429):
         resets_in = headers.get("X-Toggl-Quota-Resets-In") or headers.get(
@@ -146,18 +151,23 @@ def toggl_request(endpoint: str, token: str) -> Any:
             wait = f"{mins}m {s:02d}s" if mins else f"{s}s"
             msg += f" — resets in {wait}"
         msg += f" (Remaining: {remaining}/{limit})"
+        logger.warning("API rate limit: %s %s (%s/%s remaining)", endpoint, err, remaining, limit)
         raise TogglRateLimitError(msg, limit=limit, remaining=remaining, resets_in=resets_in)
     # Include error body in message for debugging
     error_detail = f" (body: {body})" if body else ""
+    logger.error("API error: %s -> HTTP %s%s", endpoint, err, error_detail)
     raise TogglAPIError(f"API Error: {err} for endpoint {endpoint}{error_detail}", status_code=err)
 
 
 def get_api_token() -> str:
     if os.environ.get("TOGGL_API_TOKEN"):
+        logger.debug("Using API token from TOGGL_API_TOKEN environment variable")
         return os.environ.get("TOGGL_API_TOKEN")
     data = load_config()
     if data.get("api_token"):
+        logger.debug("Using API token from config file")
         return data["api_token"]
+    logger.error("API token not found in env var or config")
     raise TogglAPIError(
         "Toggl API Token not found. Please set the TOGGL_API_TOKEN environment variable "
         "or define 'api_token' in toggl_config.json."
@@ -225,11 +235,14 @@ def _confirm_sync_quota(token: str, estimated_requests: int, sync_label: str, pr
 
 def get_projects_map(token: str, use_cache: bool = False) -> dict:
     if use_cache and os.path.exists(PROJECTS_FILE):
+        logger.debug("Using cached projects map from disk")
         with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)
             return {int(k): v for k, v in raw.items()}
+    logger.debug("Fetching projects map from API")
     projects_data = toggl_request("me/projects?active=both", token)
     result = {p["id"]: p["name"] for p in projects_data}
+    logger.debug("Projects map: %d projects fetched", len(result))
     with open(PROJECTS_FILE, "w", encoding="utf-8") as f:
         json.dump({str(k): v for k, v in result.items()}, f, indent=2)
     return result
