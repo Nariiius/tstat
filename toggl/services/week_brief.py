@@ -62,19 +62,23 @@ class WeekBriefService:
         metrics: MetricsService,
         config: Config,
         activity_rules: ActivityRules,
+        recovery_ignore: frozenset[str] | None = None,
     ) -> None:
         self._cache = cache
         self._metrics = metrics
         self._config = config
         self._rules = activity_rules
+        self._recovery_ignore = recovery_ignore or frozenset()
 
     def compute(
         self,
         discoveries: list[Discovery] | None = None,
         coach_findings: list[CoachFinding] | None = None,
+        recent: RecentContext | None = None,
     ) -> WeekBrief:
         today = date.today()
-        recent = build_recent_context(self._metrics, self._cache, lookback_days=7)
+        if recent is None:
+            recent = build_recent_context(self._metrics, self._cache, lookback_days=7)
 
         # ── Headline: week pace ──
         from toggl.cache import get_current_week
@@ -103,6 +107,18 @@ class WeekBriefService:
         protect = self._build_protect(recent, discoveries, coach_findings)
         skip = self._build_skip(today, recent, week_hours, discoveries, coach_findings)
 
+        # Sort by positive_lift for better prioritization
+        if recent.positive_lift:
+            for section in (focus, protect, skip):
+                section.sort(
+                    key=lambda a: (
+                        recent.positive_lift.get(a.name, 0.0)
+                        if a.name not in recent.neg_counts_7d
+                        else -abs(recent.positive_lift.get(a.name, 0.0))
+                    ),
+                    reverse=True,
+                )
+
         return WeekBrief(
             headline=headline,
             focus=focus[:self.MAX_FOCUS],
@@ -129,7 +145,7 @@ class WeekBriefService:
                 continue
             if not self._rules.should_suggest(name):
                 continue
-            if name in self._config.discovery_ignore:
+            if name in self._config.discovery_ignore or name in self._recovery_ignore:
                 continue
             days_since = self._days_since_tracked(name, today)
             if days_since is None or days_since < self.NEGLECT_DAYS:
@@ -157,7 +173,7 @@ class WeekBriefService:
                 continue
             if not self._rules.should_suggest(name):
                 continue
-            if name in self._config.discovery_ignore:
+            if name in self._config.discovery_ignore or name in self._recovery_ignore:
                 continue
             if float(rate) < 2.0:
                 continue
@@ -215,6 +231,8 @@ class WeekBriefService:
                 if d.kind == "positive_driver" and d.subject not in seen:
                     if not self._rules.should_suggest(d.subject):
                         continue
+                    if d.subject in self._recovery_ignore:
+                        continue
                     actions.append(WeekAction(
                         name=d.subject,
                         imperative=f"Keep {d.subject} \u2014 correlates with your best days",
@@ -230,6 +248,8 @@ class WeekBriefService:
                 if f.kind == "frequency_surge":
                     if not self._rules.should_suggest(f.subject):
                         continue
+                    if f.subject in self._recovery_ignore:
+                        continue
                     pts = self._config.positives.get(f.subject, 0)
                     actions.append(WeekAction(
                         name=f.subject,
@@ -244,6 +264,8 @@ class WeekBriefService:
                 if hab in seen:
                     continue
                 if not self._rules.should_suggest(hab):
+                    continue
+                if hab in self._recovery_ignore:
                     continue
                 pts = self._config.positives.get(hab, 0)
                 actions.append(WeekAction(
@@ -273,6 +295,8 @@ class WeekBriefService:
         # 1. Repeat negatives (2+ in last 7d)
         for name, count in recent.neg_counts_7d.items():
             if count < self.RECENT_NEG_THRESHOLD:
+                continue
+            if name in self._recovery_ignore:
                 continue
             pts = self._config.negatives.get(name, 5)
             actions.append(WeekAction(
@@ -307,9 +331,10 @@ class WeekBriefService:
                     continue
                 if hrs < 0.25:
                     continue
+                if name in self._recovery_ignore:
+                    continue
                 rate = self._config.points.get(name, 0)
-                # Also check if their category nature is avoid
-                if not self._rules.should_suggest(name) and float(rate) < 0:
+                if not self._rules.should_suggest(name) or float(rate) < 0:
                     actions.append(WeekAction(
                         name=name,
                         imperative=f"Don't add {name} time \u2014 already {hrs:.1f}h this week",

@@ -144,6 +144,7 @@ class InsightsBundleService:
             metrics=metrics,
             config=config,
             activity_rules=config.activity_rules,
+            recovery_ignore=frozenset(config.recovery_ignore),
         )
 
     def compute_fingerprint(self) -> dict[str, Any]:
@@ -177,12 +178,19 @@ class InsightsBundleService:
         self,
         on_progress: Callable[[str], None] | None = None,
     ) -> InsightsBundle:
+        # Compute recent context once for all sub-services
+        recent = build_recent_context(
+            self._metrics, self._cache, lookback_days=14
+        )
+
         if on_progress:
             on_progress("playbook")
-        playbook = self._playbook_svc.compute()
+        playbook = self._playbook_svc.compute(recent=recent)
 
         # Run discovery engine
         discoveries: list[Discovery] = []
+        if on_progress:
+            on_progress("discovery")
         try:
             engine = DiscoveryEngine(
                 cache=self._cache,
@@ -198,16 +206,19 @@ class InsightsBundleService:
         if on_progress:
             on_progress("coach")
         try:
-            coach_findings = self._coach_svc.compute()
+            coach_findings = self._coach_svc.compute(recent=recent)
         except Exception:
             logger.exception("CoachService failed")
 
         # Run week brief (consumes discoveries + coach)
         week_brief = WeekBrief(headline="", focus=[], protect=[], skip=[])
+        if on_progress:
+            on_progress("week_brief")
         try:
             week_brief = self._week_brief_svc.compute(
                 discoveries=discoveries,
                 coach_findings=coach_findings,
+                recent=recent,
             )
         except Exception:
             logger.exception("WeekBriefService failed")

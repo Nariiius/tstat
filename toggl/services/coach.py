@@ -47,7 +47,7 @@ class CoachFinding:
 class CoachService:
     """Compares recent behaviour against personal baselines.
 
-    Personal baselines are computed from the last 28 days.  Recent
+    Personal baselines are computed from the last 35 days.  Recent
     behaviour is the last 7 days.  The coach only surfaces deltas
     that exceed the noise floor for each individual activity.
     """
@@ -70,15 +70,15 @@ class CoachService:
 
     # ── Main pipeline ───────────────────────────────────────────────────
 
-    def compute(self) -> list[CoachFinding]:
+    def compute(self, recent: RecentContext | None = None) -> list[CoachFinding]:
         """Run all coach analyzers and return ranked findings."""
         today = date.today()
         findings: list[CoachFinding] = []
 
-        # Build recent context (7-day lookback with positive_lift)
-        recent = build_recent_context(
-            self._metrics, self._cache, lookback_days=self.LOOKBACK_SHORT
-        )
+        if recent is None:
+            recent = build_recent_context(
+                self._metrics, self._cache, lookback_days=self.LOOKBACK_SHORT
+            )
 
         # Build personal baselines over the longer lookback
         baseline = self._compute_baselines(today)
@@ -187,6 +187,8 @@ class CoachService:
             if coach_mode == "observe_only":
                 confidence *= 0.5  # dampen for avoid/neutral
 
+            confidence = max(0.0, min(1.0, confidence))
+
             if confidence < MIN_CONFIDENCE:
                 continue
 
@@ -256,6 +258,8 @@ class CoachService:
             if coach_mode == "observe_only":
                 confidence *= 0.5
 
+            confidence = max(0.0, min(1.0, confidence))
+
             if confidence < MIN_CONFIDENCE:
                 continue
 
@@ -310,6 +314,8 @@ class CoachService:
             coach_mode = self._rules.get_coach_mode(name)
             if coach_mode == "observe_only":
                 confidence *= 0.5
+
+            confidence = max(0.0, min(1.0, confidence))
 
             if confidence < MIN_CONFIDENCE:
                 continue

@@ -58,7 +58,6 @@ class Playbook:
 
 
 @dataclass
-@dataclass
 class _Candidate:
     """Internal candidate representation for bucket-based selection."""
     name: str
@@ -108,7 +107,7 @@ class PlaybookService:
     # Main entry point
     # ────────────────────────────────────────
 
-    def compute(self) -> Playbook:
+    def compute(self, recent: RecentContext | None = None) -> Playbook:
         today = date.today()
         today_str = today.strftime("%Y-%m-%d")
         generated_at = datetime.now().isoformat(timespec="seconds")
@@ -121,7 +120,7 @@ class PlaybookService:
                     PlaybookStep(
                         action="log",
                         label="a project or positive habit",
-                        amount="×1",
+                        amount="\u00d71",
                         points=0.0,
                         reason="No activity data yet",
                     )
@@ -132,7 +131,8 @@ class PlaybookService:
                 generated_at=generated_at,
             )
 
-        recent = build_recent_context(self._metrics, self._cache, lookback_days=14)
+        if recent is None:
+            recent = build_recent_context(self._metrics, self._cache, lookback_days=14)
         lookback, focus_line = self._build_lookback(recent, today)
 
         day = self._metrics.get_day_metrics(today_str)
@@ -237,8 +237,8 @@ class PlaybookService:
         context: dict[str, Any],
     ) -> tuple[list[PlaybookStep], list[PlaybookStep], float, str]:
         """Build playbook for gap-filling or week recovery."""
-        habit_candidates = self._gather_habit_candidates(today_str, logged_today)
-        project_candidates = self._gather_project_candidates(today_str, logged_today)
+        habit_candidates = self._gather_habit_candidates(today_str, logged_today, recent)
+        project_candidates = self._gather_project_candidates(today_str, logged_today, recent)
 
         steps, alternatives = self._select_steps(gap, habit_candidates, project_candidates)
         expected_gain = round(sum(s.points for s in steps), 1)
@@ -265,45 +265,20 @@ class PlaybookService:
         logged_today: set[str],
         recent: RecentContext,
     ) -> tuple[list[PlaybookStep], list[PlaybookStep], float]:
-        """Build playbook for on-track days — stretch actions."""
-        habit_candidates = self._gather_habit_candidates(today_str, logged_today)
-        project_candidates = self._gather_project_candidates(today_str, logged_today)
+        """Build playbook for on-track days — stretch goals while ahead."""
+        habit_candidates = self._gather_habit_candidates(today_str, logged_today, recent)
+        project_candidates = self._gather_project_candidates(today_str, logged_today, recent)
 
-        # For on-track, pick the highest-value available action
-        all_candidates = sorted(
-            habit_candidates + project_candidates,
-            key=lambda c: -c.rank_score
-        )
+        # Use full selection with bucket caps like gap playbook
+        steps, alternatives = self._select_steps(0, habit_candidates, project_candidates)
 
-        steps = []
-        alternatives = []
-        used_names: set[str] = set()
-
-        if all_candidates:
-            best = all_candidates[0]
-            used_names.add(best.name)
-            steps.append(PlaybookStep(
-                action=best.action,
-                label=best.name,
-                amount=best.amount,
-                points=best.points,
-                reason=best.reason or "Stretch \u2014 bank extra points while ahead",
-            ))
-
-            # Capture up to 3 runner-up alternatives
-            for alt in all_candidates[1:]:
-                if alt.name in used_names:
-                    continue
-                if len(alternatives) >= 3:
-                    break
-                alternatives.append(PlaybookStep(
-                    action=alt.action,
-                    label=alt.name,
-                    amount=alt.amount,
-                    points=alt.points,
-                    reason=alt.reason or "Stretch \u2014 bank extra points while ahead",
-                ))
-                used_names.add(alt.name)
+        # Mark reasons as stretch goals if no specific reason
+        for s in steps:
+            if not s.reason or s.reason == "Not tracked yet today" or s.reason.startswith("Quick"):
+                s.reason = "Stretch \u2014 bank extra points while ahead"
+        for a in alternatives:
+            if not a.reason or a.reason == "Not tracked yet today" or a.reason.startswith("Quick"):
+                a.reason = "Stretch \u2014 bank extra points while ahead"
 
         expected_gain = round(sum(s.points for s in steps), 1)
         return steps, alternatives, expected_gain
@@ -313,10 +288,11 @@ class PlaybookService:
     # ────────────────────────────────────────
 
     def _gather_habit_candidates(
-        self, today_str: str, logged_today: set[str]
+        self, today_str: str, logged_today: set[str], recent: RecentContext | None = None
     ) -> list[_Candidate]:
         """Gather binary positive habits as candidates."""
         candidates: list[_Candidate] = []
+        positive_lift = recent.positive_lift if recent else {}
 
         for name, pts in self._positives.items():
             if not self._rules.should_suggest(name):
@@ -349,9 +325,12 @@ class PlaybookService:
             remind = self._rules.get_remind_after_gap_days(name)
             if remind is not None:
                 if gap_days >= remind:
-                    reason = f"\u23f1 {gap_days}d since last — remind after {remind}d \u00b7 +{float(pts):.0f} pts"
+                    reason = f"\u23f1 {gap_days}d since last \u2014 remind after {remind}d \u00b7 +{float(pts):.0f} pts"
                 elif gap_days >= max(remind - 1, 1):
                     reason = f"\u23f1 {gap_days}d since last \u00b7 streak at risk \u00b7 +{float(pts):.0f} pts"
+            lift = positive_lift.get(name, 0.0)
+            if lift >= 2.0:
+                reason += f"  (net {lift:+.1f} when you do this)"
 
             candidates.append(_Candidate(
                 name=name,
@@ -367,10 +346,11 @@ class PlaybookService:
         return candidates
 
     def _gather_project_candidates(
-        self, today_str: str, logged_today: set[str]
+        self, today_str: str, logged_today: set[str], recent: RecentContext | None = None
     ) -> list[_Candidate]:
         """Gather tracked projects with positive rates as candidates."""
         candidates: list[_Candidate] = []
+        positive_lift = recent.positive_lift if recent else {}
         projs = self._cache.get_day_projects(today_str) or {}
 
         for name, rate in self._points.items():
@@ -403,6 +383,9 @@ class PlaybookService:
             amount = f"{h}h" if h >= 1 else (f"{m}m" if m else "30m")
 
             reason = "Not tracked yet today"
+            lift = positive_lift.get(name, 0.0)
+            if lift >= 2.0:
+                reason += f"  (net {lift:+.1f} when you do this)"
 
             candidates.append(_Candidate(
                 name=name,
@@ -438,8 +421,8 @@ class PlaybookService:
         project_count = 0
         used_names: set[str] = set()
 
-        # Guarantee at least 1 project if available
-        if projects:
+        # Guarantee at least MIN_PROJECTS project if available
+        while len(steps) < self.MIN_PROJECTS and projects:
             best_proj = projects.pop(0)
             steps.append(PlaybookStep(
                 action=best_proj.action,
