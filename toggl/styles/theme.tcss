@@ -1,12 +1,46 @@
 $accent: #63f3ff;
+$bg-base: #0b1016;
+$bg-hover: #1e2a36;
+$text-primary: #d7dde8;
+$text-dim: #8d98a7;
+$border-muted: #3d4f63;
 
 * {
     scrollbar-size: 0 0;
 }
 
 Screen {
-    background: #0b1016;
-    color: #d7dde8;
+    background: $bg-base;
+    color: $text-primary;
+}
+
+/* ── Splash screen (startup loading) ─────────────────── */
+SplashScreen {
+    background: $bg-base;
+    align: center middle;
+}
+
+#splash-container {
+    width: auto;
+    height: auto;
+    border: round $border-muted;
+    padding: 2 4;
+    background: $bg-base;
+    align: center middle;
+}
+
+#splash-logo {
+    color: $accent;
+    text-style: bold;
+    text-align: center;
+    width: auto;
+}
+
+#splash-loading {
+    color: $text-dim;
+    text-align: center;
+    width: auto;
+    margin-top: 1;
 }
 
 #root {
@@ -20,7 +54,7 @@ Screen {
 }
 
 .app-title {
-    color: #63f3ff;
+    color: $accent;
     text-style: bold;
     padding: 0 1;
     width: auto;
@@ -32,7 +66,7 @@ Screen {
 }
 
 #view-tabs > .-active {
-    color: #63f3ff;
+    color: $accent;
     text-style: bold;
 }
 
@@ -41,9 +75,18 @@ Screen {
 }
 
 #sync-status {
-    color: #8d98a7;
     width: auto;
     padding: 0 1;
+}
+
+#sync-status.sync-fresh {
+    color: #37d994;
+}
+#sync-status.sync-warn {
+    color: #e2b714;
+}
+#sync-status.sync-stale {
+    color: #ff5f5f;
 }
 
 #main {
@@ -65,45 +108,46 @@ Screen {
     display: block;
 }
 
+/* ── Smooth focus border transitions ─────────────────── */
 DataTable {
     height: 1fr;
-    border: round #3d4f63;
-    background: #0b1016;
-    color: #d7dde8;
+    border: round $border-muted;
+    background: $bg-base;
+    color: $text-primary;
 }
 
 DataTable:focus,
 DataTable:focus-within {
     border: round $accent;
-    background: #0b1016;
+    background: $bg-base;
     background-tint: transparent 0%;
 }
 
 DataTable:focus > .datatable--cursor,
 DataTable:focus-within > .datatable--cursor {
-    background: #1e2a36;
+    background: $bg-hover;
     color: $accent;
     text-style: bold;
 }
 
 DataTable:focus > .datatable--fixed-cursor,
 DataTable:focus-within > .datatable--fixed-cursor {
-    background: #1e2a36;
+    background: $bg-hover;
     color: $accent;
 }
 
 DataTable > .datatable--cursor {
-    background: #1e2a36;
-    color: #d7dde8;
+    background: $bg-hover;
+    color: $text-primary;
 }
 
 DataTable > .datatable--fixed-cursor {
-    background: #1e2a36;
+    background: $bg-hover;
 }
 
 DataTable > .datatable--header {
-    background: #0b1016;
-    color: #63f3ff;
+    background: $bg-base;
+    color: $accent;
     text-style: bold;
 }
 
@@ -130,55 +174,69 @@ DataTable > .datatable--header {
 #spark-weeks-table {
     height: 1fr;
     min-height: 0;
-    border: round #3d4f63;
-    background: #0b1016;
-    color: #d7dde8;
+    border: round $border-muted;
+    background: $bg-base;
+    color: $text-primary;
 }
 
 #spark-weeks-table:focus,
 #spark-weeks-table:focus-within {
     border: round $accent;
-    background: #0b1016;
+    background: $bg-base;
     background-tint: transparent 0%;
 }
 
 #spark-weeks-table > .datatable--header {
-    background: #0b1016;
-    color: #63f3ff;
+    background: $bg-base;
+    color: $accent;
     text-style: bold;
 }
 
 #spark-days-table {
     height: auto;
-    border: round #3d4f63;
-    background: #0b1016;
-    color: #d7dde8;
+    border: round $border-muted;
+    background: $bg-base;
+    color: $text-primary;
 }
 
 #spark-days-table:focus,
 #spark-days-table:focus-within {
     border: round $accent;
-    background: #0b1016;
+    background: $bg-base;
     background-tint: transparent 0%;
 }
 
 #spark-catchup {
     height: auto;
-    border: round #3d4f63;
+    border: round $border-muted;
     padding: 0 1;
-    background: #0b1016;
+    background: $bg-base;
 }
 
 #spark-catchup:focus,
 #spark-catchup:focus-within {
     border: round #fab387;
-    background: #0b1016;
+    background: $bg-base;
     background-tint: transparent 0%;
 }
 
+/* ── Buttons ───────────────────────────────────────── */
+Button {
+    background: $bg-base;
+    border: none;
+    min-width: 4;
+    height: 1;
+}
+
+Button:hover {
+    color: $accent;
+    background: $bg-hover;
+}
+
+/* ── Footer ────────────────────────────────────────── */
 Footer {
-    background: #0b1016;
-    color: #8d98a7;
+    background: $bg-base;
+    color: $text-dim;
 }
 
 Footer > FooterKey .footer-key--key {
@@ -186,12 +244,13 @@ Footer > FooterKey .footer-key--key {
 }
 
 Footer > FooterKey .footer-key--description {
-    color: #8d98a7;
+    color: $text-dim;
 }
 
+/* ── OptionList ─────────────────────────────────────── */
 OptionList {
-    background: #0b1016;
-    color: #d7dde8;
+    background: $bg-base;
+    color: $text-primary;
     border: none;
     height: auto;
     max-height: 10;
@@ -203,13 +262,14 @@ OptionList > .option-list--option {
 
 OptionList > .option-list--option-highlighted {
     background: #27323d;
-    color: #63f3ff;
+    color: $accent;
 }
 
+/* ── Toast notifications with icons ─────────────────── */
 Toast {
-    background: #0b1016;
-    color: #d7dde8;
-    border: round #3d4f63;
+    background: $bg-base;
+    color: $text-primary;
+    border: round $border-muted;
     padding: 0 1;
     margin: 1 1 0 0;
     height: auto;

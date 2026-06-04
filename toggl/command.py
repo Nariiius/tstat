@@ -195,9 +195,9 @@ class CommandTab(Container):
         with Container(id="cmd-graph-header"):
             # Row 1: L1.controls
             with Horizontal(id="cmd-l1-controls"):
-                yield Button("<<<", id="cmd-prev", classes="nav-btn")
+                yield Button("\u2190", id="cmd-prev", classes="nav-btn")
                 yield Label("...", id="cmd-period-label")
-                yield Button(">>>", id="cmd-next", classes="nav-btn")
+                yield Button("\u2192", id="cmd-next", classes="nav-btn")
                 yield Label("|", classes="cmd-period-sep")
                 yield Button("View: Day ↻", id="cmd-cycle-period", classes="cycle-btn")
                 yield Label("|", classes="cmd-period-sep")

@@ -8,6 +8,7 @@ from rich.text import Text
 
 from toggl.config import CATEGORY_REGISTRY
 from toggl.formatters.cells import _fmt_project_tree, _fmt_tree_cells, fmt_pts_rich
+from toggl.widgets.icons import ICON
 
 
 # ──────────────────────────────────────────────
@@ -25,7 +26,7 @@ SECTION_COLORS = {
 def _fmt_section_header(label: str) -> Text:
     """Return a Rich Text section-divider row label with its fixed semantic color."""
     key = label
-    if key.startswith("\u2022 "):
+    if key.startswith(f"{ICON['bullet']} "):
         key = key[2:]
     elif key.startswith("["):
         key = key[1:-1] if key.endswith("]") else key[1:]
@@ -65,7 +66,7 @@ def _render_category_section(
     total = len(rows)
     for i, crow in enumerate(rows):
         is_last = (i == total - 1)
-        prefix = "\u2514 " if is_last else "\u251c "
+        prefix = f"{ICON['tree_last']} " if is_last else f"{ICON['tree_branch']} "
         name, hours, rate, pts = crow
         name_text = fmt_name_fn(name, rate)
         rate_color = CATEGORY_REGISTRY.get_color(name) or ""
@@ -96,10 +97,10 @@ def _render_logged_results(
     """
     rows.append((_fmt_section_header(section_label), Text(""), Text(""), Text("")))
     for i, (name, count, per_event, total) in enumerate(results):
-        prefix = "\u2514 " if i == len(results) - 1 else "\u251c "
+        prefix = f"{ICON['tree_last']} " if i == len(results) - 1 else f"{ICON['tree_branch']} "
         rows.append((
             Text.assemble((prefix, section_color), (name, "")),
-            Text(f"\u00d7{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total),
+            Text(f"{ICON['multiply']}{count}"), fmt_pts_rich(per_event), fmt_pts_rich(total),
         ))
 
 
@@ -144,7 +145,7 @@ def build_category_rows(
         section_rows = section_data.get(section_name, [])
         if section_rows:
             rows.append(
-                (_fmt_section_header(f"\u2022 {section_name.upper()}"),
+                (_fmt_section_header(f"{ICON['bullet']} {section_name.upper()}"),
                  Text(""), Text(""), Text(""))
             )
         rows.extend(
@@ -157,13 +158,13 @@ def build_category_rows(
     if section_data.get("positive_results"):
         _render_logged_results(
             rows, section_data["positive_results"],
-            "\u2022 LOGGED POSITIVE",
+            f"{ICON['bullet']} LOGGED POSITIVE",
             SECTION_COLORS["LOGGED POSITIVE"],
         )
     if section_data.get("negative_results"):
         _render_logged_results(
             rows, section_data["negative_results"],
-            "\u2022 LOGGED NEGATIVE",
+            f"{ICON['bullet']} LOGGED NEGATIVE",
             SECTION_COLORS["LOGGED NEGATIVE"],
         )
 
