@@ -24,7 +24,7 @@
     },
     "Entertainment": {
       "color": "#ff5f5f",
-      "projects": ["Leisure / Entertainment", "Timepass / Trash"]
+      "projects": ["Leisure / Entertainment", "Timepass / Trash", "Projects/Gacha"]
     }
   },
   "rate_colors": {
@@ -40,6 +40,7 @@
     "Learning Japanese": 3,
     "Obligations / Social": 2,
     "Personal Development": 2,
+    "Projects/Gacha": 2,
     "Acads / Study": 1,
     "Plan / Org / Review": 1,
     "Focus Thoughts": 1,
