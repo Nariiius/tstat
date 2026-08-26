@@ -20,10 +20,6 @@ Demo data — not live Toggl logs.
 
 ![Insights](docs/screenshots/insights.png)
 
-**Log a positive** (`p`)
-
-![Log positive](docs/screenshots/log-positive.png)
-
 Regenerate with `python tools/capture_readme_screenshots.py` (uses `toggl_config.json.example` and synthetic CSVs).
 
 ## Why it exists

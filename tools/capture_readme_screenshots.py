@@ -103,35 +103,49 @@ def write_demo_data(data_dir: Path, config_path: Path) -> None:
 
     shutil.copyfile(PROJECT_ROOT / "toggl_config.json.example", config_path)
 
+    cfg = json.loads(Path(config_path).read_text())
+    pos_pts = cfg["positives"]
+    neg_pts = cfg["negatives"]
+
     today = date.today()
     daily_rows: list[tuple[str, str, float]] = []
     weekly: dict[str, dict[str, float]] = {}
 
-    catalog = [
-        ("Coding", 2.0, 0.6),
-        ("Writing", 1.1, 0.5),
-        ("Study", 0.9, 0.4),
-        ("Exercise", 0.8, 0.35),
-        ("Planning", 0.4, 0.2),
-        ("Entertainment", 0.7, 0.4),
-        ("Chores", 0.3, 0.2),
-        ("Rest", 7.5, 0.4),
-    ]
-
-    for age in range(90, -1, -1):
+    # Older days: more leisure, less deep work (lifetime slightly negative so
+    # Recovery has rows). Recent two weeks: coding/exercise heavy.
+    for age in range(50, -1, -1):
         day = today - timedelta(days=age)
         ds = day.strftime("%Y-%m-%d")
         week = get_week_str(day)
         weekday = day.weekday()
+        recent = age <= 14
+        if recent:
+            catalog = [
+                ("Coding", 2.1, 0.4),
+                ("Writing", 1.0, 0.3),
+                ("Study", 0.8, 0.25),
+                ("Exercise", 1.0, 0.2),
+                ("Planning", 0.4, 0.15),
+                ("Entertainment", 0.4, 0.2),
+                ("Chores", 0.3, 0.1),
+                ("Rest", 7.4, 0.3),
+            ]
+        else:
+            catalog = [
+                ("Coding", 0.4, 0.2),
+                ("Writing", 0.3, 0.15),
+                ("Study", 0.3, 0.15),
+                ("Exercise", 0.5, 0.2),
+                ("Planning", 0.3, 0.1),
+                ("Entertainment", 5.2, 0.4),
+                ("Chores", 0.5, 0.2),
+                ("Rest", 7.6, 0.3),
+            ]
         for name, base, spread in catalog:
-            if name == "Rest":
-                hours = round(base + ((age % 5) - 2) * 0.15, 2)
-            elif weekday >= 5 and name in {"Coding", "Writing", "Study"}:
-                hours = round(max(0.2, base * 0.45 + (age % 3) * 0.1), 2)
+            if weekday >= 5 and name in {"Coding", "Writing", "Study"}:
+                hours = round(max(0.15, base * 0.5 + (age % 3) * 0.08), 2)
             else:
-                hours = round(max(0.0, base + ((age + weekday) % 5 - 2) * spread * 0.35), 2)
-            if hours <= 0:
-                continue
+                hours = round(max(0.15, base + ((age + weekday) % 5 - 2) * spread * 0.3), 2)
             daily_rows.append((ds, name, hours))
             weekly.setdefault(week, {})
             weekly[week][name] = weekly[week].get(name, 0.0) + hours
@@ -153,7 +167,7 @@ def write_demo_data(data_dir: Path, config_path: Path) -> None:
         for d, name in (
             (0, "Meditation"),
             (0, "Workout"),
-            (1, "Exercise"),
+            (1, "Workout"),
             (1, "Reading"),
             (2, "Meditation"),
             (4, "Social Time"),
@@ -167,6 +181,11 @@ def write_demo_data(data_dir: Path, config_path: Path) -> None:
             (0, "Distraction"),
             (3, "Procrastination"),
             (6, "Junk Food"),
+            (12, "Distraction"),
+            (18, "Procrastination"),
+            (22, "Junk Food"),
+            (28, "Distraction"),
+            (35, "Procrastination"),
         )
     ]
 
@@ -174,28 +193,40 @@ def write_demo_data(data_dir: Path, config_path: Path) -> None:
         writer = csv.writer(f)
         writer.writerow(["Date", "Positive", "Points"])
         for day, name in positives:
-            writer.writerow([day.strftime("%Y-%m-%d"), name, 3])
+            writer.writerow([day.strftime("%Y-%m-%d"), name, pos_pts[name]])
 
     with open(const.NEGATIVES_CSV_FILE, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Date", "Negative", "Points"])
         for day, name in negatives:
-            writer.writerow([day.strftime("%Y-%m-%d"), name, 2])
+            writer.writerow([day.strftime("%Y-%m-%d"), name, neg_pts[name]])
 
     with open(const.HISTORY_FILE, "w") as f:
         json.dump({"last_updated": f"{today.isoformat()}T12:00:00"}, f)
 
+    with open(const.PROJECTS_FILE, "w") as f:
+        json.dump({"Coding": 1, "Writing": 2, "Study": 3, "Exercise": 4}, f)
 
-def capture(name: str, press: tuple[str, ...], pause: float = 1.6) -> Path:
+    backup_dir = Path(data_dir) / "backups" / "2026-08-26T120000Z"
+    backup_dir.mkdir(parents=True)
+    (backup_dir / "_backup_meta.json").write_text(
+        json.dumps({"created": f"{today.isoformat()}T12:00:00", "files_copied": 4})
+    )
+
+
+def capture(name: str, press: tuple[str, ...], pause: float = 2.0) -> Path:
     from textual._doc import take_svg_screenshot
     from toggl.tui import TogglTUI
 
     async def settle(pilot):
         await pilot.pause(pause)
+        if name == "log-positive":
+            await pilot.press("p")
+            await pilot.pause(0.5)
 
     svg = take_svg_screenshot(
         app=TogglTUI(),
-        press=press,
+        press=() if name == "log-positive" else press,
         terminal_size=TERM_SIZE,
         title=f"TStat — {name}",
         run_before=settle,
@@ -217,24 +248,61 @@ def capture(name: str, press: tuple[str, ...], pause: float = 1.6) -> Path:
     return out
 
 
+def _crop_letterbox(im):
+    """Remove the white square padding qlmanage adds around the terminal."""
+    from PIL import Image
+
+    rgb = im.convert("RGB")
+    px = rgb.load()
+    w, h = rgb.size
+
+    def is_pad(color: tuple[int, int, int]) -> bool:
+        return color[0] > 248 and color[1] > 248 and color[2] > 248
+
+    minx, miny, maxx, maxy = w, h, 0, 0
+    for y in range(0, h, 2):
+        for x in range(0, w, 2):
+            if not is_pad(px[x, y]):
+                minx = min(minx, x)
+                miny = min(miny, y)
+                maxx = max(maxx, x)
+                maxy = max(maxy, y)
+    if maxx <= minx or maxy <= miny:
+        return im
+    pad = 4
+    box = (
+        max(0, minx - pad),
+        max(0, miny - pad),
+        min(w, maxx + pad + 1),
+        min(h, maxy + pad + 1),
+    )
+    return im.crop(box)
+
+
 def svg_to_png(svg_path: Path) -> Path | None:
+    """Rasterize via Quick Look (keeps CSS colors), then crop the white square."""
+    import subprocess
+
+    from PIL import Image
+
     png_path = svg_path.with_suffix(".png")
     ql = shutil.which("qlmanage")
     if not ql:
         return None
-    import subprocess
-
     subprocess.run(
-        [ql, "-t", "-s", "1800", "-o", str(OUT_DIR), str(svg_path)],
+        [ql, "-t", "-s", "2200", "-o", str(OUT_DIR), str(svg_path)],
         check=False,
         capture_output=True,
     )
     produced = OUT_DIR / f"{svg_path.name}.png"
-    if produced.exists():
-        produced.replace(png_path)
-        print(f"  wrote {png_path.relative_to(PROJECT_ROOT)}")
-        return png_path
-    return None
+    if not produced.exists():
+        return None
+    im = Image.open(produced)
+    cropped = _crop_letterbox(im)
+    cropped.save(png_path, optimize=True)
+    produced.unlink(missing_ok=True)
+    print(f"  wrote {png_path.relative_to(PROJECT_ROOT)} {cropped.size[0]}x{cropped.size[1]}")
+    return png_path
 
 
 def main() -> int:
@@ -257,12 +325,11 @@ def main() -> int:
             ("command", ()),
             ("overview", ("ctrl+left",)),
             ("insights", ("ctrl+right",)),
-            ("log-positive", ("p",)),
         ]
         print("Capturing views...")
         for name, press in shots:
             print(f"[{name}]")
-            svg = capture(name, press, pause=2.0 if name == "insights" else 1.6)
+            svg = capture(name, press, pause=2.2)
             svg_to_png(svg)
         print(f"\nScreenshots in {OUT_DIR}")
         return 0
