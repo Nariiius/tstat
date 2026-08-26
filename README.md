@@ -2,7 +2,7 @@
 
 Terminal dashboard for [Toggl Track](https://toggl.com/track/). Syncs time entries, scores them against your own rules, and shows trends, habits, and coaching signals.
 
-Built with Python and [Textual](https://textual.textualize.io/).
+Built with Python and [Textual](https://textual.textualize.io/). MIT licensed.
 
 ## Screenshots
 
@@ -104,6 +104,10 @@ pytest tests/unit tests/ui_quality tests/e2e -q
 ```
 
 Unit, e2e, and UI-quality tests cover scoring, cache, sync edge cases, and keyboard/accessibility behaviour. Visual snapshot tests exist under `tests/visual/` but are unstable across runs (dynamic CSS class names), so they are better as a manual check than CI.
+
+## License
+
+[MIT](LICENSE)
 
 ## Privacy
 
