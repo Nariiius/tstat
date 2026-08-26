@@ -4,6 +4,28 @@ Terminal dashboard for [Toggl Track](https://toggl.com/track/). Syncs time entri
 
 Built with Python and [Textual](https://textual.textualize.io/).
 
+## Screenshots
+
+Demo data — not live Toggl logs.
+
+**Command** (default view: graph, calendar, categories, daily breakdown)
+
+![Command view](docs/screenshots/command.png)
+
+**Overview** (lifetime scores, playbook, recent activity)
+
+![Overview](docs/screenshots/overview.png)
+
+**Insights** (coaching, streaks, next actions)
+
+![Insights](docs/screenshots/insights.png)
+
+**Log a positive** (`p`)
+
+![Log positive](docs/screenshots/log-positive.png)
+
+Regenerate with `python tools/capture_readme_screenshots.py` (uses `toggl_config.json.example` and synthetic CSVs).
+
 ## Why it exists
 
 Toggl tells you where time went. TStat turns that into a daily scoreboard: points per project, positives and negatives you log by hand, graphs over day/week/month, and insights based on *your* recent baseline rather than generic advice.
