@@ -1,30 +1,22 @@
 {
   "api_token": "YOUR_TOGGL_API_TOKEN",
-  "daily_target": 13,
+  "daily_target": 10,
   "categories": {
-    "Learning": {
+    "Deep Work": {
       "color": "#63f3ff",
-      "projects": ["Learning to Code", "Learning Japanese", "Acads / Study"]
+      "projects": ["Coding", "Writing", "Study"]
     },
-    "Finance": {
-      "color": "#ffd700",
-      "projects": ["Finance / Markets"]
-    },
-    "Fitness": {
+    "Health": {
       "color": "#37d994",
-      "projects": ["Fitness", "Sleep / Rest"]
+      "projects": ["Exercise", "Rest"]
     },
-    "Productivity": {
+    "Life": {
       "color": "#e2b714",
-      "projects": ["Obligations / Social", "Plan / Org / Review", "Focus Thoughts"]
+      "projects": ["Planning", "Chores"]
     },
-    "Misc": {
-      "color": "#8d98a7",
-      "projects": ["Chores / Waste"]
-    },
-    "Entertainment": {
+    "Leisure": {
       "color": "#ff5f5f",
-      "projects": ["Leisure / Entertainment", "Timepass / Trash", "Projects/Gacha"]
+      "projects": ["Entertainment"]
     }
   },
   "rate_colors": {
@@ -33,112 +25,76 @@
     "1": "#37d994"
   },
   "points": {
-    "Building Projects": 3,
-    "Finance / Markets": 3,
-    "Learning to Code": 3,
-    "Fitness": 3,
-    "Learning Japanese": 3,
-    "Obligations / Social": 2,
-    "Personal Development": 2,
-    "Projects/Gacha": 2,
-    "Acads / Study": 1,
-    "Plan / Org / Review": 1,
-    "Focus Thoughts": 1,
-    "Sleep / Rest": 0,
-    "Chores / Waste": 0.2,
-    "Leisure / Entertainment": -2,
-    "Timepass / Trash": -4
+    "Coding": 3,
+    "Writing": 2,
+    "Study": 2,
+    "Exercise": 3,
+    "Planning": 1,
+    "Chores": 0.2,
+    "Rest": 0,
+    "Entertainment": -2
   },
   "negatives": {
-    "Mistake": 20,
-    "Junk / Treat": 15,
-    "Doomscrolling": 5,
-    "GI Dailies": 10,
-    "Report": 5,
-    "Lazy": 2,
-    "Emo Control": 5
+    "Distraction": 5,
+    "Procrastination": 3,
+    "Junk Food": 2
   },
   "positives": {
-    "Care": 4,
-    "Meditation": 5,
-    "GI Dailies": 3,
-    "Abs Cinema": 5,
-    "Cold Shower": 2,
-    "Sleep 8+ Hours": 5,
-    "Socialising": 8,
-    "Energy Spent": 2,
-    "ProteinShake/Fit": 3,
-    "Journaling": 2,
-    "Restraint": 3,
-    "Existence Extrovert": 8
+    "Workout": 5,
+    "Reading": 3,
+    "Meditation": 4,
+    "Early Night": 5,
+    "Social Time": 4
   },
-
   "category_natures": {
-    "Learning":     { "nature": "pursue" },
-    "Finance":      { "nature": "pursue" },
-    "Fitness":      { "nature": "pursue" },
-    "Productivity": { "nature": "pursue" },
-    "Misc":         { "nature": "neutral" },
-    "Entertainment": { "nature": "avoid" }
+    "Deep Work": { "nature": "pursue" },
+    "Health": { "nature": "pursue" },
+    "Life": { "nature": "neutral" },
+    "Leisure": { "nature": "avoid" }
   },
-
   "activity_rules": {
-    "Abs Cinema": {
-      "category": "Entertainment",
-      "limits": { "max_per_day": 1 }
-    },
-    "Care": {
-      "limits": { "max_per_day": 1 },
-      "streak": { "remind_after_gap_days": 3 }
-    },
     "Meditation": {
       "limits": { "max_per_day": 1 },
       "streak": { "remind_after_gap_days": 2 }
     },
-    "GI Dailies": {
+    "Workout": {
+      "category": "Health",
+      "limits": { "max_per_day": 1 },
+      "combos": { "pairs_with": ["Exercise"] }
+    },
+    "Early Night": {
       "limits": { "max_per_day": 1 }
     },
-    "Sleep 8+ Hours": {
+    "Social Time": {
       "limits": { "max_per_day": 1 }
     },
-    "Socialising": {
-      "limits": { "max_per_day": 1 }
-    },
-    "Fitness": {
-      "category": "Fitness",
-      "combos": { "pairs_with": ["ProteinShake/Fit"], "boost": 0.3 }
-    },
-    "ProteinShake/Fit": {
-      "category": "Fitness",
-      "combos": { "pairs_with": ["Fitness"] }
+    "Exercise": {
+      "category": "Health",
+      "combos": { "pairs_with": ["Workout"], "boost": 0.3 }
     }
   },
-
-  "recovery_ignore": ["Abs Cinema"],
-
+  "recovery_ignore": ["Entertainment"],
   "playbook": {
     "controllability": {
-      "Learning to Code": 0.95,
-      "Building Projects": 0.9,
-      "Personal Development": 0.85,
-      "Socialising": 0.3,
+      "Coding": 0.95,
+      "Writing": 0.9,
+      "Study": 0.85,
+      "Exercise": 0.9,
       "Meditation": 1.0,
-      "Fitness": 0.9,
-      "Cold Shower": 1.0
+      "Social Time": 0.3
     },
     "low_control_reasons": {
-      "Socialising": "depends on others — log when it happens, don't plan around it"
+      "Social Time": "depends on other people — log it when it happens"
     },
     "default_hours": {
-      "Learning to Code": 1.5,
-      "Building Projects": 2.0,
-      "Personal Development": 1.0,
-      "Fitness": 1.0,
-      "Focus Thoughts": 0.5,
-      "Plan / Org / Review": 0.5
+      "Coding": 2.0,
+      "Writing": 1.0,
+      "Study": 1.0,
+      "Exercise": 1.0,
+      "Planning": 0.5
     },
     "availability_overrides": {
-      "Sleep 8+ Hours": {
+      "Early Night": {
         "type": "time_window",
         "available_after": "21:00",
         "before_multiplier": 0.0,
@@ -152,8 +108,8 @@
       "best_period": 120
     },
     "discovery_ignore": [
-      "Sleep / Rest",
-      "Chores / Waste"
+      "Rest",
+      "Chores"
     ]
   }
 }

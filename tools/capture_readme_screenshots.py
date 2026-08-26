@@ -18,8 +18,25 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Skip auto-sync against the real Toggl API while capturing.
 sys.modules.setdefault("pytest", type(sys)("pytest"))
 
+# Cursor/CI often sets NO_COLOR, which makes Textual dump grayscale SVGs.
+os.environ.pop("NO_COLOR", None)
+os.environ["FORCE_COLOR"] = "1"
+
 OUT_DIR = PROJECT_ROOT / "docs" / "screenshots"
 TERM_SIZE = (140, 42)
+
+PERSONAL_LEAKS = (
+    "Wuwa Dailies",
+    "Job?",
+    "Good deed",
+    "Lips",
+    "GI Dailies",
+    "Doomscrolling",
+    "Abs Cinema",
+    "Existence Extrovert",
+    "Projects/Gacha",
+    "Learning Japanese",
+)
 
 
 def patch_paths(tmp: Path) -> Path:
@@ -91,14 +108,14 @@ def write_demo_data(data_dir: Path, config_path: Path) -> None:
     weekly: dict[str, dict[str, float]] = {}
 
     catalog = [
-        ("Learning to Code", 1.6, 0.7),
-        ("Building Projects", 1.2, 0.8),
-        ("Fitness", 0.7, 0.4),
-        ("Learning Japanese", 0.5, 0.35),
-        ("Plan / Org / Review", 0.4, 0.2),
-        ("Leisure / Entertainment", 0.6, 0.5),
-        ("Chores / Waste", 0.3, 0.2),
-        ("Sleep / Rest", 7.5, 0.4),
+        ("Coding", 2.0, 0.6),
+        ("Writing", 1.1, 0.5),
+        ("Study", 0.9, 0.4),
+        ("Exercise", 0.8, 0.35),
+        ("Planning", 0.4, 0.2),
+        ("Entertainment", 0.7, 0.4),
+        ("Chores", 0.3, 0.2),
+        ("Rest", 7.5, 0.4),
     ]
 
     for age in range(90, -1, -1):
@@ -107,9 +124,9 @@ def write_demo_data(data_dir: Path, config_path: Path) -> None:
         week = get_week_str(day)
         weekday = day.weekday()
         for name, base, spread in catalog:
-            if name == "Sleep / Rest":
+            if name == "Rest":
                 hours = round(base + ((age % 5) - 2) * 0.15, 2)
-            elif weekday >= 5 and name in {"Learning to Code", "Building Projects"}:
+            elif weekday >= 5 and name in {"Coding", "Writing", "Study"}:
                 hours = round(max(0.2, base * 0.45 + (age % 3) * 0.1), 2)
             else:
                 hours = round(max(0.0, base + ((age + weekday) % 5 - 2) * spread * 0.35), 2)
@@ -135,21 +152,21 @@ def write_demo_data(data_dir: Path, config_path: Path) -> None:
         (today - timedelta(days=d), name)
         for d, name in (
             (0, "Meditation"),
-            (0, "Cold Shower"),
-            (1, "Fitness"),
-            (1, "Journaling"),
+            (0, "Workout"),
+            (1, "Exercise"),
+            (1, "Reading"),
             (2, "Meditation"),
-            (4, "Socialising"),
-            (5, "Care"),
-            (7, "Sleep 8+ Hours"),
+            (4, "Social Time"),
+            (5, "Reading"),
+            (7, "Early Night"),
         )
     ]
     negatives = [
         (today - timedelta(days=d), name)
         for d, name in (
-            (0, "Doomscrolling"),
-            (3, "Lazy"),
-            (6, "Junk / Treat"),
+            (0, "Distraction"),
+            (3, "Procrastination"),
+            (6, "Junk Food"),
         )
     ]
 
@@ -185,10 +202,15 @@ def capture(name: str, press: tuple[str, ...], pause: float = 1.6) -> Path:
         wait_for_animation=True,
         simplify=True,
     )
-    leaks = ("Wuwa Dailies", "Job?", "Good deed", "Lips")
+    leaks = PERSONAL_LEAKS
     for leak in leaks:
         if leak in svg:
             raise SystemExit(f"Refusing to write {name}: personal data {leak!r} in screenshot")
+    if "#63f3ff" not in svg.lower() and "63f3ff" not in svg.lower():
+        raise SystemExit(
+            f"Refusing to write {name}: screenshot has no accent color "
+            "(NO_COLOR is probably still on)"
+        )
     out = OUT_DIR / f"{name}.svg"
     out.write_text(svg, encoding="utf-8")
     print(f"  wrote {out.relative_to(PROJECT_ROOT)} ({out.stat().st_size} bytes)")
